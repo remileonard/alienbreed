@@ -1,0 +1,110 @@
+#!/bin/sh
+set -e
+cd "$(dirname "$0")"
+BUILD=./build
+
+mkdir -p assets/sprites assets/samples assets/voices assets/music assets/gfx assets/fonts assets/maps assets/tiles
+
+echo "=== Converting level maps ==="
+# L?MA: T7MP format map files — parsed to extract tile data, palettes, IFFP path.
+for f in game/L0MA game/L1MA game/L2MA game/L3MA game/L4MA game/L5MA \
+          game/L6MA game/L7MA game/L8MA game/L9MA game/LAMA game/LBMA; do
+    [ -f "$f" ] || continue
+    name=$(basename "$f")
+    printf "  %s -> " "$f"
+    $BUILD/parse_levels "$f" "assets/maps/${name}.map" && echo "OK" || echo "FAIL"
+done
+# L?BO: boss/object sprite blocks — raw binary loaded directly by the game.
+# L?AN: background animation tile blocks — raw binary loaded directly by the game.
+# Just copy them as-is.
+for f in game/L0BO game/L1BO game/L2BO game/L3BO game/L4BO game/L5BO \
+          game/L0AN game/L1AN game/L2AN game/L3AN game/L4AN game/L5AN; do
+    [ -f "$f" ] || continue
+    name=$(basename "$f")
+    cp "$f" "assets/maps/${name}.bin" && echo "  $name -> OK" || echo "  $name -> FAIL"
+done
+
+echo "=== Converting tilesets ==="
+for f in game/LABM game/LBBM game/LCBM game/LDBM game/LEBM game/LFBM; do
+    [ -f "$f" ] || continue
+    name=$(basename "$f")
+    printf "  %s -> " "$f"
+    $BUILD/convert_tileset "$f" "assets/tiles/${name}.raw" && echo "OK" || echo "FAIL"
+done
+
+echo "=== Converting fonts ==="
+# Fonts are stored with all 42 glyphs side-by-side: actual width = 672px.
+# The filename encodes nominal_height = 42 * glyph_height; actual height = nominal/42.
+for f in $(find src \( -name "font_*.lo2" -o -name "font_*.lo3" -o -name "font_*.lo4" \
+               -o -name "font_*.lo5" -o -name "font_*.lo6" \)); do
+    name=$(basename "$f")
+    ext="${f##*.lo}"
+    bp=$(echo "$ext" | cut -c1)
+    nom_h=$(echo "$name" | sed 's/.*x\([0-9]*\)\..*/\1/')
+    glyph_h=$(( nom_h / 42 ))
+    out="assets/fonts/${name%.*}.raw"
+    printf "  %s (%sbp, actual 672x%d) -> " "$f" "$bp" "$glyph_h"
+    $BUILD/convert_bitplanes "$f" "$bp" "$out" 672 "$glyph_h" && echo "OK" || echo "FAIL"
+done
+
+echo "=== Converting .loN graphics ==="
+for f in $(find src -name "*.lo1" -o -name "*.lo2" -o -name "*.lo3" \
+               -o -name "*.lo4" -o -name "*.lo5" -o -name "*.lo6" \
+               | grep -v "/font_"); do
+    name=$(basename "$f")
+    # extract bp count from extension: .lo4 -> 4
+    ext="${f##*.lo}"
+    bp=$(echo "$ext" | cut -c1)
+    # strip path prefix for output name: use subdir as prefix
+    subdir=$(echo "$f" | sed 's|src/||' | sed 's|/gfx/.*||' | sed 's|/||g')
+    out="assets/gfx/${subdir}_${name%.*}.raw"
+    printf "  %s (%sbp) -> " "$f" "$bp"
+    $BUILD/convert_bitplanes "$f" "$bp" "$out" && echo "OK" || echo "FAIL"
+done
+
+printf "  game/mapbkgnd_320x256.lo4 -> "
+$BUILD/convert_bitplanes game/mapbkgnd_320x256.lo4 4 assets/tiles/mapbkgnd.raw && echo "OK" || echo "FAIL"
+
+echo "=== Converting sprites ==="
+# Player sprites: paired hardware sprites (SPR_A + SPR_B = 32px wide), 32 lines.
+for f in src/main/sprites/player_sprite*.raw; do
+    [ -f "$f" ] || continue
+    name=$(basename "$f" .raw)
+    printf "  %s -> " "$name"
+    $BUILD/convert_sprites "$f" 32 2 "assets/sprites/${name}.raw" && echo "OK" || echo "FAIL"
+done
+# Timer digit sprites: single strip, 32 lines.
+for f in src/main/sprites/timer_digit*.raw; do
+    [ -f "$f" ] || continue
+    name=$(basename "$f" .raw)
+    printf "  %s -> " "$name"
+    $BUILD/convert_sprites "$f" 32 1 "assets/sprites/${name}.raw" && echo "OK" || echo "FAIL"
+done
+
+echo "=== Converting audio samples ==="
+for f in src/main/samples/*.raw; do
+    name=$(basename "$f" .raw)
+    printf "  %s -> " "$name"
+    $BUILD/convert_audio "$f" "assets/samples/${name}.wav" 8363 && echo "OK" || echo "FAIL"
+done
+
+echo "=== Converting voices ==="
+for f in src/main/voices/*.raw; do
+    name=$(basename "$f" .raw)
+    printf "  %s -> " "$name"
+    $BUILD/convert_audio "$f" "assets/voices/${name}.wav" 8363 && echo "OK" || echo "FAIL"
+done
+
+echo "=== Copying Soundmon music ==="
+cp game/boss.soundmon assets/music/boss.soundmon
+cp game/level.soundmon assets/music/level.soundmon
+cp game/title.soundmon assets/music/title.soundmon
+echo "  Copied 3 music files"
+
+echo ""
+echo "=== DONE ==="
+echo "Assets:"
+for d in assets/*/; do
+    count=$(ls "$d" 2>/dev/null | wc -l | tr -d ' ')
+    echo "  $d  ($count files)"
+done

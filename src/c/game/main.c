@@ -1,0 +1,223 @@
+/*
+ * Alien Breed SE 92 - C port
+ * main.c — entry point and top-level game loop
+ *
+ * Sequence (mirrors main.asm begin: / game_level_loop:):
+ *   1. init SDL / HAL
+ *   2. story screen
+ *   3. main menu (get num_players, share_credits)
+ *   4. loop over 12 levels:
+ *        briefing → level_run → check gameover
+ *   5. ending screen
+ *   6. back to menu
+ */
+
+#include "../types.h"
+#include "constants.h"
+#include "player.h"
+#include "alien.h"
+#include "level.h"
+#include "hud.h"
+#include "menu.h"
+#include "story.h"
+#include "briefing.h"
+#include "intex.h"
+#include "gameover.h"
+#include "end.h"
+#include "../hal/hal.h"
+#include "../hal/video.h"
+#include "../hal/input.h"
+#include "../hal/audio.h"
+#include "../hal/timer.h"
+#include "../engine/palette.h"
+#include "../engine/tilemap.h"
+#include "../engine/sprite.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* ------------------------------------------------------------------ */
+/* Forward declarations                                                 */
+/* ------------------------------------------------------------------ */
+static void game_run(int num_players, int share_credits);
+
+/* ------------------------------------------------------------------ */
+/* Main entry point                                                     */
+/* ------------------------------------------------------------------ */
+int main(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+
+    if (hal_init() != 0) {
+        fprintf(stderr, "Fatal: HAL init failed\n");
+        return 1;
+    }
+    hud_init();
+
+    /* Outer loop: menu → game → menu */
+    while (!g_quit_requested) {
+        story_run();
+        if (g_quit_requested) break;
+
+        int num_players   = 1;
+        int share_credits = 0;
+        MenuResult mr = menu_run(&num_players, &share_credits);
+        if (mr == MENU_RESULT_QUIT || g_quit_requested) break;
+
+        g_number_players = num_players;
+        game_run(num_players, share_credits);
+    }
+
+    hud_quit();
+    hal_quit();
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Run a full game session (story → levels → end)                      */
+/* ------------------------------------------------------------------ */
+static void game_run(int num_players, int share_credits)
+{
+    /* Initialise player lives */
+    player_init_variables();
+    for (int i = 0; i < num_players; i++) {
+        g_players[i].lives = (WORD)(share_credits ?
+            (i == 0 ? PLAYER_START_LIVES : 0) : PLAYER_START_LIVES);
+    }
+
+    int level_idx = 0;
+    g_game_running_flag = 1;
+
+    while (level_idx < NUM_LEVELS && g_game_running_flag && !g_quit_requested) {
+        briefing_run(level_idx);
+        if (g_quit_requested) break;
+
+        level_run(level_idx);
+        level_game_loop_external();
+
+        if (g_flag_jump_to_gameover) {
+            gameover_run();
+            g_game_running_flag = 0;
+            break;
+        }
+
+        level_idx++;
+    }
+
+    if (g_game_running_flag && !g_quit_requested && level_idx >= NUM_LEVELS) {
+        end_run();
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Per-level game loop — called by level_run()                         */
+/* (level_run sets up the map; this loop ticks everything at 50 Hz)   */
+/* ------------------------------------------------------------------ */
+void level_game_loop_external(void)
+{
+    g_flag_end_level      = 0;
+    g_flag_jump_to_gameover = 0;
+    g_self_destruct_initiated = 0;
+    g_destruction_timer   = 0;
+    g_map_overview_on     = 0;
+
+    while (!g_flag_end_level && !g_flag_jump_to_gameover && !g_quit_requested) {
+        timer_begin_frame();
+        input_poll();
+
+        if (g_quit_requested) break;
+
+        /* --- Global key checks ---------------------------------------- */
+        if (g_key_pressed == KEY_ESC) {
+            g_flag_jump_to_gameover = 1;
+            break;
+        }
+        if (g_key_pressed == KEY_P) {
+            /* Pause: just spin until P is pressed again */
+            while (1) {
+                timer_begin_frame();
+                input_poll();
+                if (g_quit_requested) goto end_loop;
+                /* Draw paused overlay */
+                video_present();          /* keep the last rendered frame */
+                hud_render_pause();
+                if (g_key_pressed == KEY_P) break;
+            }
+        }
+        if (g_key_pressed == KEY_M) {
+            g_map_overview_on = !g_map_overview_on;
+        }
+
+        /* --- Update logic --------------------------------------------- */
+        for (int i = 0; i < g_number_players; i++) {
+            if (g_players[i].alive)
+                player_update(&g_players[i], player_get_input(&g_players[i]));
+        }
+
+        alien_update_all();
+
+        aliens_collisions_with_weapons();
+        aliens_collisions_with_players();
+
+        level_tick_timer();
+        level_check_destruction();
+
+        /* Check if all players are dead */
+        int any_alive = 0;
+        for (int i = 0; i < g_number_players; i++) {
+            if (g_players[i].alive || g_players[i].lives > 0)
+                any_alive = 1;
+        }
+        if (!any_alive) {
+            g_flag_jump_to_gameover = 1;
+            break;
+        }
+
+        /* --- Render ---------------------------------------------------- */
+        video_clear();
+
+        if (g_map_overview_on) {
+            hud_render_map_overview();
+        } else {
+            /* Centre camera on player 0 */
+            Player *p = &g_players[0];
+            g_camera_x = p->pos_x - SCREEN_W / 2;
+            g_camera_y = p->pos_y - SCREEN_H / 2;
+            /* Clamp */
+            if (g_camera_x < 0) g_camera_x = 0;
+            if (g_camera_y < 0) g_camera_y = 0;
+            int max_cx = MAP_COLS * MAP_TILE_W - SCREEN_W;
+            int max_cy = MAP_ROWS * MAP_TILE_H - SCREEN_H;
+            if (g_camera_x > max_cx) g_camera_x = max_cx;
+            if (g_camera_y > max_cy) g_camera_y = max_cy;
+
+            tilemap_render(&g_cur_map, &g_tileset);
+
+            /* Draw aliens */
+            for (int i = 0; i < g_alien_count; i++) {
+                if (!g_aliens[i].alive) continue;
+                int sx = g_aliens[i].pos_x - g_camera_x;
+                int sy = g_aliens[i].pos_y - g_camera_y;
+                if (sx > -16 && sx < SCREEN_W && sy > -16 && sy < SCREEN_H) {
+                    /* Draw alien sprite (index 0 placeholder) */
+                    sprite_draw_alien(0, sx, sy);
+                }
+            }
+
+            /* Draw players */
+            for (int i = 0; i < g_number_players; i++) {
+                if (!g_players[i].alive) continue;
+                int sx = g_players[i].pos_x - g_camera_x;
+                int sy = g_players[i].pos_y - g_camera_y;
+                sprite_draw_player(i, sx, sy, g_players[i].direction);
+            }
+
+            projectiles_render();
+            hud_render();
+        }
+
+        palette_tick();
+        video_present();
+    }
+end_loop:;
+}
