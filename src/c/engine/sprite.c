@@ -186,7 +186,7 @@ void sprite_draw_alien(int direction, int anim_frame, int x, int y)
     if (alien_gfx_get_atlas_type() == ALIEN_ATLAS_LEGACY) {
         atlas_y = k_legacy_y[anim_frame];
     } else {
-        atlas_y = anim_frame * ALIEN_SPRITE_W;
+        atlas_y = anim_frame * ALIEN_WALK_FRAME_STRIDE;
     }
 
     const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);

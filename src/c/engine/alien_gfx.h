@@ -51,6 +51,11 @@
 /* Number of compass walk directions */
 #define ALIEN_DIR_COUNT      8   /* N NE E SE S SW W NW → atlas columns 0-7 */
 
+/* Vertical stride between walk frames inside the atlas.
+ * Each 30-px tall sprite occupies a 32-px row slot (2 px of vertical padding).
+ * Ref: lbW019A8E entries (0,0),(0,32),(0,64) @ main.asm#L14160. */
+#define ALIEN_WALK_FRAME_STRIDE 32
+
 /* Number of unique walk animation frames (cycle: 0→1→2→1→loop) */
 #define ALIEN_WALK_FRAMES    3
 

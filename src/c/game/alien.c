@@ -76,7 +76,7 @@ void alien_spawn_from_map(void)
                 a->speed    = (WORD)(2 + g_global_aliens_extra_strength / 5);
                 a->strength = (WORD)(base_hp + g_global_aliens_extra_strength);
                 a->alive    = 1;
-                a->type_idx = alien_type - 1;  /* 0-based atlas column index */
+                a->type_idx = alien_type - 1;  /* 0-based alien type for stats (not atlas column) */
                 audio_play_sample(SAMPLE_HATCHING_ALIEN);
             }
         }
