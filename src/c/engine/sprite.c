@@ -15,6 +15,7 @@
  */
 
 #include "sprite.h"
+#include "alien_gfx.h"
 #include "../hal/video.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -161,14 +162,25 @@ void sprite_draw_player(int player_idx, int x, int y, int facing)
     video_blit(img->pixels, img->w, x, y, img->w, img->h, 0);
 }
 
-/* Draw alien sprite (type 0 = basic alien) at (x,y). */
-void sprite_draw_alien(int type_idx, int x, int y)
+/* Draw alien sprite (type 0-based) at (x,y) using atlas decoded from the BO file.
+ * anim_frame: 0, 1, or 2 (walk cycle frames).
+ * Atlas layout: column = type_idx * ALIEN_SPRITE_W, row = anim_frame * ALIEN_SPRITE_W.
+ * Frame size: ALIEN_SPRITE_W × ALIEN_SPRITE_H (32 × 30 px).
+ * Color index 0 is transparent (Ref: main.asm#L12365, blitter minterm $CA). */
+void sprite_draw_alien(int type_idx, int anim_frame, int x, int y)
 {
-    /* Alien sprites start at index PLAYER_SPRITE_COUNT/2 as a convention.
-     * For now use a placeholder from the existing sprite set. */
-    int idx = 70 + (type_idx & 7);   /* use last 8 sprites as alien placeholders */
-    if (idx >= PLAYER_SPRITE_COUNT) idx = PLAYER_SPRITE_COUNT - 1;
-    SpriteImage *img = &s_player[idx];
-    if (!img->pixels) return;
-    video_blit(img->pixels, img->w, x, y, img->w, img->h, 0);
+    const UBYTE *atlas = alien_gfx_get_atlas();
+    if (!atlas) return;
+
+    /* Clamp inputs */
+    if (type_idx  < 0) type_idx  = 0;
+    if (type_idx  > 6) type_idx  = 6;
+    if (anim_frame < 0) anim_frame = 0;
+    if (anim_frame >= ALIEN_WALK_FRAMES) anim_frame = ALIEN_WALK_FRAMES - 1;
+
+    int atlas_x = type_idx  * ALIEN_SPRITE_W;   /* 0, 32, 64, 96, 128, 160, 192 */
+    int atlas_y = anim_frame * ALIEN_SPRITE_W;  /* 0, 32, or 64 */
+
+    const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
+    video_blit(src, ALIEN_ATLAS_W, x, y, ALIEN_SPRITE_W, ALIEN_SPRITE_H, 0);
 }

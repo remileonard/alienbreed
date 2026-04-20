@@ -16,6 +16,7 @@ typedef struct {
     WORD  speed;
     WORD  strength;
     int   alive;
+    int   type_idx;    /* 0-based alien type (0=alien1 … 6=alien7) for sprite atlas column */
     int   cur_sprite;
     int   anim_counter;
     int   direction;   /* towards player */

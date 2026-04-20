@@ -50,6 +50,7 @@ set(GAME_SOURCES
     src/c/game/end.c
     src/c/engine/palette.c
     src/c/engine/sprite.c
+    src/c/engine/alien_gfx.c
     src/c/engine/typewriter.c
     src/c/engine/tilemap.c
     src/c/hal/video.c

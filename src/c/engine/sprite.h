@@ -62,7 +62,13 @@ void sprite_draw_digit(int digit, int x, int y);
 /* Draw the animated player sprite for player index p at screen position. */
 void sprite_draw_player(int player_idx, int x, int y, int facing);
 
-/* Draw an alien sprite (type index) at screen position. */
-void sprite_draw_alien(int type_idx, int x, int y);
+/*
+ * Draw alien sprite for type type_idx (0-based, 0=alien1 … 6=alien7) at
+ * screen position (x, y).
+ * anim_frame selects the walk cycle frame (0, 1, or 2).
+ * Atlas column = type_idx * 32 px, row = anim_frame * 32 px, size 32×30 px.
+ * Color index 0 is transparent (Ref: blitter minterm $CA, main.asm#L12365).
+ */
+void sprite_draw_alien(int type_idx, int anim_frame, int x, int y);
 
 #endif /* AB_SPRITE_H */
