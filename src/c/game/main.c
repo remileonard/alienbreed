@@ -194,14 +194,14 @@ void level_game_loop_external(void)
             tilemap_render(&g_cur_map, &g_tileset);
 
             /* Draw aliens */
+            /* Walk cycle: frame sequence 0→1→2→1 (one tick/frame at 50 Hz ≈ 12.5 fps).
+             * Ref: lbL01B036 @ main.asm#L14384 — each frame has delay=1. */
+            static const int k_walk_cycle[4] = {0, 1, 2, 1};
             for (int i = 0; i < g_alien_count; i++) {
                 if (!g_aliens[i].alive) continue;
                 int sx = g_aliens[i].pos_x - g_camera_x;
                 int sy = g_aliens[i].pos_y - g_camera_y;
                 if (sx > -16 && sx < SCREEN_W && sy > -16 && sy < SCREEN_H) {
-                    /* Walk cycle: frame sequence 0→1→2→1 (4 ticks/frame, ~12 fps).
-                     * Ref: lbL01B036 @ main.asm#L14384 — delay=1 per frame. */
-                    static const int k_walk_cycle[4] = {0, 1, 2, 1};
                     int anim_tick  = g_aliens[i].anim_counter % 4;
                     int anim_frame = k_walk_cycle[anim_tick];
                     sprite_draw_alien(g_aliens[i].type_idx, anim_frame, sx, sy);

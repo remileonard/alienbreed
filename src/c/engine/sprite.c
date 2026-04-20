@@ -178,8 +178,11 @@ void sprite_draw_alien(int type_idx, int anim_frame, int x, int y)
     if (anim_frame < 0) anim_frame = 0;
     if (anim_frame >= ALIEN_WALK_FRAMES) anim_frame = ALIEN_WALK_FRAMES - 1;
 
-    int atlas_x = type_idx  * ALIEN_SPRITE_W;   /* 0, 32, 64, 96, 128, 160, 192 */
-    int atlas_y = anim_frame * ALIEN_SPRITE_W;  /* 0, 32, or 64 */
+    int atlas_x = type_idx  * ALIEN_SPRITE_W;
+    /* Rows in the atlas are spaced ALIEN_SPRITE_W (32) pixels apart, not
+     * ALIEN_SPRITE_H (30): lbW01945E @ main.asm#L14034 gives y=0, y=32, y=64.
+     * Each 30-px tall frame has 2 px of vertical padding in the atlas. */
+    int atlas_y = anim_frame * ALIEN_SPRITE_W;
 
     const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
     video_blit(src, ALIEN_ATLAS_W, x, y, ALIEN_SPRITE_W, ALIEN_SPRITE_H, 0);

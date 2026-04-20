@@ -18,6 +18,16 @@
 /* Level definitions — map filenames and settings                     */
 /* Cross-referenced from main.asm level sequences                     */
 /* ------------------------------------------------------------------ */
+/*
+ * Level BO file assignments (Ref: main.asm#L7972-L8018):
+ *   Levels 1-6 each have their own BO file (L0BO-L5BO).
+ *   Levels 7-9 reuse L2BO (lev7_load_struct#L7998, lev8#L8002, lev9#L8006).
+ *   Level 10 reuses L1BO (lev10_load_struct#L8010).
+ *   Level 11 reuses L2BO (lev11_load_struct#L8014).
+ *   Level 12 reuses L5BO (lev12_load_struct#L8018).
+ * Only 6 distinct BO files (L0BO-L5BO) exist; the original game reused them
+ * for later levels that share the same alien sprite set.
+ */
 const LevelDef k_level_defs[NUM_LEVELS] = {
     /* lvl 1  */ { "L0AN", "L0BO", "L0MA",  0, "Level 1: Research Base",          "level" },
     /* lvl 2  */ { "L1AN", "L1BO", "L1MA",  0, "Level 2: Bio-Containment",        "level" },
