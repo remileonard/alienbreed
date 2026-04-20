@@ -28,6 +28,10 @@ typedef struct {
     int   alien_extra_strength;
     const char *briefing_text;
     const char *music;    /* "level" or "boss" */
+    /* Atlas layout type for alien sprites (Ref: main.asm lbL000554 per level).
+     * ALIEN_ATLAS_COMPACT: y = frame*32 (most levels).
+     * ALIEN_ATLAS_LEGACY : y = {0, 96, 128} (L0BO / levels 1, 10, 11). */
+    int   atlas_type;
 } LevelDef;
 
 extern const LevelDef k_level_defs[NUM_LEVELS];

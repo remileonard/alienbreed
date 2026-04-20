@@ -15,11 +15,15 @@ typedef struct {
     WORD  pos_x, pos_y;
     WORD  speed;
     WORD  strength;
+    /* alive: 1 = walking/active, 2 = dying (explosion playing), 0 = dead */
     int   alive;
-    int   type_idx;    /* 0-based alien type (0=alien1 … 6=alien7) for sprite atlas column */
+    int   type_idx;      /* 0-based alien type (0=alien1…6=alien7) for stats/HP */
     int   cur_sprite;
     int   anim_counter;
-    int   direction;   /* towards player */
+    /* direction: 0=N 1=NE 2=E 3=SE 4=S 5=SW 6=W 7=NW — atlas column index
+     * (Ref: lbB00A228 direction table @ main.asm#L7077) */
+    int   direction;
+    int   death_frame;   /* 0-15 during death explosion animation */
     /* Pathfinding state */
     int   target_x, target_y;
 } Alien;

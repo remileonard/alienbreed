@@ -194,17 +194,25 @@ void level_game_loop_external(void)
             tilemap_render(&g_cur_map, &g_tileset);
 
             /* Draw aliens */
-            /* Walk cycle: frame sequence 0→1→2→1 (one tick/frame at 50 Hz ≈ 12.5 fps).
-             * Ref: lbL01B036 @ main.asm#L14384 — each frame has delay=1. */
+            /* Walk cycle: frame sequence 0→1→2→1 (one tick/frame at 50 Hz).
+             * Ref: lbL01B036 @ main.asm#L14384 — each frame has delay=1.
+             * Compass direction used as atlas column (Ref: lbB00A228#L7077). */
             static const int k_walk_cycle[4] = {0, 1, 2, 1};
             for (int i = 0; i < g_alien_count; i++) {
-                if (!g_aliens[i].alive) continue;
+                if (g_aliens[i].alive == 0) continue;
                 int sx = g_aliens[i].pos_x - g_camera_x;
                 int sy = g_aliens[i].pos_y - g_camera_y;
-                if (sx > -16 && sx < SCREEN_W && sy > -16 && sy < SCREEN_H) {
-                    int anim_tick  = g_aliens[i].anim_counter % 4;
-                    int anim_frame = k_walk_cycle[anim_tick];
-                    sprite_draw_alien(g_aliens[i].type_idx, anim_frame, sx, sy);
+                if (sx > -32 && sx < SCREEN_W && sy > -32 && sy < SCREEN_H) {
+                    if (g_aliens[i].alive == 2) {
+                        /* Dying: render explosion animation.
+                         * Ref: lbL018C2E @ main.asm#L13907; 16 frames at delay=0. */
+                        sprite_draw_alien_death(g_aliens[i].death_frame, sx, sy);
+                    } else {
+                        /* Walking: use compass direction as atlas column. */
+                        int anim_tick  = g_aliens[i].anim_counter % 4;
+                        int anim_frame = k_walk_cycle[anim_tick];
+                        sprite_draw_alien(g_aliens[i].direction, anim_frame, sx, sy);
+                    }
                 }
             }
 

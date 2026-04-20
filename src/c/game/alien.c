@@ -9,6 +9,7 @@
 #include "../hal/audio.h"
 #include "../hal/video.h"
 #include "../engine/tilemap.h"
+#include "../engine/alien_gfx.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -82,7 +83,9 @@ void alien_spawn_from_map(void)
     }
 }
 
-/* Simple Manhattan-distance AI: move alien one step toward nearest player */
+/* Simple Manhattan-distance AI: move alien one step toward nearest player.
+ * Updates alien direction (0=N,1=NE,2=E,3=SE,4=S,5=SW,6=W,7=NW).
+ * Ref: alien movement @ main.asm#L6458; direction table lbB00A228#L7077. */
 static void alien_move(Alien *a)
 {
     /* Find nearest living player */
@@ -108,12 +111,41 @@ static void alien_move(Alien *a)
         a->pos_x = (WORD)nx;
         a->pos_y = (WORD)ny;
     }
+
+    /* Update compass direction from movement vector (Ref: lbB00A228 @ main.asm#L7077).
+     * Directions: 0=N 1=NE 2=E 3=SE 4=S 5=SW 6=W 7=NW */
+    if (dx == 0 && dy == 0) {
+        /* No movement — keep current direction */
+    } else if (dy < 0) {
+        if      (dx > 0) a->direction = 1;  /* NE */
+        else if (dx < 0) a->direction = 7;  /* NW */
+        else             a->direction = 0;  /* N  */
+    } else if (dy > 0) {
+        if      (dx > 0) a->direction = 3;  /* SE */
+        else if (dx < 0) a->direction = 5;  /* SW */
+        else             a->direction = 4;  /* S  */
+    } else {
+        /* dy == 0, horizontal only */
+        if (dx > 0) a->direction = 2;  /* E  */
+        else        a->direction = 6;  /* W  */
+    }
 }
 
 void alien_update_all(void)
 {
     for (int i = 0; i < g_alien_count; i++) {
-        if (!g_aliens[i].alive) continue;
+        if (g_aliens[i].alive == 0) continue;
+
+        if (g_aliens[i].alive == 2) {
+            /* Dying: advance death explosion frame; fully remove when done.
+             * 16 frames at game rate ≈ 0.3 s (Ref: lbL018C2E @ main.asm#L13907,
+             * each frame has delay=0 = one game tick). */
+            g_aliens[i].death_frame++;
+            if (g_aliens[i].death_frame >= ALIEN_DEATH_FRAMES)
+                g_aliens[i].alive = 0;
+            continue;
+        }
+
         alien_move(&g_aliens[i]);
         g_aliens[i].anim_counter++;
     }
@@ -163,7 +195,7 @@ void aliens_collisions_with_weapons(void)
         if (!s_projectiles[pi].active) continue;
 
         for (int ai = 0; ai < g_alien_count; ai++) {
-            if (!g_aliens[ai].alive) continue;
+            if (g_aliens[ai].alive != 1) continue;
 
             int dx = s_projectiles[pi].x - g_aliens[ai].pos_x;
             int dy = s_projectiles[pi].y - g_aliens[ai].pos_y;
@@ -188,7 +220,7 @@ void aliens_collisions_with_weapons(void)
 void aliens_collisions_with_players(void)
 {
     for (int ai = 0; ai < g_alien_count; ai++) {
-        if (!g_aliens[ai].alive) continue;
+        if (g_aliens[ai].alive != 1) continue;
 
         for (int pi = 0; pi < MAX_PLAYERS; pi++) {
             if (!g_players[pi].alive) continue;
@@ -209,7 +241,10 @@ void aliens_collisions_with_players(void)
 void alien_kill(int i)
 {
     if (i < 0 || i >= g_alien_count) return;
-    g_aliens[i].alive = 0;
+    /* Transition to dying state: play 16-frame explosion then disappear.
+     * Ref: alien_dies @ main.asm#L7308; death anim lbL018C2E#L13907. */
+    g_aliens[i].alive       = 2;
+    g_aliens[i].death_frame = 0;
     /* Play alien death sound (not hatching sound) */
     audio_play_sample(SAMPLE_DYING_PLAYER);  /* closest match for alien death */
     
@@ -225,7 +260,7 @@ int alien_living_count(void)
 {
     int n = 0;
     for (int i = 0; i < g_alien_count; i++)
-        if (g_aliens[i].alive) n++;
+        if (g_aliens[i].alive == 1) n++;
     return n;
 }
 

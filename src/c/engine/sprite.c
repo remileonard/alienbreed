@@ -162,28 +162,51 @@ void sprite_draw_player(int player_idx, int x, int y, int facing)
     video_blit(img->pixels, img->w, x, y, img->w, img->h, 0);
 }
 
-/* Draw alien sprite (type 0-based) at (x,y) using atlas decoded from the BO file.
- * anim_frame: 0, 1, or 2 (walk cycle frames).
- * Atlas layout: column = type_idx * ALIEN_SPRITE_W, row = anim_frame * ALIEN_SPRITE_W.
- * Frame size: ALIEN_SPRITE_W × ALIEN_SPRITE_H (32 × 30 px).
- * Color index 0 is transparent (Ref: main.asm#L12365, blitter minterm $CA). */
-void sprite_draw_alien(int type_idx, int anim_frame, int x, int y)
+/* Draw alien walk sprite (direction=0-7 compass, anim_frame=0-2) at (x,y).
+ * Atlas column = direction * ALIEN_SPRITE_W.
+ * Atlas row depends on atlas type (COMPACT: y=frame*32; LEGACY: y={0,96,128}).
+ * Ref: lbW01945E / lbW019A8E @ main.asm#L14034,L14160; blitter minterm $CA. */
+void sprite_draw_alien(int direction, int anim_frame, int x, int y)
 {
     const UBYTE *atlas = alien_gfx_get_atlas();
     if (!atlas) return;
 
-    /* Clamp inputs */
-    if (type_idx  < 0) type_idx  = 0;
-    if (type_idx  > 6) type_idx  = 6;
+    if (direction  < 0) direction  = 0;
+    if (direction  >= ALIEN_DIR_COUNT) direction = ALIEN_DIR_COUNT - 1;
     if (anim_frame < 0) anim_frame = 0;
     if (anim_frame >= ALIEN_WALK_FRAMES) anim_frame = ALIEN_WALK_FRAMES - 1;
 
-    int atlas_x = type_idx  * ALIEN_SPRITE_W;
-    /* Rows in the atlas are spaced ALIEN_SPRITE_W (32) pixels apart, not
-     * ALIEN_SPRITE_H (30): lbW01945E @ main.asm#L14034 gives y=0, y=32, y=64.
-     * Each 30-px tall frame has 2 px of vertical padding in the atlas. */
-    int atlas_y = anim_frame * ALIEN_SPRITE_W;
+    int atlas_x = direction * ALIEN_SPRITE_W;
+
+    /* Row depends on atlas layout type (Ref: main.asm atlas descriptors):
+     *   COMPACT (lbW019A8E etc.): y = frame * 32   — most levels
+     *   LEGACY  (lbW01945E):     y = {0, 96, 128}  — L0BO / LEGACY levels */
+    static const int k_legacy_y[3] = {0, 96, 128};
+    int atlas_y;
+    if (alien_gfx_get_atlas_type() == ALIEN_ATLAS_LEGACY) {
+        atlas_y = k_legacy_y[anim_frame];
+    } else {
+        atlas_y = anim_frame * ALIEN_SPRITE_W;
+    }
 
     const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
     video_blit(src, ALIEN_ATLAS_W, x, y, ALIEN_SPRITE_W, ALIEN_SPRITE_H, 0);
+}
+
+/* Draw a death/explosion frame (0-15) at screen position (x,y).
+ * Frames are 16×14 px, stored in 2 rows of 8 starting at (192,160).
+ * Ref: lbW0188CE @ main.asm#L13833; death anim lbL018C2E @ main.asm#L13907. */
+void sprite_draw_alien_death(int death_frame, int x, int y)
+{
+    const UBYTE *atlas = alien_gfx_get_atlas();
+    if (!atlas) return;
+
+    if (death_frame < 0) death_frame = 0;
+    if (death_frame >= ALIEN_DEATH_FRAMES) death_frame = ALIEN_DEATH_FRAMES - 1;
+
+    int atlas_x = ALIEN_DEATH_ATLAS_X + (death_frame % 8) * ALIEN_DEATH_W;
+    int atlas_y = ALIEN_DEATH_ATLAS_Y + (death_frame / 8) * 16;
+
+    const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
+    video_blit(src, ALIEN_ATLAS_W, x, y, ALIEN_DEATH_W, ALIEN_DEATH_H, 0);
 }

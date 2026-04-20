@@ -23,9 +23,10 @@
 #include <string.h>
 
 /* Decoded atlas: ALIEN_ATLAS_W * ALIEN_ATLAS_H indexed-color bytes */
-static UBYTE *s_atlas = NULL;
+static UBYTE *s_atlas      = NULL;
+static int    s_atlas_type = ALIEN_ATLAS_COMPACT;
 
-int alien_gfx_load(const char *path)
+int alien_gfx_load(const char *path, int atlas_type)
 {
     alien_gfx_free();
 
@@ -76,6 +77,7 @@ int alien_gfx_load(const char *path)
     }
 
     free(raw);
+    s_atlas_type = atlas_type;
     return 0;
 }
 
@@ -88,4 +90,9 @@ void alien_gfx_free(void)
 const UBYTE *alien_gfx_get_atlas(void)
 {
     return s_atlas;
+}
+
+int alien_gfx_get_atlas_type(void)
+{
+    return s_atlas_type;
 }
