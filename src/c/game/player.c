@@ -101,8 +101,66 @@ UWORD player_get_input(const Player *p)
     return (p->port == 0) ? g_player1_input : g_player2_input;
 }
 
-/* Resolve movement with wall collision.
- * Returns 1 if movement was possible, 0 if blocked. */
+/*
+ * Directional probe offsets translated from the ASM probe tables.
+ *
+ * The original game stores four probe tables in main.asm:
+ *   lbW007B16 (LEFT):  x = -4,       y = {-6,  4, 16}
+ *   lbW007B22 (RIGHT): x = +30,      y = {-6,  4, 16}
+ *   lbW007B2E (UP):    x = {0,10,22}, y = -10
+ *   lbW007B3A (DOWN):  x = {0,10,22}, y = +20
+ *
+ * The ASM origin is pos_x = col*16+4, pos_y = row*16+58 (with a +3-row
+ * header in cur_map_datas that shifts all row lookups by 3).
+ * The C port uses pos_x = col*16+8, pos_y = row*16+8 (tile centre).
+ *
+ * Conversion so that both reach the same map tile:
+ *   c_x_offset = asm_x_offset - 4   (pos_x differs by +4)
+ *   c_y_offset = asm_y_offset + 2   (pos_y differs by -50; +3-row header
+ *                                    adds 48 px; net: +58-48-8 = +2)
+ *
+ * Resulting C-space offsets:
+ *   LEFT  x : pos_x - 8              (ASM -4  → C -4-4  = -8)
+ *   RIGHT x : pos_x + 26             (ASM +30 → C 30-4  = +26)
+ *   UP    y : pos_y - 8              (ASM -10 → C -10+2 = -8)
+ *   DOWN  y : pos_y + 22             (ASM +20 → C 20+2  = +22)
+ *   H y pts : pos_y + {-4, +6, +18}  (ASM {-6,4,16} → C {-4,6,18})
+ *   V x pts : pos_x + {-4, +6, +18}  (ASM {0,10,22} → C {-4,6,18})
+ */
+
+/* X offset of the single probe column for left/right movement */
+#define PROBE_LEFT_X   (-8)
+#define PROBE_RIGHT_X  (26)
+
+/* Y offset of the single probe row for up/down movement */
+#define PROBE_UP_Y     (-8)
+#define PROBE_DOWN_Y   (22)
+
+/* Three y-sample offsets used when probing left or right */
+static const int k_probe_hy[3] = { -4, 6, 18 };
+/* Three x-sample offsets used when probing up or down */
+static const int k_probe_vx[3] = { -4, 6, 18 };
+
+/*
+ * Returns 1 if the tile at world pixel (x,y) is blocking for this player.
+ * Walls are always blocking; doors block only when the player carries no key.
+ */
+static int tile_blocks(int x, int y, int has_key)
+{
+    int col = tilemap_pixel_to_col(x);
+    int row = tilemap_pixel_to_row(y);
+    if (tilemap_is_solid(&g_cur_map, col, row)) return 1;
+    /* Ref: tile_door → bra tile_wall path @ main.asm#L5231 */
+    if (!has_key && tilemap_attr(&g_cur_map, col, row) == TILE_DOOR) return 1;
+    return 0;
+}
+
+/*
+ * Resolve movement with directional wall collision.
+ * Only the *leading edge* in the direction of movement is probed, at three
+ * sample points that span the player's body — matching the ASM probe tables.
+ * Returns 1 if movement was applied, 0 if blocked.
+ */
 static int try_move(Player *p, int dx, int dy)
 {
     int nx = p->pos_x + dx;
@@ -114,32 +172,28 @@ static int try_move(Player *p, int dx, int dy)
     if (nx >= (MAP_COLS - 1) * MAP_TILE_W) nx = (MAP_COLS - 1) * MAP_TILE_W - 1;
     if (ny >= (MAP_ROWS - 1) * MAP_TILE_H) ny = (MAP_ROWS - 1) * MAP_TILE_H - 1;
 
-    /* Check corners of player bounding box (12×12, centred on pos).
-     * Use half=5 so both corners stay within the same tile as the player
-     * when the player is at a tile centre, avoiding false wall hits. */
-    int half = 5;
-    int col_l = tilemap_pixel_to_col(nx - half);
-    int col_r = tilemap_pixel_to_col(nx + half);
-    int row_t = tilemap_pixel_to_row(ny - half);
-    int row_b = tilemap_pixel_to_row(ny + half);
+    int has_key = (p->keys > 0);
 
-    /* Check wall collisions */
-    if (tilemap_is_solid(&g_cur_map, col_l, row_t) ||
-        tilemap_is_solid(&g_cur_map, col_r, row_t) ||
-        tilemap_is_solid(&g_cur_map, col_l, row_b) ||
-        tilemap_is_solid(&g_cur_map, col_r, row_b)) {
-        return 0;
+    /* Horizontal leading-edge check (right or left only) */
+    if (dx > 0) {
+        int px = nx + PROBE_RIGHT_X;
+        for (int i = 0; i < 3; i++)
+            if (tile_blocks(px, ny + k_probe_hy[i], has_key)) return 0;
+    } else if (dx < 0) {
+        int px = nx + PROBE_LEFT_X;
+        for (int i = 0; i < 3; i++)
+            if (tile_blocks(px, ny + k_probe_hy[i], has_key)) return 0;
     }
 
-    /* Door tiles act as walls when the player has no key.
-     * Ref: tile_door → bra tile_wall path @ main.asm#L5231. */
-    if (p->keys <= 0) {
-        if (tilemap_attr(&g_cur_map, col_l, row_t) == TILE_DOOR ||
-            tilemap_attr(&g_cur_map, col_r, row_t) == TILE_DOOR ||
-            tilemap_attr(&g_cur_map, col_l, row_b) == TILE_DOOR ||
-            tilemap_attr(&g_cur_map, col_r, row_b) == TILE_DOOR) {
-            return 0;
-        }
+    /* Vertical leading-edge check (down or up only) */
+    if (dy > 0) {
+        int py = ny + PROBE_DOWN_Y;
+        for (int i = 0; i < 3; i++)
+            if (tile_blocks(nx + k_probe_vx[i], py, has_key)) return 0;
+    } else if (dy < 0) {
+        int py = ny + PROBE_UP_Y;
+        for (int i = 0; i < 3; i++)
+            if (tile_blocks(nx + k_probe_vx[i], py, has_key)) return 0;
     }
 
     p->pos_x = (WORD)nx;
