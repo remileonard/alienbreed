@@ -6,6 +6,7 @@
 #include "player.h"
 #include "level.h"
 #include "alien.h"
+#include "intex.h"
 #include "../hal/input.h"
 #include "../hal/audio.h"
 #include "../engine/tilemap.h"
@@ -130,27 +131,6 @@ static int try_move(Player *p, int dx, int dy)
         return 0;
     }
 
-    /* Check one-way doors: block movement in opposite direction (Ref: main.asm#L5273).
-     * One-way passage tiles allow entry only from certain directions. */
-    if (dy < 0) {
-        /* Moving up: can't pass through TILE_ONEWAY_DOWN */
-        if (tilemap_attr(&g_cur_map, col_l, row_t) == TILE_ONEWAY_DOWN ||
-            tilemap_attr(&g_cur_map, col_r, row_t) == TILE_ONEWAY_DOWN) return 0;
-    } else if (dy > 0) {
-        /* Moving down: can't pass through TILE_ONEWAY_UP */
-        if (tilemap_attr(&g_cur_map, col_l, row_b) == TILE_ONEWAY_UP ||
-            tilemap_attr(&g_cur_map, col_r, row_b) == TILE_ONEWAY_UP) return 0;
-    }
-    if (dx < 0) {
-        /* Moving left: can't pass through TILE_ONEWAY_RIGHT */
-        if (tilemap_attr(&g_cur_map, col_l, row_t) == TILE_ONEWAY_RIGHT ||
-            tilemap_attr(&g_cur_map, col_l, row_b) == TILE_ONEWAY_RIGHT) return 0;
-    } else if (dx > 0) {
-        /* Moving right: can't pass through TILE_ONEWAY_LEFT */
-        if (tilemap_attr(&g_cur_map, col_r, row_t) == TILE_ONEWAY_LEFT ||
-            tilemap_attr(&g_cur_map, col_r, row_b) == TILE_ONEWAY_LEFT) return 0;
-    }
-
     p->pos_x = (WORD)nx;
     p->pos_y = (WORD)ny;
     return 1;
@@ -187,18 +167,29 @@ void open_door(Player *p)
 
 /* Check and handle tile interaction at player's current position.
  * Called from player_update() after each movement.
- * Mirrors logic from tiles_action_table @ main.asm#L5059. */
+ * Mirrors logic from tiles_action_table @ main.asm#L5059.
+ *
+ * One-way / climb tiles work like the assembly: rather than blocking movement
+ * they set extra_spd in the opposite direction.  The extra_spd is applied on
+ * the next movement tick, producing a push that either slows (climb: ±1) or
+ * prevents (one-way: ±2) movement in the "wrong" direction.
+ * Ref: tile_one_way_* / tile_climb_* @ main.asm#L5451-L5816.
+ */
 void check_tile_interaction(Player *p)
 {
     int col = tilemap_pixel_to_col(p->pos_x);
     int row = tilemap_pixel_to_row(p->pos_y);
     UBYTE attr = tilemap_attr(&g_cur_map, col, row);
 
-    /* One-time consumption: pickups, supplies, triggers. After handling, tile is patched to floor. */
+    /* -----------------------------------------------------------------
+     * One-time consumption: pickups and triggers.
+     * After handling, tile is patched to floor so it can't fire again.
+     * ----------------------------------------------------------------- */
     switch (attr) {
+
     case TILE_KEY:
         p->keys++;
-        if (p->keys > 6) p->keys = 6;  /* max 6 as in original (shows ">6" on HUD) */
+        if (p->keys > 6) p->keys = 6;  /* display cap: shows ">6" */
         tilemap_replace_tile(&g_cur_map, col, row);
         audio_play_sample(SAMPLE_KEY);
         break;
@@ -237,60 +228,170 @@ void check_tile_interaction(Player *p)
         break;
 
     case TILE_DOOR:
-        /* Door requires key; if we have one, open_door() scans and patches it */
+        /* Door requires key; if we have one, open_door() scans and patches it.
+         * Without a key, the tile blocks movement (tilemap_is_solid could include
+         * doors too, but the original keeps them as attr 0x03, not 0x01/wall). */
         if (p->keys > 0) {
             open_door(p);
         }
         break;
 
     case TILE_EXIT:
-        /* Exit available if unlocked or destruction sequence started (Ref: main.asm#L5191) */
+        /* Exit passable only once unlocked or destruction has started
+         * (Ref: tile_exit @ main.asm#L5191). */
         if (g_exit_unlocked || g_in_destruction_sequence) {
             level_trigger_end();
         }
         break;
 
+    case TILE_FACEHUGGER_HATCH:
+        /* Player stands on a facehugger hatch: spawn an alien at this tile,
+         * play the hatch sample, then convert tile to floor so it only fires once.
+         * Ref: tile_facehuggers_hatch @ main.asm#L5414. */
+        alien_spawn_near(p->pos_x, p->pos_y);
+        tilemap_replace_tile(&g_cur_map, col, row);
+        break;
+
     case TILE_INTEX:
-        /* INTEX terminal: pause game, run terminal UI, return */
-        /* TODO: call intex_run(p->port); */
+        /* INTEX terminal: activated when the player presses fire-2 (or SPACE).
+         * Ref: tile_intex_terminal @ main.asm#L5537 — checks btst #7 player input. */
+        {
+            UWORD inp = player_get_input(p);
+            if (inp & INPUT_FIRE2) {
+                intex_run(p->port);
+            }
+        }
         break;
 
     case TILE_DESTRUCT_TRIGGER:
-        /* Tile 0x15: start self-destruct sequence (Ref: main.asm#L5500) */
+        /* Tile 0x15: start self-destruct sequence (Ref: main.asm#L5500). */
         if (!g_self_destruct_initiated) {
             level_start_destruction();
             tilemap_replace_tile(&g_cur_map, col, row);
         }
         break;
 
+    case TILE_BOSS_TRIGGER:
+        /* Tile 0x3D: trigger boss encounter (Ref: main.asm#L5632). */
+        tilemap_replace_tile(&g_cur_map, col, row);
+        break;
+
+    /* -----------------------------------------------------------------
+     * Persistent hazards: applied every frame while player is on tile.
+     * ----------------------------------------------------------------- */
     case TILE_ACID_POOL:
-        /* -1 HP every 25 frames (~0.5 s) while on tile (Ref: main.asm#L5545)
-         * Persistent damage, no consumption. */
+        /* -1 HP every 25 frames (~0.5 s) while on tile
+         * (Ref: tile_acid_pool @ main.asm#L5515). */
         g_acid_damage_counter[p->port]++;
         if (g_acid_damage_counter[p->port] >= 25) {
             player_take_damage(p, 1);
             audio_play_sample(SAMPLE_ACID_POOL);
             g_acid_damage_counter[p->port] = 0;
         }
-        break;
+        break;  /* do NOT reset acid counter in the default path below */
 
     case TILE_DEADLY_HOLE:
-        /* Instant kill (Ref: main.asm#L5600) */
+        /* Instant kill (Ref: tile_deadly_hole @ main.asm#L5485). */
         player_take_damage(p, p->health);
-        tilemap_replace_tile(&g_cur_map, col, row);
         break;
 
-    case TILE_BOSS_TRIGGER:
-        /* Tile 0x3D: trigger boss encounter (Ref: main.asm#L5632)
-         * TODO: call boss_trigger(g_cur_level); set g_boss_active = 1; */
-        tilemap_replace_tile(&g_cur_map, col, row);
+    /* -----------------------------------------------------------------
+     * One-way conveyor tiles — push player in the named direction.
+     * Setting extra_spd each frame prevents movement in the other dir.
+     * Ref: tile_one_way_up/right/down/left @ main.asm#L5451-L5483.
+     * ----------------------------------------------------------------- */
+    case TILE_ONEWAY_UP:
+        p->extra_spd_y = -2;
+        audio_play_sample(SAMPLE_ONE_WAY_DOOR);
+        break;
+    case TILE_ONEWAY_RIGHT:
+        p->extra_spd_x = 2;
+        audio_play_sample(SAMPLE_ONE_WAY_DOOR);
+        break;
+    case TILE_ONEWAY_DOWN:
+        p->extra_spd_y = 2;
+        audio_play_sample(SAMPLE_ONE_WAY_DOOR);
+        break;
+    case TILE_ONEWAY_LEFT:
+        p->extra_spd_x = -2;
+        audio_play_sample(SAMPLE_ONE_WAY_DOOR);
+        break;
+
+    /* -----------------------------------------------------------------
+     * Diagonal one-way tiles — push in two directions simultaneously.
+     * Ref: tile_one_way_up_right/etc. @ main.asm#L5818-L5852.
+     * ----------------------------------------------------------------- */
+    case TILE_ONEWAY_DIAG_UR:
+        p->extra_spd_x =  2;  p->extra_spd_y = -2;
+        audio_play_sample(SAMPLE_ONE_WAY_DOOR);
+        break;
+    case TILE_ONEWAY_DIAG_DR:
+        p->extra_spd_x =  2;  p->extra_spd_y =  2;
+        audio_play_sample(SAMPLE_ONE_WAY_DOOR);
+        break;
+    case TILE_ONEWAY_DIAG_DL:
+        p->extra_spd_x = -2;  p->extra_spd_y =  2;
+        audio_play_sample(SAMPLE_ONE_WAY_DOOR);
+        break;
+    case TILE_ONEWAY_DIAG_UL:
+        p->extra_spd_x = -2;  p->extra_spd_y = -2;
+        audio_play_sample(SAMPLE_ONE_WAY_DOOR);
+        break;
+
+    /* -----------------------------------------------------------------
+     * Deadly one-way tiles — push + kill if player moves against arrow.
+     * 0x26: arrow points right; 0x2E: arrow points left.
+     * Ref: tile_one_deadly_way_right/left @ main.asm#L5600-L5630.
+     * ----------------------------------------------------------------- */
+    case TILE_ONE_DEADLY_WAY_RIGHT:
+        p->extra_spd_x = 2;
+        /* Kill if player is moving left (against the arrow) */
+        if (p->direction == PLAYER_FACE_LEFT ||
+            p->direction == PLAYER_FACE_UP_LEFT ||
+            p->direction == PLAYER_FACE_DOWN_LEFT) {
+            player_take_damage(p, p->health);
+        }
+        audio_play_sample(SAMPLE_ONE_WAY_DOOR);
+        break;
+    case TILE_ONE_DEADLY_WAY_LEFT:
+        p->extra_spd_x = -2;
+        /* Kill if player is moving right (against the arrow) */
+        if (p->direction == PLAYER_FACE_RIGHT ||
+            p->direction == PLAYER_FACE_UP_RIGHT ||
+            p->direction == PLAYER_FACE_DOWN_RIGHT) {
+            player_take_damage(p, p->health);
+        }
+        audio_play_sample(SAMPLE_ONE_WAY_DOOR);
+        break;
+
+    /* -----------------------------------------------------------------
+     * Climb tiles — apply a small counter-force to slow movement when
+     * going against the slope.  A ±1 push each frame means the player
+     * moves at half speed in the hard direction (2 forward - 1 back = 1).
+     * Ref: tile_climb_left/right/up/down @ main.asm#L5798-L5816.
+     * ----------------------------------------------------------------- */
+    case TILE_CLIMB_LEFT:
+        /* Slows leftward movement: push right (+1 x) */
+        p->extra_spd_x = 1;
+        break;
+    case TILE_CLIMB_RIGHT:
+        /* Slows rightward movement: push left (-1 x) */
+        p->extra_spd_x = -1;
+        break;
+    case TILE_CLIMB_UP:
+        /* Slows upward movement: push down (+1 y) */
+        p->extra_spd_y = 1;
+        break;
+    case TILE_CLIMB_DOWN:
+        /* Slows downward movement: push up (-1 y) */
+        p->extra_spd_y = -1;
         break;
 
     default:
-        /* Not on special tile; reset acid counter */
-        if (!TILE_IS_ONEWAY(attr)) {
-            g_acid_damage_counter[p->port] = 0;
-        }
+        /* Plain floor / metallic floor / unknown: reset acid counter.
+         * Note: TILE_ACID_POOL is handled above with break, so this default
+         * is never reached for acid tiles — the counter is preserved. */
+        g_acid_damage_counter[p->port] = 0;
         break;
     }
 }

@@ -54,6 +54,11 @@ void aliens_collisions_with_players(void);
 /* Kill an alien at index i (awards score, plays SFX). */
 void alien_kill(int i);
 
+/* Spawn one alien near the given world-pixel position.
+ * Called when the player triggers a facehugger hatch tile (0x0A).
+ * Ref: tile_facehuggers_hatch / lbC00D22A @ main.asm#L5414. */
+void alien_spawn_near(int wx, int wy);
+
 /* Returns number of living aliens. */
 int  alien_living_count(void);
 

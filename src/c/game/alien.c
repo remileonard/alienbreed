@@ -113,7 +113,8 @@ void alien_spawn_from_map(void)
     if (cap > MAX_ALIENS) cap = MAX_ALIENS;
     if (cap > n_pts)      cap = n_pts;
 
-    int step = n_pts / cap;  /* always >= 1 */
+    int step = n_pts / cap;  /* always >= 1 when cap <= n_pts */
+    if (step < 1) step = 1; /* guard: cap > n_pts was already clamped above, but defensive */
 
     for (int i = 0; i < cap; i++) {
         if (g_alien_count >= MAX_ALIENS) break;
@@ -128,9 +129,42 @@ void alien_spawn_from_map(void)
     }
 }
 
+/*
+ * Spawn one alien at world-pixel position (wx, wy).
+ * Called when the player steps on a TILE_FACEHUGGER_HATCH (0x0A) tile, which
+ * triggers a hatching event.  The original game deferred spawning until the
+ * player was nearby (lbC00D22A / lbC00D1B4); here we spawn immediately since
+ * the player is already on the tile.
+ * Ref: tile_facehuggers_hatch → lbC0082C0/CE/8302 → lbC00D22A @ main.asm#L5414.
+ */
+void alien_spawn_near(int wx, int wy)
+{
+    if (g_alien_count >= MAX_ALIENS) return;
+
+    int alien_type = 1;
+    if (g_cur_level >= 6)  alien_type = 2;
+    if (g_cur_level >= 8)  alien_type = 3;
+    if (g_cur_level >= 10) alien_type = 4;
+    if (g_cur_level == 11) alien_type = 5;
+    if (g_cur_level >= 12) alien_type = 7;
+
+    WORD base_hp = (alien_type >= 1 && alien_type <= 7)
+                   ? k_alien_type_hp[alien_type - 1]
+                   : k_alien_type_hp[0];
+
+    Alien *a    = &g_aliens[g_alien_count++];
+    a->pos_x    = (WORD)wx;
+    a->pos_y    = (WORD)wy;
+    a->speed    = (WORD)(2 + g_global_aliens_extra_strength / 5);
+    a->strength = (WORD)(base_hp + g_global_aliens_extra_strength);
+    a->alive    = 1;
+    a->type_idx = alien_type - 1;
+    audio_play_sample(SAMPLE_HATCHING_ALIEN);
+}
+
 /* Simple Manhattan-distance AI: move alien one step toward nearest player.
  * Updates alien direction (0=N,1=NE,2=E,3=SE,4=S,5=SW,6=W,7=NW).
- * Ref: alien movement @ main.asm#L6458; direction table lbB00A228#L7077. */
+ * Ref: alien movement @ main.asm#L6458; direction table lbB00A228 @ main.asm#L7077. */
 static void alien_move(Alien *a)
 {
     /* Find nearest living player */
