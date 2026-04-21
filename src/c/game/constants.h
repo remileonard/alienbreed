@@ -175,7 +175,9 @@
 #define TILE_1UP            0x07
 #define TILE_FIRE_DOOR_A    0x08
 #define TILE_FIRE_DOOR_B    0x09
-#define TILE_ALIEN_HATCH    0x0A
+/* 0x0A: player-triggered face-hugger hatch (lbC007D98 / tile_facehuggers_hatch in main.asm).
+ * The player steps on this tile to open it; NOT an alien respawn point. */
+#define TILE_FACEHUGGER_HATCH 0x0A
 #define TILE_CREDITS_100    0x0B
 #define TILE_CREDITS_1000   0x0C
 /* One-way doors: passage allowed only in the named direction (Ref: main.asm#L5059) */
@@ -184,11 +186,15 @@
 #define TILE_ONEWAY_LEFT    0x0F  /* can pass moving left,  blocks rightward movement */
 #define TILE_ONEWAY_RIGHT   0x10  /* can pass moving right, blocks leftward movement */
 #define TILE_ONEWAY_5       0x11  /* fifth one-way variant */
-#define TILE_DEADLY_HOLE    0x13  /* instant kill */
+#define TILE_DEADLY_HOLE    0x14  /* instant kill (Ref: levelmaps_format.txt 0x14) */
 #define TILE_DESTRUCT_TRIGGER 0x15 /* starts self-destruct countdown */
 #define TILE_ACID_POOL      0x16  /* -1 HP every 25 frames */
 #define TILE_INTEX          0x17  /* INTEX terminal */
-#define TILE_BOSS_TRIGGER   0x3D  /* triggers boss encounter */
+/* Alien spawn tiles (Ref: levelmaps_format.txt) */
+#define TILE_ALIEN_SPAWN_BIG   0x28  /* respawning location of big aliens */
+#define TILE_ALIEN_SPAWN_SMALL 0x29  /* respawning location of small aliens */
+#define TILE_ALIEN_HOLE        0x34  /* hole with aliens coming out */
+#define TILE_BOSS_TRIGGER      0x3D  /* triggers boss encounter */
 
 /* Convenience: true if tile is any one-way door */
 #define TILE_IS_ONEWAY(a)   ((a) >= TILE_ONEWAY_UP && (a) <= TILE_ONEWAY_5)

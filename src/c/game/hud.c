@@ -128,7 +128,9 @@ void hud_render_map_overview(void)
                 case TILE_WALL:      color = 2;  break;
                 case TILE_DOOR:      color = 6;  break;
                 case TILE_EXIT:      color = 10; break;
-                case TILE_ALIEN_HATCH: color = 4; break;
+                case TILE_ALIEN_SPAWN_BIG:
+                case TILE_ALIEN_SPAWN_SMALL:
+                case TILE_ALIEN_HOLE: color = 4; break;
                 default:             color = 1;  break;
             }
             video_plot_pixel(ox + col, oy + row, color);

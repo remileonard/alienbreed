@@ -50,6 +50,15 @@ void alien_init_variables(void)
     g_alien_count = 0;
 }
 
+/*
+ * Maximum number of aliens placed on the map at level start.
+ * The original assembly uses 7 fixed alien slots (alien1_struct..alien7_struct)
+ * that spawn near the player on demand.  We use a small initial cap to keep
+ * the same rough density while letting all spawn-tile types be covered.
+ * (Ref: alien1_struct..alien7_struct @ main.asm#L5918-L5973)
+ */
+#define ALIEN_INITIAL_CAP 10
+
 void alien_spawn_from_map(void)
 {
     /* Select alien type based on level number (Ref: main.asm#L5918+).
@@ -59,27 +68,63 @@ void alien_spawn_from_map(void)
     if (g_cur_level >= 8) alien_type = 3;
     if (g_cur_level >= 10) alien_type = 4;
     if (g_cur_level == 11) alien_type = 5;
-    if (g_cur_level == 12) alien_type = 6;  /* final level: strongest aliens */
+    if (g_cur_level == 12) alien_type = 6;
     if (g_cur_level >= 12) alien_type = 7;
 
     WORD base_hp = (alien_type >= 1 && alien_type <= 7)
                    ? k_alien_type_hp[alien_type - 1]
                    : k_alien_type_hp[0];
 
+    /*
+     * Collect all spawn-tile positions first so we can spread initial aliens
+     * evenly across the map rather than clustering them at the top-left.
+     *
+     * Tile attributes that mark alien spawn locations
+     * (Ref: levelmaps_format.txt, verified by scanning all LxMA files):
+     *   0x28 – respawning location of big aliens
+     *   0x29 – respawning location of small aliens
+     *   0x34 – hole with aliens coming out
+     *
+     * NOTE: 0x0A (face-hugger hatch) is a *player-triggered* event tile, NOT a
+     * static spawn point — no LxMA map contains 0x0A tiles in the BODY chunk.
+     */
+    typedef struct { WORD x, y; } SpawnPt;
+    SpawnPt pts[MAP_ROWS * MAP_COLS];
+    int     n_pts = 0;
+
     for (int row = 0; row < MAP_ROWS; row++) {
         for (int col = 0; col < MAP_COLS; col++) {
-            if (tilemap_attr(&g_cur_map, col, row) == TILE_ALIEN_HATCH) {
-                if (g_alien_count >= MAX_ALIENS) return;
-                Alien *a    = &g_aliens[g_alien_count++];
-                a->pos_x    = (WORD)(col * MAP_TILE_W + MAP_TILE_W / 2);
-                a->pos_y    = (WORD)(row * MAP_TILE_H + MAP_TILE_H / 2);
-                a->speed    = (WORD)(2 + g_global_aliens_extra_strength / 5);
-                a->strength = (WORD)(base_hp + g_global_aliens_extra_strength);
-                a->alive    = 1;
-                a->type_idx = alien_type - 1;  /* 0-based alien type for stats (not atlas column) */
-                audio_play_sample(SAMPLE_HATCHING_ALIEN);
+            UBYTE attr = tilemap_attr(&g_cur_map, col, row);
+            if (attr == TILE_ALIEN_SPAWN_BIG  ||
+                attr == TILE_ALIEN_SPAWN_SMALL ||
+                attr == TILE_ALIEN_HOLE) {
+                pts[n_pts].x = (WORD)(col * MAP_TILE_W + MAP_TILE_W / 2);
+                pts[n_pts].y = (WORD)(row * MAP_TILE_H + MAP_TILE_H / 2);
+                n_pts++;
             }
         }
+    }
+
+    if (n_pts == 0) return;
+
+    /* Pick up to ALIEN_INITIAL_CAP spawn points, evenly spaced across the list
+     * so aliens are distributed around the whole map. */
+    int cap   = ALIEN_INITIAL_CAP;
+    if (cap > MAX_ALIENS) cap = MAX_ALIENS;
+    if (cap > n_pts)      cap = n_pts;
+
+    int step = n_pts / cap;  /* always >= 1 */
+
+    for (int i = 0; i < cap; i++) {
+        if (g_alien_count >= MAX_ALIENS) break;
+        const SpawnPt *p = &pts[i * step];
+        Alien *a    = &g_aliens[g_alien_count++];
+        a->pos_x    = p->x;
+        a->pos_y    = p->y;
+        a->speed    = (WORD)(2 + g_global_aliens_extra_strength / 5);
+        a->strength = (WORD)(base_hp + g_global_aliens_extra_strength);
+        a->alive    = 1;
+        a->type_idx = alien_type - 1;
     }
 }
 
