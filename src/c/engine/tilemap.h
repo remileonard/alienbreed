@@ -97,9 +97,12 @@ static inline int tilemap_pixel_to_row(int py) { return py / MAP_TILE_H; }
 int tilemap_find_spawn(const LevelMap *map, int *out_x, int *out_y);
 
 /*
- * Erase the type attribute of a tile at (col, row), converting it to floor.
- * Keeps the graphical tile index intact (bits 6-15 unchanged).
- * Mirrors: and.w #$FFC0,(a3) in open_door @ main.asm#L5242
+ * Replace a tile at (col, row) with a floor tile, making both the logic
+ * attribute and the visible graphic disappear.  Uses the tile word from the
+ * nearest adjacent floor tile so the graphic blends with the surroundings.
+ * Falls back to tile word 0x0000 (attr=0/floor, tile_idx=0) if no floor
+ * neighbour is found.
+ * Ref: patch_tiles + and.w #$FFC0,(a3) @ main.asm#L7815 / #L5277.
  */
 void tilemap_replace_tile(LevelMap *map, int col, int row);
 

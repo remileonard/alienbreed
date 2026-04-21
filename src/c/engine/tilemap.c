@@ -176,8 +176,25 @@ int tilemap_find_spawn(const LevelMap *map, int *out_x, int *out_y)
 void tilemap_replace_tile(LevelMap *map, int col, int row)
 {
     if (!map || col < 0 || col >= MAP_COLS || row < 0 || row >= MAP_ROWS) return;
-    /* Clear attribute bits 0-5; keep tile-index bits 6-15. */
-    map->tiles[row][col] &= (UWORD)0xFFC0;
+
+    /* Look for an adjacent floor tile (attr == 0x00) and reuse its entire
+     * tile word (graphic index + attribute).  This makes the replaced tile
+     * blend visually with the surrounding floor rather than showing tile 0
+     * in the wrong context.  Scan order: up, down, left, right.
+     * Ref: patch_tiles queues a graphical replacement in the original ASM;
+     * in the C port we apply it immediately. */
+    static const int dirs[4][2] = {{0,-1},{0,1},{-1,0},{1,0}};
+    UWORD floor_word = 0x0000;  /* fallback: tile index 0, attr = floor */
+    for (int i = 0; i < 4; i++) {
+        int nc = col + dirs[i][0];
+        int nr = row + dirs[i][1];
+        if (nc < 0 || nc >= MAP_COLS || nr < 0 || nr >= MAP_ROWS) continue;
+        if ((map->tiles[nr][nc] & 0x3F) == 0x00) {
+            floor_word = map->tiles[nr][nc];
+            break;
+        }
+    }
+    map->tiles[row][col] = floor_word;
 }
 
 void tilemap_render(const LevelMap *map, const Tileset *ts)

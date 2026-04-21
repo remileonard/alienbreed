@@ -131,15 +131,31 @@ static int try_move(Player *p, int dx, int dy)
         return 0;
     }
 
+    /* Door tiles act as walls when the player has no key.
+     * Ref: tile_door → bra tile_wall path @ main.asm#L5231. */
+    if (p->keys <= 0) {
+        if (tilemap_attr(&g_cur_map, col_l, row_t) == TILE_DOOR ||
+            tilemap_attr(&g_cur_map, col_r, row_t) == TILE_DOOR ||
+            tilemap_attr(&g_cur_map, col_l, row_b) == TILE_DOOR ||
+            tilemap_attr(&g_cur_map, col_r, row_b) == TILE_DOOR) {
+            return 0;
+        }
+    }
+
     p->pos_x = (WORD)nx;
     p->pos_y = (WORD)ny;
     return 1;
 }
 
-/* Scan 4 adjacent tiles (up, down, left, right) for TILE_DOOR and patch them.
- * Mirrors open_door routine @ main.asm#L5242.
- * Each door tile found: erase attribute bits (& 0xFFC0) to make it floor,
- * decrement player.keys, increment level.doors_opened, play sample 23. */
+/* Open a door at the player's current tile position.
+ * Mirrors open_door routine @ main.asm#L5246.
+ *
+ * The ASM detects an adjacent TILE_DOOR then patches the CURRENT tile (a3)
+ * to floor.  In this port we replicate that exactly: the tile the player
+ * stands on is cleared.  If that tile has a paired door partner (the other
+ * half of the 2-tile door), we clear that partner in the same call so that
+ * the entire doorway opens at once (the original relied on a wide sprite
+ * overlay animation to cover both tiles visually). */
 void open_door(Player *p)
 {
     if (p->keys <= 0) return;
@@ -147,22 +163,25 @@ void open_door(Player *p)
     int col = tilemap_pixel_to_col(p->pos_x);
     int row = tilemap_pixel_to_row(p->pos_y);
 
-    /* Check 4 adjacent tiles for door */
-    int dirs[][2] = { {0, -1}, {0, 1}, {-1, 0}, {1, 0} };
+    /* Patch the current tile (the one the player is standing on). */
+    tilemap_replace_tile(&g_cur_map, col, row);
+
+    /* Also open the adjacent paired door tile, if any, without an extra key.
+     * Doors come in pairs (horizontal or vertical).  Ref: the animation data
+     * at lbL020CFE / lbL020D32 covers a 32-px-wide area over both tiles. */
+    const int dirs[4][2] = { {0, -1}, {0, 1}, {-1, 0}, {1, 0} };
     for (int i = 0; i < 4; i++) {
         int adj_col = col + dirs[i][0];
         int adj_row = row + dirs[i][1];
         if (adj_col >= 0 && adj_col < MAP_COLS && adj_row >= 0 && adj_row < MAP_ROWS) {
-            UBYTE attr = tilemap_attr(&g_cur_map, adj_col, adj_row);
-            if (attr == TILE_DOOR) {
-                /* Patch door to floor */
+            if (tilemap_attr(&g_cur_map, adj_col, adj_row) == TILE_DOOR) {
                 tilemap_replace_tile(&g_cur_map, adj_col, adj_row);
-                /* Reduce keys, ensure positive key count on display */
-                if (p->keys > 0) p->keys--;
-                audio_play_sample(SAMPLE_OPENING_DOOR);
             }
         }
     }
+
+    p->keys--;
+    audio_play_sample(SAMPLE_OPENING_DOOR);
 }
 
 /* Check and handle tile interaction at player's current position.

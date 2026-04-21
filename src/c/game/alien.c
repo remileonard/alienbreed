@@ -107,21 +107,44 @@ void alien_spawn_from_map(void)
 
     if (n_pts == 0) return;
 
-    /* Pick up to ALIEN_INITIAL_CAP spawn points, evenly spaced across the list
-     * so aliens are distributed around the whole map. */
-    int cap   = ALIEN_INITIAL_CAP;
+    /* The original game spawns aliens lazily: a spawn tile only activates when
+     * it enters the player's viewport (lbC00D17E / lbC00D1B4 @ main.asm).
+     * In the C port we spawn at level-load time, so we pick the spawn tiles
+     * NEAREST to the player's starting position.  This ensures aliens are
+     * visible (or close to visible) from the start instead of being clustered
+     * at the far end of the map. */
+    int px = (int)g_players[0].pos_x;
+    int py = (int)g_players[0].pos_y;
+
+    /* Partial insertion sort: keep only ALIEN_INITIAL_CAP nearest entries. */
+    int cap = ALIEN_INITIAL_CAP;
     if (cap > MAX_ALIENS) cap = MAX_ALIENS;
     if (cap > n_pts)      cap = n_pts;
 
-    int step = n_pts / cap;  /* always >= 1 when cap <= n_pts */
-    if (step < 1) step = 1; /* guard: cap > n_pts was already clamped above, but defensive */
+    /* Compute Manhattan distances and sort the first `cap` entries by distance
+     * (selection sort — n_pts is at most a few hundred, so O(n*cap) is fine). */
+    for (int i = 0; i < cap; i++) {
+        int best = i;
+        int best_d = (int)(pts[i].x >= px ? pts[i].x - px : px - pts[i].x) +
+                     (int)(pts[i].y >= py ? pts[i].y - py : py - pts[i].y);
+        for (int j = i + 1; j < n_pts; j++) {
+            int d = (int)(pts[j].x >= px ? pts[j].x - px : px - pts[j].x) +
+                    (int)(pts[j].y >= py ? pts[j].y - py : py - pts[j].y);
+            if (d < best_d) { best_d = d; best = j; }
+        }
+        if (best != i) {
+            SpawnPt tmp = pts[i];
+            pts[i] = pts[best];
+            pts[best] = tmp;
+        }
+    }
 
     for (int i = 0; i < cap; i++) {
         if (g_alien_count >= MAX_ALIENS) break;
-        const SpawnPt *p = &pts[i * step];
+        const SpawnPt *sp = &pts[i];
         Alien *a    = &g_aliens[g_alien_count++];
-        a->pos_x    = p->x;
-        a->pos_y    = p->y;
+        a->pos_x    = sp->x;
+        a->pos_y    = sp->y;
         a->speed    = (WORD)(2 + g_global_aliens_extra_strength / 5);
         a->strength = (WORD)(base_hp + g_global_aliens_extra_strength);
         a->alive    = 1;
