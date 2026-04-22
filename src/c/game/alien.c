@@ -43,133 +43,52 @@ static Projectile s_projectiles[MAX_PROJECTILES];
 /* Score awarded per alien kill */
 #define ALIEN_SCORE_VALUE 100
 
-void alien_init_variables(void)
+/*
+ * Spawn point list — mirrors the two spawn slots (lbL00D29A / lbL00D2AA) from
+ * main.asm, generalised to support any number of map spawn tiles plus
+ * player-triggered facehugger hatches.
+ *
+ * Initial countdown value of 20 matches `move.w #20, 8(a0)` in lbC00D236.
+ * Expanded viewport margin of 80 px matches the ±80 offsets in lbC00D17E.
+ * (Ref: lbC00D17E / lbC00D1B4 / lbC00D22A / lbC00D236 @ main.asm#L8547-L8623)
+ */
+#define MAX_SPAWN_POINTS        256
+#define SPAWN_COUNTDOWN_INIT     20  /* frames until first spawn once in viewport */
+#define SPAWN_VIEWPORT_MARGIN    80  /* px beyond screen edges for expanded viewport */
+
+typedef struct {
+    WORD world_x, world_y;  /* pixel centre of the spawn tile */
+    int  countdown;          /* decrements while tile is in viewport; spawn at −1 */
+    int  alien_type;         /* 1-based alien type (1=weakest … 7=strongest) */
+    int  active;             /* 1 = slot occupied */
+    int  one_shot;           /* 1 = deactivate after first spawn (facehugger hatch) */
+} SpawnPoint;
+
+static SpawnPoint s_spawn_points[MAX_SPAWN_POINTS];
+static int        s_spawn_count = 0;
+
+/* -----------------------------------------------------------------------
+ * Return the alien type appropriate for the current level.
+ * Ref: alien type selection @ main.asm#L5918-L5973.
+ * ----------------------------------------------------------------------- */
+static int alien_type_for_level(void)
 {
-    memset(g_aliens,       0, sizeof(g_aliens));
-    memset(s_projectiles,  0, sizeof(s_projectiles));
-    g_alien_count = 0;
+    int t = 1;
+    if (g_cur_level >= 6)  t = 2;
+    if (g_cur_level >= 8)  t = 3;
+    if (g_cur_level >= 10) t = 4;
+    if (g_cur_level == 11) t = 5;
+    if (g_cur_level == 12) t = 6;
+    if (g_cur_level >= 12) t = 7;
+    return t;
 }
 
-/*
- * Maximum number of aliens placed on the map at level start.
- * The original assembly uses 7 fixed alien slots (alien1_struct..alien7_struct)
- * that spawn near the player on demand.  We use a small initial cap to keep
- * the same rough density while letting all spawn-tile types be covered.
- * (Ref: alien1_struct..alien7_struct @ main.asm#L5918-L5973)
- */
-#define ALIEN_INITIAL_CAP 10
-
-void alien_spawn_from_map(void)
-{
-    /* Select alien type based on level number (Ref: main.asm#L5918+).
-     * Later levels use stronger alien types. */
-    int alien_type = 1;  /* default */
-    if (g_cur_level >= 6) alien_type = 2;
-    if (g_cur_level >= 8) alien_type = 3;
-    if (g_cur_level >= 10) alien_type = 4;
-    if (g_cur_level == 11) alien_type = 5;
-    if (g_cur_level == 12) alien_type = 6;
-    if (g_cur_level >= 12) alien_type = 7;
-
-    WORD base_hp = (alien_type >= 1 && alien_type <= 7)
-                   ? k_alien_type_hp[alien_type - 1]
-                   : k_alien_type_hp[0];
-
-    /*
-     * Collect all spawn-tile positions first so we can spread initial aliens
-     * evenly across the map rather than clustering them at the top-left.
-     *
-     * Tile attributes that mark alien spawn locations
-     * (Ref: levelmaps_format.txt, verified by scanning all LxMA files):
-     *   0x28 – respawning location of big aliens
-     *   0x29 – respawning location of small aliens
-     *   0x34 – hole with aliens coming out
-     *
-     * NOTE: 0x0A (face-hugger hatch) is a *player-triggered* event tile, NOT a
-     * static spawn point — no LxMA map contains 0x0A tiles in the BODY chunk.
-     */
-    typedef struct { WORD x, y; } SpawnPt;
-    SpawnPt pts[MAP_ROWS * MAP_COLS];
-    int     n_pts = 0;
-
-    for (int row = 0; row < MAP_ROWS; row++) {
-        for (int col = 0; col < MAP_COLS; col++) {
-            UBYTE attr = tilemap_attr(&g_cur_map, col, row);
-            if (attr == TILE_ALIEN_SPAWN_BIG  ||
-                attr == TILE_ALIEN_SPAWN_SMALL ||
-                attr == TILE_ALIEN_HOLE) {
-                pts[n_pts].x = (WORD)(col * MAP_TILE_W + MAP_TILE_W / 2);
-                pts[n_pts].y = (WORD)(row * MAP_TILE_H + MAP_TILE_H / 2);
-                n_pts++;
-            }
-        }
-    }
-
-    if (n_pts == 0) return;
-
-    /* The original game spawns aliens lazily: a spawn tile only activates when
-     * it enters the player's viewport (lbC00D17E / lbC00D1B4 @ main.asm).
-     * In the C port we spawn at level-load time, so we pick the spawn tiles
-     * NEAREST to the player's starting position.  This ensures aliens are
-     * visible (or close to visible) from the start instead of being clustered
-     * at the far end of the map. */
-    int px = (int)g_players[0].pos_x;
-    int py = (int)g_players[0].pos_y;
-
-    /* Partial insertion sort: keep only ALIEN_INITIAL_CAP nearest entries. */
-    int cap = ALIEN_INITIAL_CAP;
-    if (cap > MAX_ALIENS) cap = MAX_ALIENS;
-    if (cap > n_pts)      cap = n_pts;
-
-    /* Compute Manhattan distances and sort the first `cap` entries by distance
-     * (selection sort — n_pts is at most a few hundred, so O(n*cap) is fine). */
-    for (int i = 0; i < cap; i++) {
-        int best = i;
-        int best_d = (int)(pts[i].x >= px ? pts[i].x - px : px - pts[i].x) +
-                     (int)(pts[i].y >= py ? pts[i].y - py : py - pts[i].y);
-        for (int j = i + 1; j < n_pts; j++) {
-            int d = (int)(pts[j].x >= px ? pts[j].x - px : px - pts[j].x) +
-                    (int)(pts[j].y >= py ? pts[j].y - py : py - pts[j].y);
-            if (d < best_d) { best_d = d; best = j; }
-        }
-        if (best != i) {
-            SpawnPt tmp = pts[i];
-            pts[i] = pts[best];
-            pts[best] = tmp;
-        }
-    }
-
-    for (int i = 0; i < cap; i++) {
-        if (g_alien_count >= MAX_ALIENS) break;
-        const SpawnPt *sp = &pts[i];
-        Alien *a    = &g_aliens[g_alien_count++];
-        a->pos_x    = sp->x;
-        a->pos_y    = sp->y;
-        a->speed    = (WORD)(2 + g_global_aliens_extra_strength / 5);
-        a->strength = (WORD)(base_hp + g_global_aliens_extra_strength);
-        a->alive    = 1;
-        a->type_idx = alien_type - 1;
-    }
-}
-
-/*
- * Spawn one alien at world-pixel position (wx, wy).
- * Called when the player steps on a TILE_FACEHUGGER_HATCH (0x0A) tile, which
- * triggers a hatching event.  The original game deferred spawning until the
- * player was nearby (lbC00D22A / lbC00D1B4); here we spawn immediately since
- * the player is already on the tile.
- * Ref: tile_facehuggers_hatch → lbC0082C0/CE/8302 → lbC00D22A @ main.asm#L5414.
- */
-void alien_spawn_near(int wx, int wy)
+/* -----------------------------------------------------------------------
+ * Place one alien at world-pixel position (wx, wy) of the given type.
+ * ----------------------------------------------------------------------- */
+static void spawn_alien_at(int wx, int wy, int alien_type)
 {
     if (g_alien_count >= MAX_ALIENS) return;
-
-    int alien_type = 1;
-    if (g_cur_level >= 6)  alien_type = 2;
-    if (g_cur_level >= 8)  alien_type = 3;
-    if (g_cur_level >= 10) alien_type = 4;
-    if (g_cur_level == 11) alien_type = 5;
-    if (g_cur_level >= 12) alien_type = 7;
 
     WORD base_hp = (alien_type >= 1 && alien_type <= 7)
                    ? k_alien_type_hp[alien_type - 1]
@@ -182,7 +101,133 @@ void alien_spawn_near(int wx, int wy)
     a->strength = (WORD)(base_hp + g_global_aliens_extra_strength);
     a->alive    = 1;
     a->type_idx = alien_type - 1;
-    audio_play_sample(SAMPLE_HATCHING_ALIEN);
+}
+
+void alien_init_variables(void)
+{
+    memset(g_aliens,       0, sizeof(g_aliens));
+    memset(s_projectiles,  0, sizeof(s_projectiles));
+    memset(s_spawn_points, 0, sizeof(s_spawn_points));
+    g_alien_count = 0;
+    s_spawn_count = 0;
+}
+
+/*
+ * Scan the loaded map for spawn tiles and register them as pending spawn
+ * points.  No aliens are created yet — spawning is deferred to
+ * alien_spawn_tick() which fires lazily when each tile enters the player's
+ * (expanded) viewport, exactly as in the original ASM.
+ *
+ * Tile attributes that mark alien spawn locations:
+ *   0x28 – TILE_ALIEN_SPAWN_BIG   (respawning big-alien location)
+ *   0x29 – TILE_ALIEN_SPAWN_SMALL (respawning small-alien location)
+ *   0x34 – TILE_ALIEN_HOLE        (hole from which aliens emerge)
+ *
+ * Ref: lbC00D17E / lbC00D1B4 / lbC00D236 @ main.asm#L8547-L8623;
+ *      set_all_aliens_to_default @ main.asm#L8628.
+ */
+void alien_spawn_from_map(void)
+{
+    int alien_type = alien_type_for_level();
+    s_spawn_count  = 0;
+
+    for (int row = 0; row < MAP_ROWS && s_spawn_count < MAX_SPAWN_POINTS; row++) {
+        for (int col = 0; col < MAP_COLS && s_spawn_count < MAX_SPAWN_POINTS; col++) {
+            UBYTE attr = tilemap_attr(&g_cur_map, col, row);
+            if (attr != TILE_ALIEN_SPAWN_BIG  &&
+                attr != TILE_ALIEN_SPAWN_SMALL &&
+                attr != TILE_ALIEN_HOLE) continue;
+
+            SpawnPoint *sp = &s_spawn_points[s_spawn_count++];
+            sp->world_x    = (WORD)(col * MAP_TILE_W + MAP_TILE_W / 2);
+            sp->world_y    = (WORD)(row * MAP_TILE_H + MAP_TILE_H / 2);
+            sp->countdown  = SPAWN_COUNTDOWN_INIT;
+            sp->alien_type = alien_type;
+            sp->active     = 1;
+            sp->one_shot   = 0;
+        }
+    }
+}
+
+/*
+ * Register a one-shot spawn point at (wx, wy).
+ *
+ * Called when the player triggers a facehugger hatch tile (0x0A).  The
+ * original game queues the tile through lbC00D22A → lbC00D236, which sets up
+ * a spawn slot with countdown = 20, then lbC00D1B4 fires it once the tile is
+ * in the viewport.  We replicate that deferred behaviour here.
+ *
+ * The tile itself is patched to floor by the caller before this returns, so
+ * the hatch can never be triggered a second time.
+ *
+ * Ref: tile_facehuggers_hatch → lbC0082C0/CE/8302 → lbC00D22A → lbC00D236
+ *      @ main.asm#L5414-L8623.
+ */
+void alien_spawn_near(int wx, int wy)
+{
+    if (s_spawn_count >= MAX_SPAWN_POINTS) return;
+
+    SpawnPoint *sp = &s_spawn_points[s_spawn_count++];
+    sp->world_x    = (WORD)wx;
+    sp->world_y    = (WORD)wy;
+    sp->countdown  = SPAWN_COUNTDOWN_INIT;
+    sp->alien_type = alien_type_for_level();
+    sp->active     = 1;
+    sp->one_shot   = 1;
+}
+
+/*
+ * Per-frame viewport scan — mirrors lbC00D17E / lbC00D1B4 @ main.asm.
+ *
+ * Expanded viewport (80 px beyond each screen edge):
+ *   left   = g_camera_x − 80         right  = g_camera_x + 400 (= left + 480)
+ *   top    = g_camera_y − 80         bottom = g_camera_y + 336 (= top  + 416)
+ *
+ * For each active spawn point:
+ *   – If its pixel centre is inside the expanded viewport, the countdown
+ *     decrements by 1.  When it reaches −1 an alien is spawned and the
+ *     countdown resets to SPAWN_COUNTDOWN_INIT (mirrors lbC00D1B4 line
+ *     `move.w 44(a1), 8(a0)` which reloads the timer).
+ *   – If the tile is outside the viewport the countdown resets to
+ *     SPAWN_COUNTDOWN_INIT (mirrors lbC00D220 which clears the slot pointer
+ *     so the next viewport entry starts fresh).
+ *   – One-shot slots (facehugger hatches) are deactivated after the spawn.
+ *
+ * Called from alien_update_all() every game tick.
+ */
+void alien_spawn_tick(void)
+{
+    int vp_left   = g_camera_x - SPAWN_VIEWPORT_MARGIN;
+    int vp_right  = g_camera_x + SCREEN_W + SPAWN_VIEWPORT_MARGIN;
+    int vp_top    = g_camera_y - SPAWN_VIEWPORT_MARGIN;
+    int vp_bottom = g_camera_y + SCREEN_H + SPAWN_VIEWPORT_MARGIN;
+
+    for (int i = 0; i < s_spawn_count; i++) {
+        SpawnPoint *sp = &s_spawn_points[i];
+        if (!sp->active) continue;
+
+        int in_vp = (sp->world_x >= vp_left  && sp->world_x < vp_right &&
+                     sp->world_y >= vp_top    && sp->world_y < vp_bottom);
+
+        if (!in_vp) {
+            /* Left viewport: reset countdown (ref lbC00D220). */
+            sp->countdown = SPAWN_COUNTDOWN_INIT;
+            continue;
+        }
+
+        sp->countdown--;
+        if (sp->countdown >= 0) continue;
+
+        /* Countdown expired: spawn alien and reload timer (ref lbC00D1B4). */
+        spawn_alien_at(sp->world_x, sp->world_y, sp->alien_type);
+        audio_play_sample(SAMPLE_HATCHING_ALIEN);
+
+        if (sp->one_shot) {
+            sp->active = 0;
+        } else {
+            sp->countdown = SPAWN_COUNTDOWN_INIT;
+        }
+    }
 }
 
 /* Simple Manhattan-distance AI: move alien one step toward nearest player.
@@ -235,6 +280,9 @@ static void alien_move(Alien *a)
 
 void alien_update_all(void)
 {
+    /* Lazy viewport-triggered spawning (mirrors lbC00D17E @ main.asm#L8547). */
+    alien_spawn_tick();
+
     for (int i = 0; i < g_alien_count; i++) {
         if (g_aliens[i].alive == 0) continue;
 

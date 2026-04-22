@@ -54,10 +54,21 @@ void aliens_collisions_with_players(void);
 /* Kill an alien at index i (awards score, plays SFX). */
 void alien_kill(int i);
 
-/* Spawn one alien near the given world-pixel position.
+/*
+ * Register a one-shot spawn point at (wx, wy).
  * Called when the player triggers a facehugger hatch tile (0x0A).
- * Ref: tile_facehuggers_hatch / lbC00D22A @ main.asm#L5414. */
+ * The alien will appear once the countdown expires (≈20 frames) — mirroring
+ * the lbC00D22A → lbC00D1B4 deferred-spawn path @ main.asm#L5414.
+ */
 void alien_spawn_near(int wx, int wy);
+
+/*
+ * Per-frame viewport scan: check all registered spawn points against the
+ * expanded viewport and spawn aliens when their countdown reaches zero.
+ * Mirrors lbC00D17E / lbC00D1B4 @ main.asm called every game tick.
+ * Called internally from alien_update_all().
+ */
+void alien_spawn_tick(void);
 
 /* Returns number of living aliens. */
 int  alien_living_count(void);
