@@ -30,14 +30,16 @@ void player_init_variables(void)
     for (int i = 0; i < MAX_PLAYERS; i++) {
         Player *p    = &g_players[i];
         p->port      = i;
-        p->alive     = 1;
-        p->health    = PLAYER_MAX_HEALTH;
-        p->lives     = 3;
-        p->credits   = 0;
-        p->score     = 0;
-        p->keys      = 0;
-        p->ammopacks = 0;
-        p->direction = PLAYER_FACE_DOWN;
+        p->alive       = 1;
+        p->health      = PLAYER_MAX_HEALTH;
+        p->lives       = 4;               /* Ref: move.w #4,PLAYER_LIVES @ init_player_dats, main.asm#L1007 */
+        p->credits     = 0;
+        p->score       = 0;
+        p->keys        = 0;               /* Ref: clr.w PLAYER_KEYS @ init_player_dats, main.asm#L1010 */
+        p->ammopacks   = 2;               /* Ref: move.w #2,PLAYER_AMMOPACKS @ init_player_dats, main.asm#L1008 */
+        p->ammunitions = PLAYER_MAX_AMMO; /* Ref: move.w #PLAYER_MAX_AMMO,PLAYER_AMMUNITIONS @ init_player_dats, main.asm#L1009 */
+        p->shot_amount = 4;               /* Ref: move.w #4,PLAYER_SHOT_AMOUNT @ init_player_dats, main.asm#L998 */
+        p->direction   = PLAYER_FACE_DOWN;
         player_set_cur_weapon(p, WEAPON_MACHINEGUN);
         p->owned_weapons[WEAPON_MACHINEGUN - 1] = 1;
     }
