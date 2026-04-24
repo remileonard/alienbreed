@@ -553,9 +553,12 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
         char label_sc[32];
         int  last_np = -1, last_sc = -1;   /* detect changes */
 
-        /* Phase 3 state (disp_credits in menu.asm):                    *
-         * credit_state: 0=wait 350 frames, 1=fade→red, 2=fade→black   */
+        /* Phase 3 state:                                               *
+         * credit_state: 0=typewriter+hold 350 frames, 1=fade→red,     *
+         *               2=fade→black                                   */
         int   cidx          = 0;
+        int   chars_shown   = 0;
+        int   total_chars   = 0;
         int   hold_frames   = 0;
         int   credit_state  = 0;
         int   fade_ctr      = 0;
@@ -652,9 +655,13 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
                 if (frames_idle >= 1000) {
                     phase         = 1;
                     cidx          = 0;
+                    chars_shown   = 0;
                     hold_frames   = 0;
                     credit_state  = 0;
                     fade_ctr      = 0;
+                    total_chars   = 0;
+                    for (const char *p = k_credits[cidx]; *p; p++)
+                        if (*p != '\n') total_chars++;
                     /* Ensure text palette is at normal menu colours */
                     for (int i = 0; i < 8; i++) s_pal[16 + i] = k_palette_menu[i];
                     palette_set_immediate(s_pal, 32);
@@ -662,12 +669,12 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
 
             } else {
                 /* ------------------------------------------------- */
-                /* Phase 3: Credits — mirrors disp_credits in menu.asm */
-                /*   display_text: all text shown at once (no typewriter) */
-                /*   .wait loop: 350 vsync frames, button → back to menu  */
-                /*   fade palette_menu → palette_menu_red (FADE_SPEED=3)  */
-                /*   fade palette_menu_red → black                         */
-                /*   advance to next credit (or trigger story after all 9) */
+                /* Phase 3: Credits                                   */
+                /*   Typewriter effect while chars_shown < total      */
+                /*   Hold 350 frames once all chars shown             */
+                /*   Fade palette_menu → red (FADE_SPEED=3)           */
+                /*   Fade red → black                                 */
+                /*   Advance to next credit (story after all 9)       */
                 /* ------------------------------------------------- */
                 timer_begin_frame();
                 input_poll();
@@ -677,45 +684,63 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
                 /* Draw background (no copyright during credits) */
                 draw_bg(&title, 300, NULL);
 
-                /* display_text: show full credit text immediately */
+                /* Typewriter rendering */
                 {
                     TextCtx ctx;
                     typewriter_init_ctx(&ctx, &font, g_framebuffer, 320, 68, 136);
                     ctx.color_offset = 16;
-                    typewriter_display(&ctx, k_credits[cidx]);
+                    if (credit_state == 0) {
+                        /* Show chars_shown chars — typewriter in progress or hold */
+                        int cnt = 0;
+                        for (const char *p = k_credits[cidx]; *p && cnt < chars_shown; p++) {
+                            if (*p == '\n') {
+                                ctx.cursor_x = ctx.start_x;
+                                ctx.cursor_y += ctx.font->letter_h + 1;
+                            } else {
+                                typewriter_putchar(&ctx, *p);
+                                cnt++;
+                            }
+                        }
+                    } else {
+                        /* Fading out — keep full text visible */
+                        typewriter_display(&ctx, k_credits[cidx]);
+                    }
                 }
 
-                /* Button during credits → back to Phase 2
-                 * (.button_pressed: break_main_loop_flag=1 in menu.asm) */
+                /* Button during credits → back to Phase 2 */
                 if ((g_player1_input & INPUT_FIRE1) ||
                      g_key_pressed == KEY_SPACE      ||
                      g_key_pressed == KEY_RETURN) {
-                    /* Restore normal text palette before returning to menu */
                     for (int i = 0; i < 8; i++) s_pal[16 + i] = k_palette_menu[i];
                     palette_set_immediate(s_pal, 32);
                     phase         = 0;
                     copyright_y   = 256;
                     frames_idle   = 0;
                     debounce      = 0;
+                    chars_shown   = 0;
+                    total_chars   = 0;
                     credit_state  = 0;
                     hold_frames   = 0;
                     fade_ctr      = 0;
                     continue;
                 }
 
-                /* ---- State machine (mirrors .wait / fade sequence) ---- */
-                /* FADE_SPEED equ 3 in menu.asm: one palette step per 3 frames */
+                /* ---- State machine ---- */
 #define CREDITS_FADE_SPEED 3
                 static const UWORD k_text_black[8] = {
                     0x000,0x000,0x000,0x000,0x000,0x000,0x000,0x000
                 };
 
                 if (credit_state == 0) {
-                    /* .wait: hold for 350 frames then start fade */
-                    hold_frames++;
-                    if (hold_frames >= 350) {
-                        credit_state = 1;
-                        fade_ctr     = 0;
+                    /* Advance typewriter first; hold 350 frames only after all chars shown */
+                    if (chars_shown < total_chars) {
+                        chars_shown++;
+                    } else {
+                        hold_frames++;
+                        if (hold_frames >= 350) {
+                            credit_state = 1;
+                            fade_ctr     = 0;
+                        }
                     }
                 } else {
                     /* Fade one step every CREDITS_FADE_SPEED frames */
@@ -738,30 +763,29 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
                         }
                         if (done) {
                             if (credit_state == 1) {
-                                /* palette_menu → red done: now fade red → black */
                                 credit_state = 2;
                                 fade_ctr     = 0;
                             } else {
-                                /* Both fades done → advance to next credit */
                                 cidx++;
                                 if (cidx >= 9) {
-                                    /* All 9 shown → trigger story (return_value=-1) */
                                     result = MENU_RESULT_AUTO_EXIT;
                                     goto cleanup;
                                 }
-                                /* Restore normal text palette for the next credit */
                                 for (int i = 0; i < 8; i++)
                                     s_pal[16 + i] = k_palette_menu[i];
+                                chars_shown  = 0;
                                 hold_frames  = 0;
                                 credit_state = 0;
                                 fade_ctr     = 0;
+                                total_chars  = 0;
+                                for (const char *p = k_credits[cidx]; *p; p++)
+                                    if (*p != '\n') total_chars++;
                             }
                         }
                     }
                 }
 #undef CREDITS_FADE_SPEED
 
-                /* Apply updated text palette */
                 palette_set_immediate(s_pal, 32);
                 video_present();
             }
