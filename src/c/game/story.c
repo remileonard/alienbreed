@@ -96,13 +96,22 @@ typedef struct { UBYTE *pixels; int w, h; } StoryImg;
 static int img_load(StoryImg *img, const char *path)
 {
     FILE *f = fopen(path, "rb");
-    if (!f) return -1;
+    if (!f) {
+        fprintf(stderr, "story: cannot open '%s'\n", path);
+        return -1;
+    }
     if (fread(&img->w, 4, 1, f) != 1 || fread(&img->h, 4, 1, f) != 1) {
+        fprintf(stderr, "story: header read error in '%s'\n", path);
         fclose(f); return -1;
     }
-    img->pixels = (UBYTE *)malloc((size_t)(img->w * img->h));
+    size_t sz = (size_t)(img->w * img->h);
+    img->pixels = (UBYTE *)malloc(sz);
     if (!img->pixels) { fclose(f); return -1; }
-    fread(img->pixels, 1, (size_t)(img->w * img->h), f);
+    if (fread(img->pixels, 1, sz, f) != sz) {
+        fprintf(stderr, "story: pixel read error in '%s'\n", path);
+        free(img->pixels); img->pixels = NULL;
+        fclose(f); return -1;
+    }
     fclose(f);
     return 0;
 }
@@ -136,7 +145,7 @@ void story_run(void)
         int num_lines = 0;
 
         while (k_story_lines[num_lines]) num_lines++;
-        int line_h  = font.pixels ? (font.letter_h + 2) : 13;
+        int line_h  = font.pixels ? (font.letter_h + 2) : 13; /* fallback line height */
         int total_h = num_lines * line_h;
 
         while (!g_quit_requested) {

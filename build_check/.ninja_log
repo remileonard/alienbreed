@@ -32,3 +32,6 @@
 2243	2608	1777051274351020686	CMakeFiles/alienbreed.dir/src/c/hal/timer.c.o	d9505d545328c6ad
 2332	2647	1777051274440024617	CMakeFiles/alienbreed.dir/src/c/hal/hal.c.o	546e4a45fb3f76a7
 2647	2997	1777051274755020940	alienbreed	be632ce5796a9aa3
+2	283	1777051467200139780	CMakeFiles/alienbreed.dir/src/c/game/story.c.o	4b7bebde2926eaff
+2	293	1777051467201706640	CMakeFiles/alienbreed.dir/src/c/game/menu.c.o	c72f5bc10538ae5e
+293	379	1777051467491139840	alienbreed	be632ce5796a9aa3

@@ -1,3 +1,4 @@
 .venv
 assets
 build
+build_check

@@ -79,13 +79,22 @@ typedef struct { UBYTE *pixels; int w, h; } Img;
 static int img_load(Img *img, const char *path)
 {
     FILE *f = fopen(path, "rb");
-    if (!f) return -1;
+    if (!f) {
+        fprintf(stderr, "menu: cannot open '%s'\n", path);
+        return -1;
+    }
     if (fread(&img->w, 4, 1, f) != 1 || fread(&img->h, 4, 1, f) != 1) {
+        fprintf(stderr, "menu: header read error in '%s'\n", path);
         fclose(f); return -1;
     }
-    img->pixels = (UBYTE *)malloc((size_t)(img->w * img->h));
+    size_t sz = (size_t)(img->w * img->h);
+    img->pixels = (UBYTE *)malloc(sz);
     if (!img->pixels) { fclose(f); return -1; }
-    fread(img->pixels, 1, (size_t)(img->w * img->h), f);
+    if (fread(img->pixels, 1, sz, f) != sz) {
+        fprintf(stderr, "menu: pixel read error in '%s'\n", path);
+        free(img->pixels); img->pixels = NULL;
+        fclose(f); return -1;
+    }
     fclose(f);
     return 0;
 }
@@ -282,152 +291,150 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
     palette_set_immediate(s_pal, 32);
 
     /* ============================================================ */
-    /* Phase 2 → Phase 3 outer loop                                 */
+    /* Phase 2 / Phase 3 state machine                              */
     /* (matches main_loop in menu.asm)                              */
+    /*                                                               */
+    /* phase=0: menu display                                         */
+    /* phase=1: credits display                                      */
+    /* Pressing a button during Phase 3 resets phase back to 0,      */
+    /* mirroring the break_main_loop_flag logic in menu.asm.         */
     /* ============================================================ */
-phase2_entry:
     {
-        /* -------------------------------------------------------- */
-        /* Phase 2: Menu                                            */
-        /* -------------------------------------------------------- */
-        int copyright_y = 256;   /* copyright slides in from below */
+        int phase = 0;   /* 0 = menu, 1 = credits */
+
+        /* Phase 2 state */
+        int copyright_y = 256;
         int frames_idle = 0;
         int debounce    = 0;
+        /* Build label strings once; rebuild when toggles change */
+        char label_np[32];
+        char label_sc[32];
+        int  last_np = -1, last_sc = -1;   /* detect changes */
+
+        /* Phase 3 state */
+        int   cidx        = 0;
+        int   chars_shown = 0;
+        int   total_chars = 0;
+        int   hold_frames = 0;
 
         while (!g_quit_requested) {
-            timer_begin_frame();
-            input_poll();
 
-            if (g_key_pressed == KEY_ESC) { result = MENU_RESULT_QUIT; goto cleanup; }
-
-            /* Slide copyright up from the bottom */
-            if (copyright_y > 240) copyright_y--;
-
-            draw_bg(&title, copyright_y, &copy);
-
-            /* Build menu label strings */
-            char label_np[32], label_sc[32];
-            if (*out_num_players == 1)
-                (void)snprintf(label_np, sizeof(label_np), " ONE PLAYER GAME");
-            else
-                (void)snprintf(label_np, sizeof(label_np), " TWO PLAYER GAME");
-            if (*out_share_credits)
-                (void)snprintf(label_sc, sizeof(label_sc), "SHARE CREDITS  ON ");
-            else
-                (void)snprintf(label_sc, sizeof(label_sc), "SHARE CREDITS  OFF");
-
-            const char *items[MENU_ITEMS];
-            items[MENU_ITEM_NUM_PLAYERS]   = label_np;
-            items[MENU_ITEM_SHARE_CREDITS] = label_sc;
-            items[MENU_ITEM_START]         = "    START GAME    ";
-
-            /*
-             * Screen layout (matches pos_in_menu*13 + 167 from menu.asm):
-             *   item 0 at y=179, item 1 at y=192, item 2 (START) at y=205
-             * Text is drawn using palette_menu (slots 16-23, offset=16).
-             */
-            for (int i = 0; i < MENU_ITEMS; i++) {
-                int item_y = 167 + i * 13;
-                /* Highlight selected item with a filled bar in slot 22 */
-                if (i == cur_item)
-                    video_fill_rect(68, item_y, 184, 12, 22);
-
-                TextCtx ctx;
-                typewriter_init_ctx(&ctx, &font, g_framebuffer, 320, 68, item_y);
-                ctx.color_offset = 16;
-                typewriter_display(&ctx, items[i]);
-            }
-
-            palette_tick();
-            video_present();
-
-            /* Input with debounce */
-            if (debounce > 0) {
-                debounce--;
-                goto count_idle;
-            }
-
-            if ((g_player1_input & INPUT_UP) && !(g_player1_old_input & INPUT_UP)) {
-                cur_item = (cur_item - 1 + MENU_ITEMS) % MENU_ITEMS;
-                audio_play_sample(SAMPLE_CARET_MOVE);
-                debounce = 8; frames_idle = 0;
-
-            } else if ((g_player1_input & INPUT_DOWN) && !(g_player1_old_input & INPUT_DOWN)) {
-                cur_item = (cur_item + 1) % MENU_ITEMS;
-                audio_play_sample(SAMPLE_CARET_MOVE);
-                debounce = 8; frames_idle = 0;
-
-            } else if ((g_player1_input & INPUT_FIRE1) && !(g_player1_old_input & INPUT_FIRE1)) {
-                frames_idle = 0;
-                switch (cur_item) {
-                    case MENU_ITEM_START:
-                        result = MENU_RESULT_START;
-                        fade_to_black_and_wait();
-                        goto cleanup;
-                    case MENU_ITEM_NUM_PLAYERS:
-                        *out_num_players = (*out_num_players == 1) ? 2 : 1;
-                        debounce = 8;
-                        break;
-                    case MENU_ITEM_SHARE_CREDITS:
-                        *out_share_credits = !(*out_share_credits);
-                        debounce = 8;
-                        break;
-                }
-            }
-
-count_idle:
-            /* Reset idle counter on any joystick input */
-            if (g_player1_input & (INPUT_UP | INPUT_DOWN | INPUT_FIRE1 | INPUT_LEFT | INPUT_RIGHT))
-                frames_idle = 0;
-            else
-                frames_idle++;
-
-            /* 1000-frame idle timeout → credits (matches menu.asm) */
-            if (frames_idle >= 1000)
-                break;
-        }
-        if (g_quit_requested) { result = MENU_RESULT_QUIT; goto cleanup; }
-
-        /* -------------------------------------------------------- */
-        /* Phase 3: Credits                                         */
-        /* (matches disp_credits in menu.asm)                      */
-        /* -------------------------------------------------------- */
-        for (int cidx = 0; cidx < 9; cidx++) {
-            const char *credit = k_credits[cidx];
-
-            /* Count printable characters for typewriter pacing */
-            int total_chars = 0;
-            for (const char *p = credit; *p; p++)
-                if (*p != '\n') total_chars++;
-
-            int chars_shown  = 0;
-            int hold_frames  = 0;
-            int btn_pressed  = 0;
-
-            /* Display credit with typewriter, then hold ~350 frames */
-            while (!g_quit_requested) {
+            /* ---------------------------------------------------- */
+            if (phase == 0) {
+                /* Phase 2: Menu                                     */
+                /* ------------------------------------------------- */
                 timer_begin_frame();
                 input_poll();
 
                 if (g_key_pressed == KEY_ESC) { result = MENU_RESULT_QUIT; goto cleanup; }
 
-                /* Button during credits → back to menu (break_main_loop_flag) */
-                if ((g_player1_input & INPUT_FIRE1) ||
-                     g_key_pressed == KEY_SPACE      ||
-                     g_key_pressed == KEY_RETURN) {
-                    btn_pressed = 1;
+                /* Slide copyright up from the bottom */
+                if (copyright_y > 240) copyright_y--;
+
+                draw_bg(&title, copyright_y, &copy);
+
+                /* Rebuild label strings only when values change */
+                if (*out_num_players != last_np) {
+                    last_np = *out_num_players;
+                    (void)snprintf(label_np, sizeof(label_np),
+                                   last_np == 1 ? " ONE PLAYER GAME" : " TWO PLAYER GAME");
                 }
+                if (*out_share_credits != last_sc) {
+                    last_sc = *out_share_credits;
+                    (void)snprintf(label_sc, sizeof(label_sc),
+                                   last_sc ? "SHARE CREDITS  ON " : "SHARE CREDITS  OFF");
+                }
+
+                const char *items[MENU_ITEMS];
+                items[MENU_ITEM_NUM_PLAYERS]   = label_np;
+                items[MENU_ITEM_SHARE_CREDITS] = label_sc;
+                items[MENU_ITEM_START]         = "    START GAME    ";
+
+                /*
+                 * Screen layout (matches pos_in_menu*13 + 167 from menu.asm):
+                 *   item 0 at y=167, item 1 at y=180, item 2 (START) at y=193
+                 * Text drawn using palette_menu (slots 16-23, offset=16).
+                 */
+                for (int i = 0; i < MENU_ITEMS; i++) {
+                    int item_y = 167 + i * 13;
+                    if (i == cur_item)
+                        video_fill_rect(68, item_y, 184, 12, 22);
+                    TextCtx ctx;
+                    typewriter_init_ctx(&ctx, &font, g_framebuffer, 320, 68, item_y);
+                    ctx.color_offset = 16;
+                    typewriter_display(&ctx, items[i]);
+                }
+
+                palette_tick();
+                video_present();
+
+                /* Input with debounce */
+                if (debounce > 0) {
+                    debounce--;
+                } else if ((g_player1_input & INPUT_UP) && !(g_player1_old_input & INPUT_UP)) {
+                    cur_item = (cur_item - 1 + MENU_ITEMS) % MENU_ITEMS;
+                    audio_play_sample(SAMPLE_CARET_MOVE);
+                    debounce = 8; frames_idle = 0;
+                } else if ((g_player1_input & INPUT_DOWN) && !(g_player1_old_input & INPUT_DOWN)) {
+                    cur_item = (cur_item + 1) % MENU_ITEMS;
+                    audio_play_sample(SAMPLE_CARET_MOVE);
+                    debounce = 8; frames_idle = 0;
+                } else if ((g_player1_input & INPUT_FIRE1) && !(g_player1_old_input & INPUT_FIRE1)) {
+                    frames_idle = 0;
+                    switch (cur_item) {
+                        case MENU_ITEM_START:
+                            result = MENU_RESULT_START;
+                            fade_to_black_and_wait();
+                            goto cleanup;
+                        case MENU_ITEM_NUM_PLAYERS:
+                            *out_num_players = (*out_num_players == 1) ? 2 : 1;
+                            last_np = -1;   /* force label rebuild */
+                            debounce = 8;
+                            break;
+                        case MENU_ITEM_SHARE_CREDITS:
+                            *out_share_credits = !(*out_share_credits);
+                            last_sc = -1;   /* force label rebuild */
+                            debounce = 8;
+                            break;
+                    }
+                }
+
+                /* Reset idle counter on any joystick input */
+                if (g_player1_input & (INPUT_UP | INPUT_DOWN | INPUT_FIRE1 | INPUT_LEFT | INPUT_RIGHT))
+                    frames_idle = 0;
+                else
+                    frames_idle++;
+
+                /* 1000-frame idle timeout → switch to credits */
+                if (frames_idle >= 1000) {
+                    phase         = 1;
+                    cidx          = 0;
+                    chars_shown   = 0;
+                    hold_frames   = 0;
+                    total_chars   = 0;
+                    for (const char *p = k_credits[cidx]; *p; p++)
+                        if (*p != '\n') total_chars++;
+                }
+
+            } else {
+                /* ------------------------------------------------- */
+                /* Phase 3: Credits                                   */
+                /* ------------------------------------------------- */
+                timer_begin_frame();
+                input_poll();
+
+                if (g_key_pressed == KEY_ESC) { result = MENU_RESULT_QUIT; goto cleanup; }
 
                 /* Draw background */
                 draw_bg(&title, 300, NULL);
 
-                /* Render only the first chars_shown characters */
+                /* Render credit text with typewriter effect */
                 {
                     TextCtx ctx;
                     typewriter_init_ctx(&ctx, &font, g_framebuffer, 320, 68, 136);
                     ctx.color_offset = 16;
                     int cnt = 0;
-                    for (const char *p = credit; *p && cnt < chars_shown; p++) {
+                    for (const char *p = k_credits[cidx]; *p && cnt < chars_shown; p++) {
                         if (*p == '\n') {
                             ctx.cursor_x = ctx.start_x;
                             ctx.cursor_y += ctx.font->letter_h + 1;
@@ -441,49 +448,62 @@ count_idle:
                 palette_tick();
                 video_present();
 
-                /* Typewriter: reveal one more character per frame */
+                /* Advance typewriter or count hold time */
                 if (chars_shown < total_chars)
                     chars_shown++;
                 else
                     hold_frames++;
 
-                if (btn_pressed || hold_frames >= 350) break;
-            }
-
-            if (g_quit_requested) { result = MENU_RESULT_QUIT; goto cleanup; }
-
-            /* Button during credits → back to Phase 2 */
-            if (btn_pressed) goto phase2_entry;
-
-            /* Fade menu-text palette slots to red then to black between credits */
-            {
-                /* Build a target palette: menu slots → red, rest unchanged */
-                UWORD pal_red[32];
-                for (int i = 0;  i < 8;  i++) pal_red[i]      = k_palette_logo[i];
-                for (int i = 0;  i < 8;  i++) pal_red[i +  8] = k_stars_palette[i];
-                for (int i = 0;  i < 8;  i++) pal_red[i + 16] = k_palette_menu_red[i];
-                for (int i = 0;  i < 8;  i++) pal_red[i + 24] = k_palette_copyright[i];
-
-                palette_prep_fade_to_rgb(pal_red, s_pal, 32);
-                for (int i = 0; i < 20 && !g_quit_requested; i++) {
-                    timer_begin_frame(); input_poll();
-                    palette_tick(); video_present();
-                    if (g_done_fade) break;
+                /* Button during credits → back to Phase 2 */
+                if ((g_player1_input & INPUT_FIRE1) ||
+                     g_key_pressed == KEY_SPACE      ||
+                     g_key_pressed == KEY_RETURN) {
+                    phase       = 0;
+                    copyright_y = 256;
+                    frames_idle = 0;
+                    debounce    = 0;
+                    continue;
                 }
-                /* Copy pal_red into s_pal for the next fade step */
-                for (int i = 0; i < 32; i++) s_pal[i] = pal_red[i];
 
-                fade_to_black_and_wait();
-                /* Restore combined palette for the next credit */
-                build_combined_palette();
-                palette_set_immediate(s_pal, 32);
+                /* Hold time elapsed → next credit */
+                if (hold_frames >= 350) {
+                    /* Fade menu text red then to black between credits */
+                    UWORD pal_red[32];
+                    for (int i = 0; i < 8; i++) pal_red[i]      = k_palette_logo[i];
+                    for (int i = 0; i < 8; i++) pal_red[i +  8] = k_stars_palette[i];
+                    for (int i = 0; i < 8; i++) pal_red[i + 16] = k_palette_menu_red[i];
+                    for (int i = 0; i < 8; i++) pal_red[i + 24] = k_palette_copyright[i];
+
+                    palette_prep_fade_to_rgb(pal_red, s_pal, 32);
+                    for (int i = 0; i < 20 && !g_quit_requested; i++) {
+                        timer_begin_frame(); input_poll();
+                        palette_tick(); video_present();
+                        if (g_done_fade) break;
+                    }
+                    for (int i = 0; i < 32; i++) s_pal[i] = pal_red[i];
+
+                    fade_to_black_and_wait();
+                    build_combined_palette();
+                    palette_set_immediate(s_pal, 32);
+
+                    cidx++;
+                    if (cidx >= 9) {
+                        /* All 9 credits exhausted → trigger story */
+                        result = MENU_RESULT_AUTO_EXIT;
+                        fade_to_black_and_wait();
+                        goto cleanup;
+                    }
+                    /* Prepare next credit */
+                    chars_shown = 0;
+                    hold_frames = 0;
+                    total_chars = 0;
+                    for (const char *p = k_credits[cidx]; *p; p++)
+                        if (*p != '\n') total_chars++;
+                }
             }
         }
 
-        /* All 9 credits exhausted: trigger story sequence */
-        result = MENU_RESULT_AUTO_EXIT;
-        fade_to_black_and_wait();
-        goto cleanup;
+        if (g_quit_requested) { result = MENU_RESULT_QUIT; goto cleanup; }
     }
 
 cleanup:
