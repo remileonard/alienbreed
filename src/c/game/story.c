@@ -127,7 +127,7 @@ void story_run(void)
 
     img_load(&planet, "assets/gfx/story_planet_320x256.raw");
     img_load(&title,  "assets/gfx/story_title_320x256.raw");
-    font_load(&font,  "assets/fonts/font_16x462.raw", 16, 11, 0);
+    font_load(&font,  "assets/fonts/font_16x462.raw", 9, 11, 0);  /* TEXT_LETTER_WIDTH=9 from story.asm font_struct */
 
     /* ============================================================ */
     /* Phase 1: Planet + scrolling story text                       */

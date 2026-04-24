@@ -84,7 +84,7 @@ void intex_run(int player_idx)
     }
 
     Font font = {0};
-    font_load(&font, "assets/fonts/font_16x504.raw", 16, 12, 0);
+    font_load(&font, "assets/fonts/font_16x504.raw", 8, 12, 0);  /* TEXT_LETTER_WIDTH=8 from intex.asm font_struct */
 
     /* From intex.asm: COLOR16-23 = green tones for the terminal glow */
     static const UWORD k_intex_pal[] = {
