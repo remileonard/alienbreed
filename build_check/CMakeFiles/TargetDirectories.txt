@@ -1,8 +1,0 @@
-/home/runner/work/alienbreed/alienbreed/build_check/CMakeFiles/convert_bitplanes.dir
-/home/runner/work/alienbreed/alienbreed/build_check/CMakeFiles/convert_tileset.dir
-/home/runner/work/alienbreed/alienbreed/build_check/CMakeFiles/convert_sprites.dir
-/home/runner/work/alienbreed/alienbreed/build_check/CMakeFiles/convert_audio.dir
-/home/runner/work/alienbreed/alienbreed/build_check/CMakeFiles/parse_levels.dir
-/home/runner/work/alienbreed/alienbreed/build_check/CMakeFiles/alienbreed.dir
-/home/runner/work/alienbreed/alienbreed/build_check/CMakeFiles/edit_cache.dir
-/home/runner/work/alienbreed/alienbreed/build_check/CMakeFiles/rebuild_cache.dir

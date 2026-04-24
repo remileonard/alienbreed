@@ -1,1 +1,0 @@
-/usr/bin/cc -Wl,--dependency-file=CMakeFiles/convert_sprites.dir/link.d CMakeFiles/convert_sprites.dir/tools/convert_sprites.c.o -o convert_sprites

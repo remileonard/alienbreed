@@ -1,1 +1,0 @@
-/usr/bin/cc -Wl,--dependency-file=CMakeFiles/convert_tileset.dir/link.d CMakeFiles/convert_tileset.dir/tools/convert_tileset.c.o -o convert_tileset

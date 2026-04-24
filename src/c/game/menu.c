@@ -291,7 +291,7 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
 
     img_load(&title, "assets/gfx/menu_title_320x180.raw");
     img_load(&copy,  "assets/gfx/menu_copyright_320x16.raw");
-    font_load(&font, "assets/fonts/font_16x672.raw", 16, 16, 0);
+    font_load(&font, "assets/fonts/font_16x672.raw", 8, 16, 0);  /* advance=9 matches hardcoded 'add.l #9,d0' in menu.asm display_text */
 
     stars_init();
 
