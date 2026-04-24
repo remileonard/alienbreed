@@ -250,57 +250,115 @@ void open_door(Player *p)
  * prevents (one-way: ±2) movement in the "wrong" direction.
  * Ref: tile_one_way_* / tile_climb_* @ main.asm#L5451-L5816.
  */
-void check_tile_interaction(Player *p)
+/*
+ * Try to collect a floor pickup at tile (col, row).
+ * Returns 1 if the tile was a consumable item and was collected; 0 otherwise.
+ * tilemap_replace_tile ensures each tile fires at most once even when several
+ * probes hit it in the same frame.
+ *
+ * Ref: tile_key / tile_ammo / tile_first_aid / tile_1up /
+ *      tile_add_100_credits / tile_add_1000_credits @ main.asm#L5323-L5412.
+ */
+static int pickup_tile_at(Player *p, int col, int row)
 {
-    int col = tilemap_pixel_to_col(p->pos_x);
-    int row = tilemap_pixel_to_row(p->pos_y);
     UBYTE attr = tilemap_attr(&g_cur_map, col, row);
-
-    /* -----------------------------------------------------------------
-     * One-time consumption: pickups and triggers.
-     * After handling, tile is patched to floor so it can't fire again.
-     * ----------------------------------------------------------------- */
     switch (attr) {
-
     case TILE_KEY:
+        /* ASM: addq.w #1,PLAYER_KEYS(a0) — no cap; HUD shows ">6" above six keys */
         p->keys++;
-        if (p->keys > 6) p->keys = 6;  /* display cap: shows ">6" */
         tilemap_replace_tile(&g_cur_map, col, row);
         audio_play_sample(SAMPLE_KEY);
-        break;
-
+        return 1;
     case TILE_FIRST_AID:
         p->health += 20;
         if (p->health > PLAYER_MAX_HEALTH) p->health = PLAYER_MAX_HEALTH;
         tilemap_replace_tile(&g_cur_map, col, row);
         audio_play_sample(SAMPLE_1STAID_CREDS);
-        break;
-
+        return 1;
     case TILE_AMMO:
+        /* ASM sets ammo to MAX first, then increments pack count */
+        p->ammunitions = PLAYER_MAX_AMMO;
         p->ammopacks++;
         if (p->ammopacks > PLAYER_MAX_AMMOPCKS) p->ammopacks = PLAYER_MAX_AMMOPCKS;
-        p->ammunitions = PLAYER_MAX_AMMO;
         tilemap_replace_tile(&g_cur_map, col, row);
         audio_play_sample(SAMPLE_AMMO);
-        break;
-
+        return 1;
     case TILE_1UP:
         p->lives++;
         tilemap_replace_tile(&g_cur_map, col, row);
         audio_play_sample(SAMPLE_1UP);
-        break;
-
+        return 1;
     case TILE_CREDITS_100:
         p->credits += 5000;
         tilemap_replace_tile(&g_cur_map, col, row);
         audio_play_sample(SAMPLE_1STAID_CREDS);
-        break;
-
+        return 1;
     case TILE_CREDITS_1000:
         p->credits += 50000;
         tilemap_replace_tile(&g_cur_map, col, row);
         audio_play_sample(SAMPLE_1STAID_CREDS);
-        break;
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+void check_tile_interaction(Player *p)
+{
+    int col = tilemap_pixel_to_col(p->pos_x);
+    int row = tilemap_pixel_to_row(p->pos_y);
+
+    /*
+     * The ASM dispatches the tile action table for 4 probe positions each frame:
+     *   probes 1-3: leading-edge probes in the current movement direction
+     *   probe  4:   fixed centre probe (~player centre)
+     * All 4 probes trigger pickup tiles.  Non-pickup effects (door, exit,
+     * acid …) are driven by the centre probe only.
+     * Ref: lbC007B4C @ main.asm#L4952; probe tables lbW007B16-lbW007B3A.
+     */
+
+    /* Probes 1-3: leading-edge probes — pickups only. */
+    {
+        int d    = p->direction;
+        int go_r = (d == PLAYER_FACE_RIGHT || d == PLAYER_FACE_UP_RIGHT || d == PLAYER_FACE_DOWN_RIGHT);
+        int go_l = (d == PLAYER_FACE_LEFT  || d == PLAYER_FACE_UP_LEFT  || d == PLAYER_FACE_DOWN_LEFT);
+        int go_d = (d == PLAYER_FACE_DOWN  || d == PLAYER_FACE_DOWN_LEFT || d == PLAYER_FACE_DOWN_RIGHT);
+        int go_u = (d == PLAYER_FACE_UP    || d == PLAYER_FACE_UP_LEFT  || d == PLAYER_FACE_UP_RIGHT);
+
+        if (go_r) {
+            int px = p->pos_x + PROBE_RIGHT_X;
+            for (int i = 0; i < 3; i++)
+                pickup_tile_at(p, tilemap_pixel_to_col(px),
+                                  tilemap_pixel_to_row(p->pos_y + k_probe_hy[i]));
+        }
+        if (go_l) {
+            int px = p->pos_x + PROBE_LEFT_X;
+            for (int i = 0; i < 3; i++)
+                pickup_tile_at(p, tilemap_pixel_to_col(px),
+                                  tilemap_pixel_to_row(p->pos_y + k_probe_hy[i]));
+        }
+        if (go_d) {
+            int py = p->pos_y + PROBE_DOWN_Y;
+            for (int i = 0; i < 3; i++)
+                pickup_tile_at(p, tilemap_pixel_to_col(p->pos_x + k_probe_vx[i]),
+                                  tilemap_pixel_to_row(py));
+        }
+        if (go_u) {
+            int py = p->pos_y + PROBE_UP_Y;
+            for (int i = 0; i < 3; i++)
+                pickup_tile_at(p, tilemap_pixel_to_col(p->pos_x + k_probe_vx[i]),
+                                  tilemap_pixel_to_row(py));
+        }
+    }
+
+    /* Probe 4 (centre): pickups + all non-pickup tile effects. */
+    pickup_tile_at(p, col, row);
+    UBYTE attr = tilemap_attr(&g_cur_map, col, row);
+
+    /* -----------------------------------------------------------------
+     * Non-pickup tile effects: applied at the centre probe position only.
+     * ----------------------------------------------------------------- */
+    switch (attr) {
 
     case TILE_DOOR:
         /* Door requires key; if we have one, open_door() scans and patches it.
@@ -574,19 +632,23 @@ int player_is_invincible(const Player *p)
 void player_collect_supply(Player *p, int supply_flags)
 {
     if (supply_flags & SUPPLY_AMMO_CHARGE) {
-        p->ammopacks++;
+        /* ASM: move.w #PLAYER_MAX_AMMO,PLAYER_AMMUNITIONS(a0)
+         *      addq.w #2,PLAYER_AMMOPACKS(a0)  — purchases give 2 packs */
+        p->ammunitions = PLAYER_MAX_AMMO;
+        p->ammopacks += 2;
         if (p->ammopacks > PLAYER_MAX_AMMOPCKS)
             p->ammopacks = PLAYER_MAX_AMMOPCKS;
-        p->ammunitions = PLAYER_MAX_AMMO;
         audio_play_sample(SAMPLE_AMMO);
     }
     if (supply_flags & SUPPLY_NRG_INJECT) {
-        p->health += 16;
+        /* ASM: add.w #20,d3 — energy injection heals 20 HP */
+        p->health += 20;
         if (p->health > PLAYER_MAX_HEALTH) p->health = PLAYER_MAX_HEALTH;
         audio_play_sample(SAMPLE_1STAID_CREDS);
     }
     if (supply_flags & SUPPLY_KEY_PACK) {
-        p->keys++;
+        /* ASM: addq.w #6,PLAYER_KEYS(a0) — key pack gives 6 keys */
+        p->keys += 6;
         audio_play_sample(SAMPLE_KEY);
     }
     if (supply_flags & SUPPLY_EXTRA_LIFE) {
