@@ -495,34 +495,36 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
     int cur_item           = MENU_ITEM_START;   /* same default as pos_in_menu=2 in asm */
 
     /* ============================================================ */
-    /* Phase 1: Title on black — fade in, then wait for button      */
-    /* (matches setup_copperlist fade-in + wait_button_press)       */
+    /* Phase 1: Title on black — fade in, then debounce            */
+    /* Matches setup_copperlist (fades in logo palette,            */
+    /* waits done_fade) then wait_button_press which waits until   */
+    /* NO button is held (release debounce, NOT a press request).  */
+    /* The menu appears immediately after — no button required.    */
     /* ============================================================ */
     {
         static UWORD s_zero[32] = {0};
         palette_prep_fade_in(s_pal, s_zero, 32);
 
-        int btn_seen = 0;
+        /* Wait for fade to complete */
+        while (!g_quit_requested && !g_done_fade) {
+            timer_begin_frame();
+            input_poll();
+            if (g_key_pressed == KEY_ESC) { result = MENU_RESULT_QUIT; goto cleanup; }
+            draw_bg(&title, 300, NULL);
+            palette_tick();
+            video_present();
+        }
+        if (g_quit_requested) { result = MENU_RESULT_QUIT; goto cleanup; }
+
+        /* wait_button_press: wait until no button is held (debounce) */
         while (!g_quit_requested) {
             timer_begin_frame();
             input_poll();
-
             if (g_key_pressed == KEY_ESC) { result = MENU_RESULT_QUIT; goto cleanup; }
-
-            /* A button press is only acted on AFTER the fade is complete
-             * (matches wait_button_press after setup_copperlist returns). */
-            if (g_done_fade &&
-                ((g_player1_input & INPUT_FIRE1) ||
-                  g_key_pressed == KEY_SPACE     ||
-                  g_key_pressed == KEY_RETURN)) {
-                btn_seen = 1;
-            }
-
-            draw_bg(&title, 300, NULL);   /* no copyright yet */
+            draw_bg(&title, 300, NULL);
             palette_tick();
             video_present();
-
-            if (btn_seen) break;
+            if (!(g_player1_input & INPUT_FIRE1)) break;
         }
         if (g_quit_requested) { result = MENU_RESULT_QUIT; goto cleanup; }
     }
@@ -551,12 +553,10 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
         char label_sc[32];
         int  last_np = -1, last_sc = -1;   /* detect changes */
 
-        /* Phase 3 state */
+        /* Phase 3 state (disp_credits in menu.asm):                    *
+         * credit_state: 0=wait 350 frames, 1=fade→red, 2=fade→black   */
         int   cidx          = 0;
-        int   chars_shown   = 0;
-        int   total_chars   = 0;
         int   hold_frames   = 0;
-        /* credit_state: 0=typewriter+hold, 1=fade text→red, 2=fade red→black */
         int   credit_state  = 0;
         int   fade_ctr      = 0;
 
@@ -652,13 +652,9 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
                 if (frames_idle >= 1000) {
                     phase         = 1;
                     cidx          = 0;
-                    chars_shown   = 0;
                     hold_frames   = 0;
                     credit_state  = 0;
                     fade_ctr      = 0;
-                    total_chars   = 0;
-                    for (const char *p = k_credits[cidx]; *p; p++)
-                        if (*p != '\n') total_chars++;
                     /* Ensure text palette is at normal menu colours */
                     for (int i = 0; i < 8; i++) s_pal[16 + i] = k_palette_menu[i];
                     palette_set_immediate(s_pal, 32);
@@ -666,51 +662,31 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
 
             } else {
                 /* ------------------------------------------------- */
-                /* Phase 3: Credits                                   */
-                /* Matches disp_credits in menu.asm exactly:          */
-                /*   display_text (all chars at once, no typewriter)  */
-                /*   wait 350 frames (hold)                           */
-                /*   fade text palette: palette_menu → palette_menu_red */
-                /*     (only 8 colours, slots 16-23 of s_pal)         */
-                /*   wait vsync until done                            */
-                /*   fade text palette: palette_menu_red → black      */
-                /*   wait vsync until done                            */
-                /*   clear text → next credit                        */
+                /* Phase 3: Credits — mirrors disp_credits in menu.asm */
+                /*   display_text: all text shown at once (no typewriter) */
+                /*   .wait loop: 350 vsync frames, button → back to menu  */
+                /*   fade palette_menu → palette_menu_red (FADE_SPEED=3)  */
+                /*   fade palette_menu_red → black                         */
+                /*   advance to next credit (or trigger story after all 9) */
                 /* ------------------------------------------------- */
                 timer_begin_frame();
                 input_poll();
 
                 if (g_key_pressed == KEY_ESC) { result = MENU_RESULT_QUIT; goto cleanup; }
 
-                /* Draw background */
+                /* Draw background (no copyright during credits) */
                 draw_bg(&title, 300, NULL);
 
-                /* Render credit text with typewriter effect (during hold phase)
-                 * or fully once fading has begun */
+                /* display_text: show full credit text immediately */
                 {
                     TextCtx ctx;
                     typewriter_init_ctx(&ctx, &font, g_framebuffer, 320, 68, 136);
                     ctx.color_offset = 16;
-                    if (credit_state == 0) {
-                        /* Still in typewriter / hold phase — show chars_shown chars */
-                        int cnt = 0;
-                        for (const char *p = k_credits[cidx]; *p && cnt < chars_shown; p++) {
-                            if (*p == '\n') {
-                                ctx.cursor_x = ctx.start_x;
-                                ctx.cursor_y += ctx.font->letter_h + 1;
-                            } else {
-                                typewriter_putchar(&ctx, *p);
-                                cnt++;
-                            }
-                        }
-                    } else {
-                        /* Fading out — keep full text visible */
-                        typewriter_display(&ctx, k_credits[cidx]);
-                    }
+                    typewriter_display(&ctx, k_credits[cidx]);
                 }
 
                 /* Button during credits → back to Phase 2
-                 * (matches .button_pressed: set break_main_loop_flag=1 in menu.asm) */
+                 * (.button_pressed: break_main_loop_flag=1 in menu.asm) */
                 if ((g_player1_input & INPUT_FIRE1) ||
                      g_key_pressed == KEY_SPACE      ||
                      g_key_pressed == KEY_RETURN) {
@@ -721,40 +697,28 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
                     copyright_y   = 256;
                     frames_idle   = 0;
                     debounce      = 0;
-                    chars_shown   = 0;
-                    total_chars   = 0;
                     credit_state  = 0;
                     hold_frames   = 0;
                     fade_ctr      = 0;
                     continue;
                 }
 
-                /* ---- State machine ---- */
-                /* CREDITS_FADE_SPEED=3 matches "FADE_SPEED equ 3" in menu.asm.
-                 * Channel advances by ±1 every 3 frames (identical to asm's
-                 * cur_frame_counter / frames_slowdown / cmp.w logic).            */
+                /* ---- State machine (mirrors .wait / fade sequence) ---- */
+                /* FADE_SPEED equ 3 in menu.asm: one palette step per 3 frames */
 #define CREDITS_FADE_SPEED 3
-                /* 8-entry black palette for the final fade step */
                 static const UWORD k_text_black[8] = {
                     0x000,0x000,0x000,0x000,0x000,0x000,0x000,0x000
                 };
 
                 if (credit_state == 0) {
-                    /* Advance typewriter first; hold only after all chars shown */
-                    if (chars_shown < total_chars) {
-                        chars_shown++;
-                    } else {
-                        hold_frames++;
-                        if (hold_frames >= 350) {
-                            credit_state = 1;   /* start fade: menu → red */
-                            fade_ctr     = 0;
-                        }
+                    /* .wait: hold for 350 frames then start fade */
+                    hold_frames++;
+                    if (hold_frames >= 350) {
+                        credit_state = 1;
+                        fade_ctr     = 0;
                     }
-
                 } else {
-                    /* Fade text colours (s_pal[16..23]) one step every
-                     * CREDITS_FADE_SPEED frames, ±1 per channel — identical
-                     * to prep_fade_speeds_fade_to_rgb / fade_palette_to_rgb. */
+                    /* Fade one step every CREDITS_FADE_SPEED frames */
                     const UWORD *target = (credit_state == 1)
                                          ? k_palette_menu_red
                                          : k_text_black;
@@ -765,43 +729,39 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
                         for (int i = 0; i < 8; i++) {
                             UWORD c  = s_pal[16 + i];
                             UWORD tc = target[i];
-                            int r = (c  >> 8) & 0xF, g = (c  >> 4) & 0xF, b = c  & 0xF;
+                            int r = (c  >> 8) & 0xF, gv = (c  >> 4) & 0xF, b = c  & 0xF;
                             int tr= (tc >> 8) & 0xF,tg = (tc >> 4) & 0xF,tb = tc & 0xF;
-                            if (r != tr) { r += (r < tr) ?  1 : -1; done = 0; }
-                            if (g != tg) { g += (g < tg) ?  1 : -1; done = 0; }
-                            if (b != tb) { b += (b < tb) ?  1 : -1; done = 0; }
-                            s_pal[16 + i] = (UWORD)(((r&0xF)<<8)|((g&0xF)<<4)|(b&0xF));
+                            if (r != tr) { r  += (r  < tr) ?  1 : -1; done = 0; }
+                            if (gv!= tg) { gv += (gv < tg) ?  1 : -1; done = 0; }
+                            if (b != tb) { b  += (b  < tb) ?  1 : -1; done = 0; }
+                            s_pal[16 + i] = (UWORD)(((r&0xF)<<8)|((gv&0xF)<<4)|(b&0xF));
                         }
                         if (done) {
                             if (credit_state == 1) {
-                                /* First fade complete: now fade red → black */
+                                /* palette_menu → red done: now fade red → black */
                                 credit_state = 2;
                                 fade_ctr     = 0;
                             } else {
-                                /* Both fades done: advance to next credit */
+                                /* Both fades done → advance to next credit */
                                 cidx++;
                                 if (cidx >= 9) {
-                                    /* All 9 credits exhausted → trigger story */
+                                    /* All 9 shown → trigger story (return_value=-1) */
                                     result = MENU_RESULT_AUTO_EXIT;
                                     goto cleanup;
                                 }
                                 /* Restore normal text palette for the next credit */
                                 for (int i = 0; i < 8; i++)
                                     s_pal[16 + i] = k_palette_menu[i];
-                                chars_shown  = 0;
                                 hold_frames  = 0;
                                 credit_state = 0;
                                 fade_ctr     = 0;
-                                total_chars  = 0;
-                                for (const char *p = k_credits[cidx]; *p; p++)
-                                    if (*p != '\n') total_chars++;
                             }
                         }
                     }
                 }
 #undef CREDITS_FADE_SPEED
 
-                /* Apply updated text palette (may differ from last frame during fade) */
+                /* Apply updated text palette */
                 palette_set_immediate(s_pal, 32);
                 video_present();
             }
