@@ -360,8 +360,10 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
 
         /* Phase 3 state */
         int   cidx          = 0;
+        int   chars_shown   = 0;
+        int   total_chars   = 0;
         int   hold_frames   = 0;
-        /* credit_state: 0=hold, 1=fade text→red, 2=fade red→black */
+        /* credit_state: 0=typewriter+hold, 1=fade text→red, 2=fade red→black */
         int   credit_state  = 0;
         int   fade_ctr      = 0;
 
@@ -457,9 +459,13 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
                 if (frames_idle >= 1000) {
                     phase         = 1;
                     cidx          = 0;
+                    chars_shown   = 0;
                     hold_frames   = 0;
                     credit_state  = 0;
                     fade_ctr      = 0;
+                    total_chars   = 0;
+                    for (const char *p = k_credits[cidx]; *p; p++)
+                        if (*p != '\n') total_chars++;
                     /* Ensure text palette is at normal menu colours */
                     for (int i = 0; i < 8; i++) s_pal[16 + i] = k_palette_menu[i];
                     palette_set_immediate(s_pal, 32);
@@ -486,13 +492,28 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
                 /* Draw background */
                 draw_bg(&title, 300, NULL);
 
-                /* Render ALL credit text at once — matches assembly display_text
-                 * which writes all glyphs in one synchronous call, not incrementally. */
+                /* Render credit text with typewriter effect (during hold phase)
+                 * or fully once fading has begun */
                 {
                     TextCtx ctx;
                     typewriter_init_ctx(&ctx, &font, g_framebuffer, 320, 68, 136);
                     ctx.color_offset = 16;
-                    typewriter_display(&ctx, k_credits[cidx]);
+                    if (credit_state == 0) {
+                        /* Still in typewriter / hold phase — show chars_shown chars */
+                        int cnt = 0;
+                        for (const char *p = k_credits[cidx]; *p && cnt < chars_shown; p++) {
+                            if (*p == '\n') {
+                                ctx.cursor_x = ctx.start_x;
+                                ctx.cursor_y += ctx.font->letter_h + 1;
+                            } else {
+                                typewriter_putchar(&ctx, *p);
+                                cnt++;
+                            }
+                        }
+                    } else {
+                        /* Fading out — keep full text visible */
+                        typewriter_display(&ctx, k_credits[cidx]);
+                    }
                 }
 
                 /* Button during credits → back to Phase 2
@@ -507,6 +528,8 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
                     copyright_y   = 256;
                     frames_idle   = 0;
                     debounce      = 0;
+                    chars_shown   = 0;
+                    total_chars   = 0;
                     credit_state  = 0;
                     hold_frames   = 0;
                     fade_ctr      = 0;
@@ -524,11 +547,15 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
                 };
 
                 if (credit_state == 0) {
-                    /* Hold for 350 frames before transitioning */
-                    hold_frames++;
-                    if (hold_frames >= 350) {
-                        credit_state = 1;   /* start fade: menu → red */
-                        fade_ctr     = 0;
+                    /* Advance typewriter first; hold only after all chars shown */
+                    if (chars_shown < total_chars) {
+                        chars_shown++;
+                    } else {
+                        hold_frames++;
+                        if (hold_frames >= 350) {
+                            credit_state = 1;   /* start fade: menu → red */
+                            fade_ctr     = 0;
+                        }
                     }
 
                 } else {
@@ -568,9 +595,13 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
                                 /* Restore normal text palette for the next credit */
                                 for (int i = 0; i < 8; i++)
                                     s_pal[16 + i] = k_palette_menu[i];
+                                chars_shown  = 0;
                                 hold_frames  = 0;
                                 credit_state = 0;
                                 fade_ctr     = 0;
+                                total_chars  = 0;
+                                for (const char *p = k_credits[cidx]; *p; p++)
+                                    if (*p != '\n') total_chars++;
                             }
                         }
                     }
