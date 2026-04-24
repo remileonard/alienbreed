@@ -58,8 +58,15 @@ typedef struct {
     WORD  shot_amount_counter;
     UBYTE owned_weapons[OWNED_WEAPONS_SIZE];
 
-    /* Animation */
-    int   cur_sprite;
+    /* Animation — mirrors ASM player data walk/fire/respawn state machine.
+     * Ref: lbC006E96..lbC006FD0 @ main.asm#L4042-L4114 */
+    int   cur_sprite;          /* body-orientation index 1-8 (ref: PLAYER_CUR_SPRITE / 320(a0)) */
+    int   anim_flipflop;       /* toggles each frame while moving to gate walk-cycle advance (ref: 288(a0)) */
+    int   anim_fire_counter;   /* countdown from 5 on alien hit; drives hit/fire anim (ref: 292(a0)) */
+    int   anim_state;          /* computed state 0-35 (0-8=idle/walk, 9-17=fire, 18-26=hit, 27-35=respawn) (ref: 296(a0)) */
+    int   anim_seq_frame;      /* current frame index within the walk / fire cycle */
+    int   anim_seq_timer;      /* ticks remaining before advancing to the next frame */
+    int   anim_seq_id;         /* opaque id of the current sequence; reset triggers frame restart */
 
     /* Input (references to global input state) */
     int   port;           /* 0 = player 1, 1 = player 2 */

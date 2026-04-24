@@ -40,6 +40,14 @@ void player_init_variables(void)
         p->ammunitions = PLAYER_MAX_AMMO; /* Ref: move.w #PLAYER_MAX_AMMO,PLAYER_AMMUNITIONS @ init_player_dats, main.asm#L1009 */
         p->shot_amount = 4;               /* Ref: move.w #4,PLAYER_SHOT_AMOUNT @ init_player_dats, main.asm#L998 */
         p->direction   = PLAYER_FACE_DOWN;
+        /* Animation: initial body pose = 3 (facing down), matching ASM move.w #3,PLAYER_CUR_SPRITE */
+        p->cur_sprite        = 3;
+        p->anim_flipflop     = 0;
+        p->anim_fire_counter = 0;
+        p->anim_state        = 0;
+        p->anim_seq_frame    = 0;
+        p->anim_seq_timer    = 2;
+        p->anim_seq_id       = -1;
         player_set_cur_weapon(p, WEAPON_MACHINEGUN);
         p->owned_weapons[WEAPON_MACHINEGUN - 1] = 1;
     }
@@ -598,6 +606,102 @@ void player_update(Player *p, UWORD input_mask)
     int idx = p->port;
     if (g_player_invincibility[idx] > 0)
         g_player_invincibility[idx]--;
+
+    /* ---------------------------------------------------------------
+     * Walk-cycle pose advance + animation state machine
+     * Mirrors lbC006EF4..lbC006F64 @ main.asm#L4066-L4101
+     * ---------------------------------------------------------------
+     * lbB00A24F: for each movement direction (1-8) and current body
+     * pose (cur_sprite 1-8), gives the next body pose.  The player
+     * sprite smoothly rotates toward the new facing direction.
+     * Index: direction*8 + cur_sprite.
+     * ---------------------------------------------------------------- */
+    static const int k_walk_table[73] = {
+        /* dir=0 (idle), spr=0-8: no change */
+        0,0,0,0,0,0,0,0,0,
+        /* dir=1 (up), spr=1-8: converges to pose 1 */
+        1,1,2,3,6,7,8,1,
+        /* dir=2 (up-right), spr=1-8: converges to pose 2 */
+        2,2,2,3,4,7,8,1,
+        /* dir=3 (right), spr=1-8: converges to pose 3 */
+        2,3,3,3,4,5,8,1,
+        /* dir=4 (down-right), spr=1-8: converges to pose 4 */
+        2,3,4,4,4,5,6,1,
+        /* dir=5 (down), spr=1-8: converges to pose 5 */
+        2,3,4,5,5,5,6,7,
+        /* dir=6 (down-left), spr=1-8: converges to pose 6 */
+        8,3,4,5,6,6,6,7,
+        /* dir=7 (left), spr=1-8: converges to pose 7 */
+        8,1,4,5,6,7,7,7,
+        /* dir=8 (up-left), spr=1-8: converges to pose 8 */
+        8,1,2,5,6,7,8,8
+    };
+
+    /* dir_code: 0 = not moving, 1-8 = current direction */
+    int dir_code = (dx || dy) ? p->direction : 0;
+
+    /* Advance body-pose every other frame while moving (flipflop gates it) */
+    if (dir_code > 0) {
+        p->anim_flipflop ^= 1;
+        if (p->anim_flipflop) {
+            int widx = dir_code * 8 + p->cur_sprite;
+            if (widx < 73 && k_walk_table[widx] != 0)
+                p->cur_sprite = k_walk_table[widx];
+        }
+    }
+
+    /* Decrement hit-anim counter (set to 5 by player_take_damage) */
+    if (p->anim_fire_counter > 0)
+        p->anim_fire_counter--;
+
+    /* Compute animation state (ref: lbC006F18..lbC006F64 @ main.asm#L4078-L4101)
+     *   0   : idle (dir_code=0, no fire)
+     *   1-8 : walking in direction dir_code
+     *   9-17: fire button held (same base as 0-8 + 9)
+     *  18-26: hit/fire countdown active (same base + 18)
+     *  27-35: invincible/respawn (same base + 27) */
+    int fire_held = (input_mask & INPUT_FIRE1) != 0;
+    int invincible = (g_player_invincibility[p->port] > 0);
+
+    if (invincible) {
+        p->anim_state = dir_code + 27;
+    } else if (p->anim_fire_counter > 0) {
+        p->anim_state = dir_code + 18;
+    } else if (fire_held) {
+        p->anim_state = dir_code + 9;
+    } else {
+        p->anim_state = dir_code;
+    }
+
+    /* Advance animation sequence frame/timer.
+     * Sequence identity: seq_group (0-3) × 16 + cur_sprite.
+     * When the identity changes the frame counter resets (mirrors lbC011346). */
+    int seq_group = p->anim_state / 9; /* 0=idle/walk, 1=fire, 2=hit, 3=respawn */
+    int new_seq_id = (seq_group << 4) | (p->cur_sprite & 0xF);
+    if (new_seq_id != p->anim_seq_id) {
+        p->anim_seq_id    = new_seq_id;
+        p->anim_seq_frame = 0;
+        /* Initial frame hold: walk=2, respawn=4, fire/hit=1 */
+        if      (seq_group == 3) p->anim_seq_timer = 4;
+        else if (seq_group == 0) p->anim_seq_timer = 2;
+        else                     p->anim_seq_timer = 1;
+    }
+
+    if (p->anim_seq_timer > 0) {
+        p->anim_seq_timer--;
+    } else {
+        /* cycle_len and next frame delay per state */
+        int cycle_len, next_delay;
+        if      (p->anim_state == 0)              { cycle_len = 1; next_delay = 2; } /* idle: static */
+        else if (p->anim_state <= 8)              { cycle_len = 4; next_delay = 2; } /* walk: 4-frame, 2 ticks */
+        else if (p->anim_state == 9)              { cycle_len = 2; next_delay = 1; } /* fire-idle: 2-frame, 1 tick */
+        else if (p->anim_state <= 17)             { cycle_len = 4; next_delay = 1; } /* fire-walk: 4-frame, 1 tick */
+        else if (p->anim_state <= 26)             { cycle_len = 4; next_delay = 1; } /* hit: 4-frame, 1 tick */
+        else                                      { cycle_len = 2; next_delay = 4; } /* respawn: 2-frame, 4 ticks */
+
+        p->anim_seq_frame = (p->anim_seq_frame + 1) % cycle_len;
+        p->anim_seq_timer = next_delay;
+    }
 }
 
 void player_take_damage(Player *p, int amount)
@@ -607,6 +711,7 @@ void player_take_damage(Player *p, int amount)
 
     p->health -= (WORD)amount;
     audio_play_sample(SAMPLE_HURT_PLAYER);
+    p->anim_fire_counter = 5; /* trigger 5-frame hit animation (ref: move.w #5,292(a1) @ main.asm#L7642) */
 
     if (p->health <= 0) {
         p->health = 0;
