@@ -54,17 +54,19 @@ int main(int argc, char **argv)
     }
     hud_init();
 
-    /* Matching the assembly attract-mode cycle (story.asm then menu.asm):
-     *   story.asm:  planète (set_planet_pic) → display_title_screen
-     *   menu.asm:   logo → étoile → menu → (idle) crédits → auto-exit
-     *   bra run_menu → back to story.asm
+    /* Attract-mode cycle matching the original CD32 game sequence:
      *
-     * On first boot story runs first so the user sees:
-     *   display_title_screen → logo → étoile → menu → crédits → planète (→ repeat)
+     *   1. Title screen (display_title_screen + display_beam_title) — story_title_run()
+     *      Reproduces the standalone title executable (no sources available).
+     *   2. Menu attract loop (logo → stars → menu → idle timeout → credits) — menu_run()
+     *   3. On credits exhausted (AUTO_EXIT):
+     *      Planet + scrolling story text → title screen again — story_run()
+     *      (matches story.asm: set_planet_pic … → display_title_screen)
+     *   4. Back to step 2 (menu)
      *
-     * On game-over the player returns directly to menu (no story), matching
+     * On game-over: return directly to step 2 (menu), not step 1, matching
      * loop_from_gameover in main.asm which jumps straight to run_menu. */
-    story_run();
+    story_title_run();
 
     while (!g_quit_requested) {
         int num_players   = 1;
@@ -73,10 +75,10 @@ int main(int argc, char **argv)
         if (mr == MENU_RESULT_QUIT || g_quit_requested) break;
 
         if (mr == MENU_RESULT_AUTO_EXIT) {
-            /* Credits exhausted without user interaction → run story sequence
-             * (mirrors bra run_menu after exe_story in main.asm) */
+            /* Credits exhausted without user interaction:
+             * story.asm sequence (planet → title), then back to menu */
             story_run();
-            continue;   /* back to menu */
+            continue;
         }
 
         /* MENU_RESULT_START: user actively selected "Start Game" */

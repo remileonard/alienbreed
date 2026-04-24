@@ -117,7 +117,109 @@ static int img_load(StoryImg *img, const char *path)
 }
 
 /* ------------------------------------------------------------------ */
-/* story_run                                                           */
+/* run_title_phase — display_title_screen + display_beam_title        */
+/*                                                                     */
+/* Shared by story_run() (called at the end after the planet) and     */
+/* story_title_run() (called standalone at startup, before the menu). */
+/* ------------------------------------------------------------------ */
+static void run_title_phase(StoryImg *title)
+{
+    static UWORD s_pal[32] = {0};
+
+    /* Fade from black → colors_down (matches display_title_screen
+     * window-open animation, ~52 frames) */
+    palette_prep_fade_in(k_colors_down, s_pal, 32);
+
+    int fade_frames = 0;
+    while (!g_quit_requested && !g_done_fade) {
+        timer_begin_frame();
+        input_poll();
+
+        video_clear();
+        if (title->pixels)
+            video_blit(title->pixels, title->w, 0, 0, 320, 256, -1);
+
+        palette_tick();
+        video_present();
+
+        if (++fade_frames >= 52) break;
+    }
+
+    if (g_quit_requested) return;
+
+    /* Fade colors_down → colors_up while the beam sweeps down
+     * (display_beam_title; hold ~300 frames) */
+    palette_prep_fade_to_rgb(k_colors_up, s_pal, 32);
+    {
+        int beam_y    = 0;
+        int beam_done = 0;
+        int hold      = 0;
+
+        while (!g_quit_requested) {
+            timer_begin_frame();
+            input_poll();
+
+            if ((g_player1_input & INPUT_FIRE1) ||
+                 g_key_pressed == KEY_SPACE      ||
+                 g_key_pressed == KEY_RETURN      ||
+                 g_key_pressed == KEY_ESC)
+                break;
+
+            video_clear();
+            if (title->pixels)
+                video_blit(title->pixels, title->w, 0, 0, 320, 256, -1);
+
+            /* Bright scan-line beam (simulates hardware sprite in asm) */
+            if (!beam_done) {
+                video_fill_rect(0, beam_y, 320, 2, 1);
+                beam_y++;
+                if (beam_y >= 256) beam_done = 1;
+            }
+
+            palette_tick();
+            video_present();
+
+            if (beam_done) {
+                if (++hold >= 300) break;
+            }
+        }
+    }
+
+    if (g_quit_requested) return;
+
+    /* Fade to black */
+    {
+        static UWORD s_black[32] = {0};
+        palette_prep_fade_to_rgb(s_black, s_pal, 32);
+        for (int i = 0; i < 40 && !g_done_fade && !g_quit_requested; i++) {
+            timer_begin_frame(); input_poll();
+            palette_tick(); video_present();
+        }
+        palette_set_immediate(s_black, 32);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* story_title_run — display_title_screen + display_beam_title only   */
+/*                                                                     */
+/* Reproduces the standalone title executable from the original CD32  */
+/* game (no sources available).  Called once at program startup before */
+/* the menu loop, so the user sees the title before the attract mode.  */
+/* ------------------------------------------------------------------ */
+void story_title_run(void)
+{
+    StoryImg title = {NULL, 0, 0};
+    img_load(&title, "assets/gfx/story_title_320x256.raw");
+    run_title_phase(&title);
+    free(title.pixels);
+}
+
+/* ------------------------------------------------------------------ */
+/* story_run — full story sequence: planet then title                 */
+/*                                                                     */
+/* Matches story.asm: set_planet_pic → scroll loop → fade_out_planet  */
+/* → display_title_screen → display_beam_title.                        */
+/* Called on auto-exit (credits exhausted) from the menu loop.         */
 /* ------------------------------------------------------------------ */
 void story_run(void)
 {
@@ -205,81 +307,7 @@ void story_run(void)
     /* Phase 2: Title on black (display_title_screen +             */
     /*          display_beam_title from story.asm)                  */
     /* ============================================================ */
-    {
-        static UWORD s_pal[32] = {0};
-
-        /* Fade from black → colors_down (matches fade_in_planet/
-         * display_title_screen window-open animation, ~52 frames) */
-        palette_prep_fade_in(k_colors_down, s_pal, 32);
-
-        int fade_frames = 0;
-        while (!g_quit_requested && !g_done_fade) {
-            timer_begin_frame();
-            input_poll();
-
-            video_clear();
-            if (title.pixels)
-                video_blit(title.pixels, title.w, 0, 0, 320, 256, -1);
-
-            palette_tick();
-            video_present();
-
-            if (++fade_frames >= 52) break;
-        }
-
-        if (g_quit_requested) goto done;
-
-        /* Fade colors_down → colors_up while the beam sweeps down
-         * (display_beam_title; hold ~300 frames) */
-        palette_prep_fade_to_rgb(k_colors_up, s_pal, 32);
-        {
-            int beam_y   = 0;
-            int beam_done = 0;
-            int hold     = 0;
-
-            while (!g_quit_requested) {
-                timer_begin_frame();
-                input_poll();
-
-                if ((g_player1_input & INPUT_FIRE1) ||
-                     g_key_pressed == KEY_SPACE      ||
-                     g_key_pressed == KEY_RETURN      ||
-                     g_key_pressed == KEY_ESC)
-                    break;
-
-                video_clear();
-                if (title.pixels)
-                    video_blit(title.pixels, title.w, 0, 0, 320, 256, -1);
-
-                /* Bright scan-line beam (simulates hardware sprite in asm) */
-                if (!beam_done) {
-                    video_fill_rect(0, beam_y, 320, 2, 1);
-                    beam_y++;
-                    if (beam_y >= 256) beam_done = 1;
-                }
-
-                palette_tick();
-                video_present();
-
-                if (beam_done) {
-                    if (++hold >= 300) break;
-                }
-            }
-        }
-
-        if (g_quit_requested) goto done;
-
-        /* Fade to black */
-        {
-            static UWORD s_black[32] = {0};
-            palette_prep_fade_to_rgb(s_black, s_pal, 32);
-            for (int i = 0; i < 40 && !g_done_fade && !g_quit_requested; i++) {
-                timer_begin_frame(); input_poll();
-                palette_tick(); video_present();
-            }
-            palette_set_immediate(s_black, 32);
-        }
-    }
+    run_title_phase(&title);
 
 done:
     free(planet.pixels);
