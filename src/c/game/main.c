@@ -54,16 +54,20 @@ int main(int argc, char **argv)
     }
     hud_init();
 
-    /* Outer loop: menu → game → menu */
+    /* Outer loop: menu → [story on auto-exit] → menu */
     while (!g_quit_requested) {
-        story_run();
-        if (g_quit_requested) break;
-
         int num_players   = 1;
         int share_credits = 0;
         MenuResult mr = menu_run(&num_players, &share_credits);
         if (mr == MENU_RESULT_QUIT || g_quit_requested) break;
 
+        if (mr == MENU_RESULT_AUTO_EXIT) {
+            /* Credits exhausted without user interaction → run story sequence */
+            story_run();
+            continue;   /* back to menu */
+        }
+
+        /* MENU_RESULT_START: user actively selected "Start Game" */
         g_number_players = num_players;
         game_run(num_players, share_credits);
     }
