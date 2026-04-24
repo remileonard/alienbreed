@@ -53,6 +53,7 @@ int main(int argc, char **argv)
         return 1;
     }
     hud_init();
+    audio_load_all();
 
     /* Attract-mode cycle matching the original CD32 game sequence:
      *
