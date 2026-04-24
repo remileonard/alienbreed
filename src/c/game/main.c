@@ -54,7 +54,18 @@ int main(int argc, char **argv)
     }
     hud_init();
 
-    /* Outer loop: menu → [story on auto-exit] → menu */
+    /* Matching the assembly attract-mode cycle (story.asm then menu.asm):
+     *   story.asm:  planète (set_planet_pic) → display_title_screen
+     *   menu.asm:   logo → étoile → menu → (idle) crédits → auto-exit
+     *   bra run_menu → back to story.asm
+     *
+     * On first boot story runs first so the user sees:
+     *   display_title_screen → logo → étoile → menu → crédits → planète (→ repeat)
+     *
+     * On game-over the player returns directly to menu (no story), matching
+     * loop_from_gameover in main.asm which jumps straight to run_menu. */
+    story_run();
+
     while (!g_quit_requested) {
         int num_players   = 1;
         int share_credits = 0;
@@ -62,7 +73,8 @@ int main(int argc, char **argv)
         if (mr == MENU_RESULT_QUIT || g_quit_requested) break;
 
         if (mr == MENU_RESULT_AUTO_EXIT) {
-            /* Credits exhausted without user interaction → run story sequence */
+            /* Credits exhausted without user interaction → run story sequence
+             * (mirrors bra run_menu after exe_story in main.asm) */
             story_run();
             continue;   /* back to menu */
         }
