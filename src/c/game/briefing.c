@@ -48,7 +48,7 @@ void briefing_run(int level_idx)
     }
 
     Font font = {0};
-    font_load(&font, "assets/fonts/font_16x504.raw", 16, 12, 0);
+    font_load(&font, "assets/fonts/font_16x504.raw", 8, 12, 0);  /* TEXT_LETTER_WIDTH=8 from briefingcore.asm font_struct */
 
     static const UWORD k_brief_pal[] = {
         0x000, 0xFFF, 0x888, 0x444, 0x0A0, 0x0F0, 0x080, 0x060,

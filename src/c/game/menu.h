@@ -1,7 +1,7 @@
 #ifndef AB_MENU_H
 #define AB_MENU_H
 
-typedef enum { MENU_RESULT_START, MENU_RESULT_QUIT } MenuResult;
+typedef enum { MENU_RESULT_START, MENU_RESULT_AUTO_EXIT, MENU_RESULT_QUIT } MenuResult;
 
 /* Run the main menu loop. Returns when the player starts or quits.
  * out_num_players : set to 1 or 2

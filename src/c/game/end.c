@@ -52,7 +52,7 @@ void end_run(void)
     }
 
     Font font = {0};
-    font_load(&font, "assets/fonts/font_16x504.raw", 16, 12, 0);
+    font_load(&font, "assets/fonts/font_16x504.raw", 8, 12, 0);  /* TEXT_LETTER_WIDTH=8, same font as briefing/intex */
 
     /* From end.asm copperlist COLOR00-31 */
     static const UWORD k_end_pal[] = {

@@ -13,7 +13,8 @@
  *
  * Font format (after asset conversion):
  *   - Fixed-width characters in a horizontal strip
- *   - Each character cell is letter_w × letter_h pixels
+ *   - Each glyph cell in the strip is glyph_w × letter_h pixels (always 16 wide)
+ *   - Cursor advances letter_w + 1 per character (TEXT_LETTER_WIDTH from asm font_struct)
  *   - Characters are in order of ascii_letters[] below
  */
 
@@ -26,7 +27,12 @@
 typedef struct {
     const UBYTE *pixels;      /* indexed pixel data for the full font strip */
     int          strip_w;     /* total width of strip in pixels */
-    int          letter_w;    /* width of one character cell */
+    int          glyph_w;     /* pixel width of each glyph cell in the bitmap strip
+                                 (always 16 for these fonts — matches the 2-byte/word
+                                 bitplane layout used by the Amiga blitter) */
+    int          letter_w;    /* cursor advance per character = TEXT_LETTER_WIDTH in
+                                 font_struct dc.l data (may be < glyph_w for tight spacing:
+                                 8 for briefing/intex, 9 for story, 16 for menu) */
     int          letter_h;    /* height of one character cell */
     int          transparent; /* palette index treated as background */
 } Font;
@@ -41,6 +47,7 @@ typedef struct {
     int         cursor_y;      /* current cursor Y */
     int         play_sound;    /* play typewriter sound every N chars */
     int         sound_counter;
+    int         color_offset; /* added to every drawn pixel index (for multi-palette layers) */
 } TextCtx;
 
 /* Initialise a text context. */
@@ -64,8 +71,10 @@ void typewriter_display(TextCtx *ctx, const char *text);
 int  typewriter_putchar(TextCtx *ctx, char c);
 
 /* Load a font from a converted asset file.
- * path  : path to a flat indexed image (e.g. "assets/fonts/font_16x504.raw")
- * lw,lh : letter cell dimensions in pixels
+ * path      : path to a flat indexed image (e.g. "assets/fonts/font_16x504.raw")
+ * lw        : cursor advance per character (= TEXT_LETTER_WIDTH in asm font_struct;
+ *             8 for briefing/intex, 9 for story, 16 for menu)
+ * lh        : glyph height in pixels
  * Returns 0 on success. */
 int  font_load(Font *font, const char *path, int lw, int lh, int transparent);
 
