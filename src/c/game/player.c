@@ -616,6 +616,9 @@ void player_update(Player *p, UWORD input_mask)
      * sprite smoothly rotates toward the new facing direction.
      * Index: direction*8 + cur_sprite.
      * ---------------------------------------------------------------- */
+    /* Walk-cycle direction→next-pose table (ref: lbB00A24F @ main.asm#L7079).
+     * Size = 9 (dir=0 idle) + 8 directions × 8 poses = 73 entries.
+     * Index: direction*8 + cur_sprite (dir 0-8, spr 1-8). */
     static const int k_walk_table[73] = {
         /* dir=0 (idle), spr=0-8: no change */
         0,0,0,0,0,0,0,0,0,
@@ -645,7 +648,7 @@ void player_update(Player *p, UWORD input_mask)
         p->anim_flipflop ^= 1;
         if (p->anim_flipflop) {
             int widx = dir_code * 8 + p->cur_sprite;
-            if (widx < 73 && k_walk_table[widx] != 0)
+            if (widx > 0 && widx < 73 && k_walk_table[widx] != 0)
                 p->cur_sprite = k_walk_table[widx];
         }
     }
