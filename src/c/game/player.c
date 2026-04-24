@@ -9,6 +9,7 @@
 #include "intex.h"
 #include "../hal/input.h"
 #include "../hal/audio.h"
+#include "../hal/video.h"
 #include "../engine/tilemap.h"
 #include <string.h>
 #include <stdio.h>
@@ -111,45 +112,7 @@ UWORD player_get_input(const Player *p)
     return (p->port == 0) ? g_player1_input : g_player2_input;
 }
 
-/*
- * Directional probe offsets translated from the ASM probe tables.
- *
- * The original game stores four probe tables in main.asm:
- *   lbW007B16 (LEFT):  x = -4,       y = {-6,  4, 16}
- *   lbW007B22 (RIGHT): x = +30,      y = {-6,  4, 16}
- *   lbW007B2E (UP):    x = {0,10,22}, y = -10
- *   lbW007B3A (DOWN):  x = {0,10,22}, y = +20
- *
- * The ASM origin is pos_x = col*16+4, pos_y = row*16+58 (with a +3-row
- * header in cur_map_datas that shifts all row lookups by 3).
- * The C port uses pos_x = col*16+8, pos_y = row*16+8 (tile centre).
- *
- * Conversion so that both reach the same map tile:
- *   c_x_offset = asm_x_offset - 4   (pos_x differs by +4)
- *   c_y_offset = asm_y_offset + 2   (pos_y differs by -50; +3-row header
- *                                    adds 48 px; net: +58-48-8 = +2)
- *
- * Resulting C-space offsets:
- *   LEFT  x : pos_x - 8              (ASM -4  → C -4-4  = -8)
- *   RIGHT x : pos_x + 26             (ASM +30 → C 30-4  = +26)
- *   UP    y : pos_y - 8              (ASM -10 → C -10+2 = -8)
- *   DOWN  y : pos_y + 22             (ASM +20 → C 20+2  = +22)
- *   H y pts : pos_y + {-4, +6, +18}  (ASM {-6,4,16} → C {-4,6,18})
- *   V x pts : pos_x + {-4, +6, +18}  (ASM {0,10,22} → C {-4,6,18})
- */
 
-/* X offset of the single probe column for left/right movement */
-#define PROBE_LEFT_X   (-8)
-#define PROBE_RIGHT_X  (26)
-
-/* Y offset of the single probe row for up/down movement */
-#define PROBE_UP_Y     (-8)
-#define PROBE_DOWN_Y   (22)
-
-/* Three y-sample offsets used when probing left or right */
-static const int k_probe_hy[3] = { -4, 6, 18 };
-/* Three x-sample offsets used when probing up or down */
-static const int k_probe_vx[3] = { -4, 6, 18 };
 
 /*
  * Returns 1 if the tile at world pixel (x,y) is blocking for this player.
@@ -315,7 +278,7 @@ void check_tile_interaction(Player *p)
 {
     int col = tilemap_pixel_to_col(p->pos_x);
     int row = tilemap_pixel_to_row(p->pos_y);
-
+    
     /*
      * The ASM dispatches the tile action table for 4 probe positions each frame:
      *   probes 1-3: leading-edge probes in the current movement direction

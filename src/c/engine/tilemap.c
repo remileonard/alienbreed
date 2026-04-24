@@ -231,6 +231,8 @@ void tilemap_render(const LevelMap *map, const Tileset *ts)
 
             video_blit(tile_px, MAP_TILE_W, dst_x, dst_y,
                        MAP_TILE_W, MAP_TILE_H, -1);  /* -1 = no transparency */
+            
+            /* debug: plot top-left pixel of each tile */
         }
     }
 }

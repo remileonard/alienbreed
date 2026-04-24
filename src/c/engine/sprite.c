@@ -252,7 +252,12 @@ void sprite_draw_player(int player_idx, int x, int y, int facing)
     if (sprite_idx < 0 || sprite_idx >= PLAYER_SPRITE_COUNT) return;
     SpriteImage *img = &s_player[sprite_idx];
     if (!img->pixels) return;
-    video_blit(img->pixels, img->w, x, y, img->w, img->h, 0);
+    video_blit(img->pixels, img->w, x-(img->w/2), y-(img->h/2), img->w, img->h, 0);
+    video_plot_pixel(x, y, 12);  /* debug: plot top-left pixel of alien sprite */
+    video_plot_pixel(x + PROBE_LEFT_X, y, 15);  /* debug: plot first probe point */
+    video_plot_pixel(x + PROBE_RIGHT_X, y, 15); /* debug: plot second probe point */
+    video_plot_pixel(x, y + PROBE_UP_Y, 15);    /* debug: plot third probe point */
+    video_plot_pixel(x, y + PROBE_DOWN_Y, 15);  /* debug: plot fourth probe point */
 }
 
 /* Draw alien walk sprite (direction=0-7 compass, anim_frame=0-2) at (x,y).
