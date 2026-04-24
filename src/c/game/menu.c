@@ -128,6 +128,33 @@ static void blit_offset(const Img *img, int dx, int dy, int offset)
     }
 }
 
+/*
+ * Blit a horizontal band of src_h rows starting at source row src_y.
+ * Matches the bitplane-pointer arithmetic in display_title (menu.asm):
+ * the title image stores two 89-row variants stacked vertically and the
+ * assembly alternates between them every VBlank to create the neon effect.
+ */
+static void blit_offset_half(const Img *img, int dx, int dy,
+                              int src_y, int src_h, int offset)
+{
+    if (!img || !img->pixels) return;
+    int w = img->w;
+    for (int row = 0; row < src_h; row++) {
+        int sy = src_y + row;
+        if (sy >= img->h) break;
+        int y = dy + row;
+        if (y < 0 || y >= 256) continue;
+        const UBYTE *src = img->pixels + sy * w;
+        for (int col = 0; col < w; col++) {
+            int x = dx + col;
+            if (x < 0 || x >= 320) continue;
+            UBYTE px = src[col];
+            if (px == 0) continue;
+            g_framebuffer[y * 320 + x] = (UBYTE)(px + offset);
+        }
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* Simple 2-D starfield (approximates the 3-D stars from menu.asm)    */
 /* ------------------------------------------------------------------ */
@@ -217,14 +244,34 @@ static const char *k_credits[9] = {
 /* ------------------------------------------------------------------ */
 /* Draw the full menu scene (background + title + stars + optional     */
 /* copyright + optional menu items).                                   */
+/*                                                                     */
+/* Neon title effect (matches display_title called from lev3irq):      */
+/*   The title image stores two 89-row variants of the logo stacked    */
+/*   vertically (rows 0–88 = first half, rows 89–177 = second half).   */
+/*   flag_swap_title starts at 0; not.w toggles between 0 and 0xFFFF  */
+/*   each VBlank:                                                       */
+/*     non-zero result → add 89*40 offset → second half (rows 89+)     */
+/*     zero result     → no offset        → first half  (rows 0+)      */
+/*   Alternating at ~50 Hz produces the neon flicker effect.           */
 /* ------------------------------------------------------------------ */
+#define TITLE_HALF_H 89  /* height of each neon half in the title bitmap */
+
+/* Mirrors flag_swap_title in menu.asm; 0 = use first half (rows 0–88) */
+static int s_flag_swap_title = 0;
+
 static void draw_bg(const Img *title, int copyright_y, const Img *copy)
 {
     video_clear();
     stars_update();
     stars_draw();
-    /* Title uses raw indices 0–7 (palette_logo, offset 0): transparent=0 */
-    blit_offset(title, 0, 0, 0);
+
+    /* Toggle between the two halves every frame, matching not.w flag_swap_title
+     * in lev3irq → display_title.  First call: flag 0→1 (non-zero) → second
+     * half; second call: flag 1→0 (zero) → first half; etc. */
+    s_flag_swap_title ^= 1;
+    int title_src_y = s_flag_swap_title ? TITLE_HALF_H : 0;
+    blit_offset_half(title, 0, 0, title_src_y, TITLE_HALF_H, 0);
+
     /* Copyright uses indices 0–7 offset by 24 (palette_copyright) */
     if (copy && copy->pixels && copyright_y < 256)
         blit_offset(copy, 0, copyright_y, 24);
