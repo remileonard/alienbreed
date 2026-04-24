@@ -1,9 +1,13 @@
 /*
  * Alien Breed SE 92 - C port
  * Audio HAL implementation
+ *
+ * Music is played via the native Soundmon V2 player (soundmon.c).
+ * SDL2_mixer Mix_HookMusic is used to feed the mixed audio stream.
  */
 
 #include "audio.h"
+#include "soundmon.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_mixer.h>
 #include <stdio.h>
@@ -11,8 +15,9 @@
 
 int g_music_enabled = 0;
 
-static Mix_Chunk *s_samples[AUDIO_MAX_SAMPLES];
-static Mix_Music *s_music  = NULL;
+static Mix_Chunk  *s_samples[AUDIO_MAX_SAMPLES];
+static SM_Module  *s_music  = NULL;
+static int         s_mix_rate = 22050;
 
 /* Maps sample ID to filename stem (assets/samples/ or assets/voices/) */
 typedef struct { int id; const char *file; } SampleEntry;
@@ -77,6 +82,13 @@ int audio_init(void)
         return -1;
     }
 
+    /* Retrieve the actual output rate negotiated by SDL_mixer */
+    {
+        int freq = 22050; int channels = 2; Uint16 fmt = 0;
+        Mix_QuerySpec(&freq, &fmt, &channels);
+        s_mix_rate = freq;
+    }
+
     Mix_AllocateChannels(16);
     memset(s_samples, 0, sizeof(s_samples));
     return 0;
@@ -89,6 +101,7 @@ void audio_quit(void)
     for (int i = 0; i < AUDIO_MAX_SAMPLES; i++) {
         if (s_samples[i]) { Mix_FreeChunk(s_samples[i]); s_samples[i] = NULL; }
     }
+    Mix_HookMusic(NULL, NULL);
     Mix_CloseAudio();
     SDL_QuitSubSystem(SDL_INIT_AUDIO);
 }
@@ -129,23 +142,31 @@ void audio_stop_samples(void)
 void audio_play_music(const char *name)
 {
     char path[256];
-    if (s_music) { Mix_HaltMusic(); Mix_FreeMusic(s_music); s_music = NULL; }
+
+    /* Stop and free any currently playing module */
+    if (s_music) {
+        Mix_HookMusic(NULL, NULL);
+        sm_free(s_music);
+        s_music = NULL;
+    }
 
     snprintf(path, sizeof(path), "assets/music/%s.soundmon", name);
-    s_music = Mix_LoadMUS(path);
+    s_music = sm_load(path);
     if (!s_music) {
-        fprintf(stderr, "Warning: could not load music %s: %s\n", path, Mix_GetError());
+        fprintf(stderr, "Warning: could not load music '%s'\n", path);
         return;
     }
-    Mix_PlayMusic(s_music, -1);
+
+    sm_play(s_music, s_mix_rate);
+    Mix_HookMusic(sm_mix_callback, s_music);
     g_music_enabled = 1;
 }
 
 void audio_stop_music(void)
 {
     if (s_music) {
-        Mix_HaltMusic();
-        Mix_FreeMusic(s_music);
+        Mix_HookMusic(NULL, NULL);
+        sm_free(s_music);
         s_music = NULL;
     }
     g_music_enabled = 0;
@@ -153,15 +174,17 @@ void audio_stop_music(void)
 
 void audio_set_music_volume(int vol)
 {
-    Mix_VolumeMusic(vol);
+    /* Not implemented for Soundmon (no global volume in the original player).
+     * SDL_mixer volume affects only Mix_Music tracks, not our hook stream. */
+    (void)vol;
 }
 
 void audio_pause_music(void)
 {
-    Mix_PauseMusic();
+    if (s_music) sm_pause(s_music);
 }
 
 void audio_resume_music(void)
 {
-    Mix_ResumeMusic();
+    if (s_music) sm_resume(s_music);
 }

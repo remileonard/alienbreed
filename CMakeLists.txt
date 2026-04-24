@@ -56,6 +56,7 @@ set(GAME_SOURCES
     src/c/hal/video.c
     src/c/hal/input.c
     src/c/hal/audio.c
+    src/c/hal/soundmon.c
     src/c/hal/timer.c
     src/c/hal/blitter.c
     src/c/hal/hal.c
@@ -88,6 +89,23 @@ if(EXISTS "${ASSETS_DIR}")
 else()
     message(STATUS "Note: No 'assets/' directory found. Run the conversion tools first.")
 endif()
+
+# Copy Soundmon music files from game/ to <binary>/assets/music/
+# The files are used directly (no conversion needed).
+add_custom_command(TARGET alienbreed POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:alienbreed>/assets/music"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${GAME_DIR}/title.soundmon"
+        "$<TARGET_FILE_DIR:alienbreed>/assets/music/title.soundmon"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${GAME_DIR}/level.soundmon"
+        "$<TARGET_FILE_DIR:alienbreed>/assets/music/level.soundmon"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${GAME_DIR}/boss.soundmon"
+        "$<TARGET_FILE_DIR:alienbreed>/assets/music/boss.soundmon"
+    COMMENT "Copying Soundmon music files..."
+)
 
 # Compiler warnings
 if(MSVC)
