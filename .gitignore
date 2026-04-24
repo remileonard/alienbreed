@@ -1,5 +1,3 @@
-build/
-.venv/
-assets/
-*.o
-*.d
+build
+venv
+assets
