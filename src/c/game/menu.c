@@ -156,43 +156,236 @@ static void blit_offset_half(const Img *img, int dx, int dy,
 }
 
 /* ------------------------------------------------------------------ */
-/* Simple 2-D starfield (approximates the 3-D stars from menu.asm)    */
+/* 3-D starfield — exact port of menu.asm stars subsystem             */
+/*                                                                     */
+/* stars_directions_table (menu.asm lines 837-870):                   */
+/*   dcb.w 32,V for each V in the sequence below, then dc.w -32       */
+/*   as a sentinel that triggers wrap-around to the table start.       */
+/*                                                                     */
+/* Three independent pointers advance through this table each frame,  */
+/* one per axis.  Their starting word offsets match the assembly:      */
+/*   direction_x: word   0 → initial delta = 0                        */
+/*   direction_y: word 256 → initial delta = 8  (at the peak)         */
+/*   direction_z: word 384 → initial delta = 4  (descending)          */
 /* ------------------------------------------------------------------ */
-#define NUM_STARS 81
+#define NUM_STARS 81   /* stars_nbr = 81-1 = 80 → 81 entries          */
 
-static struct { int x, y, col; } s_stars[NUM_STARS];
+#define REP32(v) v,v,v,v,v,v,v,v,v,v,v,v,v,v,v,v,v,v,v,v,v,v,v,v,v,v,v,v,v,v,v,v
+static const short k_stars_dir_table[1025] = {
+    /* wave up: 0→8 */
+    REP32(0), REP32(1), REP32(2), REP32(3), REP32(4),
+    REP32(5), REP32(6), REP32(7), REP32(8),
+    /* wave down: 7→0 */
+    REP32(7), REP32(6), REP32(5), REP32(4),
+    REP32(3), REP32(2), REP32(1), REP32(0),
+    /* wave negative: -1→-8 */
+    REP32(-1), REP32(-2), REP32(-3), REP32(-4),
+    REP32(-5), REP32(-6), REP32(-7), REP32(-8),
+    /* wave back: -7→-1 */
+    REP32(-7), REP32(-6), REP32(-5), REP32(-4),
+    REP32(-3), REP32(-2), REP32(-1),
+    -32   /* sentinel: wrap-around marker */
+};
+#undef REP32
 
+/* Current positions in the direction table for each axis.            *
+ * Reset to initial assembly offsets in stars_init().                 */
+static int s_dir_x = 0;    /* word 0   → initial value 0             */
+static int s_dir_y = 256;  /* word 256 → initial value 8             */
+static int s_dir_z = 384;  /* word 384 → initial value 4             */
+
+/* 3-D star coordinates matching the assembly layout:                 *
+ *   x ∈ (-768/2, 768/2) = (-384, 384)                               *
+ *   y ∈ (-512/2, 512/2) = (-256, 256)                               *
+ *   z ∈ (64, 1024]      (z=0 becomes 960 after first wrap)          *
+ * sx, sy, col: projected screen position and brightness this frame.  */
+static struct { short x, y, z; short sx, sy, col; } s_stars[NUM_STARS];
+
+/* ---- Assembly RNG (set_random_seed / get_rnd_number / rand) ------- */
+static unsigned int s_rng0, s_rng1;
+
+/* Mirrors get_rnd_number in menu.asm.  Returns seed[1] as result.    */
+static unsigned int asm_get_rnd(void)
+{
+    unsigned int d0 = s_rng0;
+    unsigned int d1 = s_rng1;
+
+    /* and.b #$E, d0  /  or.b #$20, d0 */
+    d0 = (d0 & ~(unsigned int)0xFF) | ((d0 & 0x0Eu) | 0x20u);
+
+    unsigned int d2 = d0, d3 = d1;
+
+    /* add.l d2,d2  /  addx.l d3,d3 */
+    unsigned long long t = (unsigned long long)d2 + d2;
+    int carry = (int)(t >> 32) & 1;
+    d2 = (unsigned int)t;
+    t = (unsigned long long)d3 + d3 + (unsigned int)carry;
+    d3 = (unsigned int)t;
+
+    /* add.l d2,d0  /  addx.l d3,d1 */
+    t = (unsigned long long)d0 + d2;
+    carry = (int)(t >> 32) & 1;
+    d0 = (unsigned int)t;
+    t = (unsigned long long)d1 + d3 + (unsigned int)carry;
+    d1 = (unsigned int)t;
+
+    /* swap d3  /  swap d2  /  move.w d2,d3  /  clr.w d2 */
+    d3 = (d3 >> 16) | (d3 << 16);
+    d2 = (d2 >> 16) | (d2 << 16);
+    d3 = (d3 & 0xFFFF0000u) | (d2 & 0x0000FFFFu);
+    d2 =  d2 & 0xFFFF0000u;
+
+    /* add.l d2,d0  /  addx.l d3,d1 */
+    t = (unsigned long long)d0 + d2;
+    carry = (int)(t >> 32) & 1;
+    d0 = (unsigned int)t;
+    t = (unsigned long long)d1 + d3 + (unsigned int)carry;
+    d1 = (unsigned int)t;
+
+    s_rng0 = d0;
+    s_rng1 = d1;
+    return d1;
+}
+
+/* Mirrors set_random_seed (which falls through to get_rnd_number).   */
+static void asm_seed(unsigned int d0, unsigned int d1)
+{
+    s_rng0 = d0;
+    s_rng1 = d0 + d1;   /* add.l d0,d1 before storing */
+    asm_get_rnd();       /* fall-through to get_rnd_number */
+}
+
+/* Mirrors rand(d0): returns high16(get_rnd()) % (range+1).           */
+static unsigned short asm_rand(unsigned short range)
+{
+    if (range == 0) return 0;
+    unsigned int rnd = asm_get_rnd();
+    unsigned short h = (unsigned short)(rnd >> 16);
+    return h % (unsigned short)(range + 1u);
+}
+
+/* ---- stars_init: mirrors create_stars_coords ---------------------- */
 static void stars_init(void)
 {
-    unsigned rng = 0x4D373729u;
+    /* Reset direction indices to assembly starting offsets */
+    s_dir_x = 0;
+    s_dir_y = 256;
+    s_dir_z = 384;
+
+    /* Seed the RNG exactly as the assembly does before the loop:       *
+     *   move.l #$4D373729,d0                                           *
+     *   move.l d0,d1                                                   *
+     *   rol.w  #3,d1        ; rotate lower 16 bits left by 3          *
+     *   swap   d1           ; swap upper/lower words                   *
+     *   eor.l  #$5A5AA5A5,d1                                           *
+     *   bsr    set_random_seed                                         */
+    unsigned int d0 = 0x4D373729u;
+    unsigned int d1 = d0;
+    /* rol.w #3 on lower 16 bits of d1 */
+    unsigned short lw = (unsigned short)(d1 & 0xFFFFu);
+    lw = (unsigned short)((lw << 3) | (lw >> 13));
+    d1 = (d1 & 0xFFFF0000u) | lw;
+    /* swap d1 */
+    d1 = (d1 >> 16) | (d1 << 16);
+    /* eor.l #$5A5AA5A5,d1 */
+    d1 ^= 0x5A5AA5A5u;
+    asm_seed(d0, d1);
+
+    /* create_x: stars_3d_coords + 0, stride 6 bytes (3 words) */
     for (int i = 0; i < NUM_STARS; i++) {
-        rng = rng * 1664525u + 1013904223u;
-        s_stars[i].x = (int)(rng % 320);
-        rng = rng * 1664525u + 1013904223u;
-        s_stars[i].y = (int)(rng % 240);
-        rng = rng * 1664525u + 1013904223u;
-        s_stars[i].col = (int)(rng % 6) + 1;   /* 1–6 brightness */
+        s_stars[i].x = (short)((int)asm_rand(768) - 384);
+    }
+    /* create_y */
+    for (int i = 0; i < NUM_STARS; i++) {
+        s_stars[i].y = (short)((int)asm_rand(512) - 256);
+    }
+    /* create_z */
+    for (int i = 0; i < NUM_STARS; i++) {
+        s_stars[i].z = (short)asm_rand(1024);
+    }
+
+    /* Pre-fill sx/sy/col with 0 (no-draw until first update) */
+    for (int i = 0; i < NUM_STARS; i++) {
+        s_stars[i].sx = -1;
+        s_stars[i].sy = -1;
+        s_stars[i].col = 0;
     }
 }
 
+/* ---- stars_dir_next: advances one axis pointer, returns delta ----- *
+ * Mirrors the move_stars logic: on hitting the sentinel (-32),        *
+ * reset pointer to table[0] then advance to table[1].                 */
+static short stars_dir_next(int *idx)
+{
+    short val = k_stars_dir_table[*idx];
+    if (val == -32) {
+        *idx = 0;
+        val = k_stars_dir_table[0];
+    }
+    (*idx)++;
+    return val;
+}
+
+/* ---- stars_update: mirrors move_stars + do_stars ------------------ */
 static void stars_update(void)
 {
+    short dx = stars_dir_next(&s_dir_x);
+    short dy = stars_dir_next(&s_dir_y);
+    short dz = stars_dir_next(&s_dir_z);
+
+    /* do_stars: add delta, wrap, project to screen */
     for (int i = 0; i < NUM_STARS; i++) {
-        int speed = s_stars[i].col / 2 + 1;
-        s_stars[i].x = (s_stars[i].x + speed) % 320;
+        int x = (int)s_stars[i].x + dx;
+        int y = (int)s_stars[i].y + dy;
+        int z = (int)s_stars[i].z + dz;
+
+        /* Wrap x: range (-384, 384] modulo 768 */
+        if (x >= 384)  x -= 768;
+        if (x <= -384) x += 768;
+
+        /* Wrap y: range (-256, 256] modulo 512 */
+        if (y >= 256)  y -= 512;
+        if (y <= -256) y += 512;
+
+        /* Wrap z: range (64, 1024] modulo 960 */
+        if (z > 1024)  z -= 960;
+        if (z <= 64)   z += 960;
+
+        s_stars[i].x = (short)x;
+        s_stars[i].y = (short)y;
+        s_stars[i].z = (short)z;
+
+        /* Perspective projection (stars_aspect_x=160, _y=127,          *
+         * stars_centers=144,128):                                       *
+         *   sx = x * 160 / z + 144                                     *
+         *   sy = y * 127 / z + 128                                     */
+        int sx = (x * 160) / z + 144;
+        int sy = (y * 127) / z + 128;
+
+        /* plot_star clips: 0 <= sx < 320 (384 in asm, clipped to 320), *
+         * 0 <= sy < 256.  Brightness = (~(z>>7)) & 7, clamped 0–6.    */
+        if (sx >= 0 && sx < 320 && sy >= 0 && sy < 256) {
+            int bri = (~(z >> 7)) & 7;
+            if (bri > 6) bri = 0;  /* palette[7] = black, map to 0 */
+            s_stars[i].sx  = (short)sx;
+            s_stars[i].sy  = (short)sy;
+            s_stars[i].col = (short)bri;
+        } else {
+            s_stars[i].sx = -1;   /* off-screen: don't draw */
+        }
     }
 }
 
 /*
- * Draw stars using palette slots 8–14 (offset 8, value 1–6 → slots 9–14).
+ * Draw stars using palette slots 8–14 (offset 8, col 0–6 → slots 8–14).
  * Stars are rendered before the title so the title logo covers them.
  */
 static void stars_draw(void)
 {
     for (int i = 0; i < NUM_STARS; i++) {
-        int x = s_stars[i].x;
-        int y = s_stars[i].y;
-        if (x >= 0 && x < 320 && y >= 0 && y < 256)
+        int x = s_stars[i].sx;
+        int y = s_stars[i].sy;
+        if (x >= 0)
             g_framebuffer[y * 320 + x] = (UBYTE)(8 + s_stars[i].col);
     }
 }
