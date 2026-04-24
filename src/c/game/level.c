@@ -106,8 +106,15 @@ void level_tick_timer(void)
         audio_play_sample(SAMPLE_CARET_MOVE);
 
     /* Switch palette to destruction colors when sequence starts */
-    if (g_destruction_timer == (LONG)DESTRUCTION_TIMER_SECONDS * TIMER_FRAMES_PER_SECOND - 1)
+    if (g_destruction_timer == (LONG)DESTRUCTION_TIMER_SECONDS * TIMER_FRAMES_PER_SECOND - 1) {
         palette_set_immediate(g_cur_map.palette_b, 32);
+        /* Replicate copper override: at beam line 51 the copper forces COLOR02
+         * and COLOR03 to black for the main 5-bitplane play area regardless of
+         * the loaded palette (Ref: lbW09A20C dc.w COLOR02,0,COLOR03,0
+         * @ main.asm#L18513). */
+        video_set_palette_entry(2, 0x000);
+        video_set_palette_entry(3, 0x000);
+    }
 
     /* Timer expired: game over */
     if (g_destruction_timer == 0) {
@@ -154,8 +161,15 @@ void level_trigger_end(void)
 void level_finalize(void)
 {
     /* Apply level palette */
-    if (g_cur_map.valid)
+    if (g_cur_map.valid) {
         palette_set_immediate(g_cur_map.palette_a, 32);
+        /* Replicate copper override: at beam line 51 the copper forces COLOR02
+         * and COLOR03 to black for the main 5-bitplane play area regardless of
+         * the loaded palette (Ref: lbW09A20C dc.w COLOR02,0,COLOR03,0
+         * @ main.asm#L18513). */
+        video_set_palette_entry(2, 0x000);
+        video_set_palette_entry(3, 0x000);
+    }
 
     /* Set map overview flag if player has supply */
     /* (handled when player collects SUPPLY_MAP_OVERVIEW) */

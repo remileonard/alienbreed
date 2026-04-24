@@ -230,52 +230,122 @@ void alien_spawn_tick(void)
     }
 }
 
-/* Simple Manhattan-distance AI: move alien one step toward nearest player.
- * Updates alien direction (0=N,1=NE,2=E,3=SE,4=S,5=SW,6=W,7=NW).
- * Ref: alien movement @ main.asm#L6458; direction table lbB00A228 @ main.asm#L7077. */
+/* Return 1 if the world pixel (wx, wy) falls inside a solid tile. */
+static int alien_solid_at(int wx, int wy)
+{
+    return tilemap_is_solid(&g_cur_map,
+                            tilemap_pixel_to_col(wx),
+                            tilemap_pixel_to_row(wy));
+}
+
+/*
+ * Move one alien toward the nearest living player.
+ *
+ * Re-implementation of the ASM movement at lbC009CE2 / lbC009E1A
+ * (main.asm#L6810-L6989):
+ *
+ *  1. Find the nearest player by Manhattan distance.
+ *  2. X axis: if |dx| > 4, move by a->speed; check two leading corners
+ *     of the bounding box for solid tiles before committing.
+ *  3. Y axis: same treatment independently of X.
+ *  4. Build a direction-bit word (bit0=down, bit1=up, bit2=right, bit3=left)
+ *     from the actual movement and map it to the 0-based compass direction
+ *     using the lbB00A228 look-up table (main.asm#L7077).
+ *
+ * Bounding box half-extents (8 px) are derived from the alien type struct
+ * collision offsets (lbW00A29A … lbW00A31E, main.asm#L7085-L7096).
+ */
 static void alien_move(Alien *a)
 {
-    /* Find nearest living player */
-    int best_dist = 0x7FFFFFFF;
-    int tx = a->pos_x, ty = a->pos_y;
+    /* ------------------------------------------------------------------ */
+    /* 1. Find nearest living player by Manhattan distance                 */
+    /* ------------------------------------------------------------------ */
+    int tx = -1, ty = -1;
+    int best = 0x7FFFFFFF;
     for (int i = 0; i < MAX_PLAYERS; i++) {
         if (!g_players[i].alive) continue;
-        int dx = g_players[i].pos_x - a->pos_x;
-        int dy = g_players[i].pos_y - a->pos_y;
-        int d  = (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy);
-        if (d < best_dist) { best_dist = d; tx = g_players[i].pos_x; ty = g_players[i].pos_y; }
+        int ddx = g_players[i].pos_x - (int)a->pos_x;
+        int ddy = g_players[i].pos_y - (int)a->pos_y;
+        int d   = (ddx < 0 ? -ddx : ddx) + (ddy < 0 ? -ddy : ddy);
+        if (d < best) { best = d; tx = g_players[i].pos_x; ty = g_players[i].pos_y; }
+    }
+    if (tx < 0) return;  /* no living player */
+
+    int spd     = (int)a->speed;
+    int ax      = (int)a->pos_x;
+    int ay      = (int)a->pos_y;
+    int dir_bits = 0;   /* bit0=down  bit1=up  bit2=right  bit3=left */
+
+    /* ------------------------------------------------------------------ */
+    /* 2. X movement — independent of Y                                    */
+    /*    Threshold of 4 px mirrors ASM `cmp.w #4,d4` (main.asm#L6926).   */
+    /* ------------------------------------------------------------------ */
+    int dx = tx - ax;
+    if (dx > 4) {
+        /* Move right: check top-right and bottom-right corners */
+        int nx = ax + spd;
+        if (!alien_solid_at(nx + 8, ay - 8) &&
+            !alien_solid_at(nx + 8, ay + 8)) {
+            ax = nx;
+            dir_bits |= 4;  /* right */
+        }
+    } else if (dx < -4) {
+        /* Move left: check top-left and bottom-left corners */
+        int nx = ax - spd;
+        if (!alien_solid_at(nx - 8, ay - 8) &&
+            !alien_solid_at(nx - 8, ay + 8)) {
+            ax = nx;
+            dir_bits |= 8;  /* left */
+        }
     }
 
-    int dx = (tx > a->pos_x) ? a->speed : (tx < a->pos_x) ? -a->speed : 0;
-    int dy = (ty > a->pos_y) ? a->speed : (ty < a->pos_y) ? -a->speed : 0;
-
-    /* Wall check */
-    int nx = a->pos_x + dx;
-    int ny = a->pos_y + dy;
-    int col = tilemap_pixel_to_col(nx);
-    int row = tilemap_pixel_to_row(ny);
-    if (!tilemap_is_solid(&g_cur_map, col, row)) {
-        a->pos_x = (WORD)nx;
-        a->pos_y = (WORD)ny;
+    /* ------------------------------------------------------------------ */
+    /* 3. Y movement — independent of X                                    */
+    /* ------------------------------------------------------------------ */
+    int dy = ty - ay;
+    if (dy > 4) {
+        /* Move down: check bottom-left and bottom-right corners */
+        int ny = ay + spd;
+        if (!alien_solid_at(ax - 8, ny + 8) &&
+            !alien_solid_at(ax + 8, ny + 8)) {
+            ay = ny;
+            dir_bits |= 1;  /* down */
+        }
+    } else if (dy < -4) {
+        /* Move up: check top-left and top-right corners */
+        int ny = ay - spd;
+        if (!alien_solid_at(ax - 8, ny - 8) &&
+            !alien_solid_at(ax + 8, ny - 8)) {
+            ay = ny;
+            dir_bits |= 2;  /* up */
+        }
     }
 
-    /* Update compass direction from movement vector (Ref: lbB00A228 @ main.asm#L7077).
-     * Directions: 0=N 1=NE 2=E 3=SE 4=S 5=SW 6=W 7=NW */
-    if (dx == 0 && dy == 0) {
-        /* No movement — keep current direction */
-    } else if (dy < 0) {
-        if      (dx > 0) a->direction = 1;  /* NE */
-        else if (dx < 0) a->direction = 7;  /* NW */
-        else             a->direction = 0;  /* N  */
-    } else if (dy > 0) {
-        if      (dx > 0) a->direction = 3;  /* SE */
-        else if (dx < 0) a->direction = 5;  /* SW */
-        else             a->direction = 4;  /* S  */
-    } else {
-        /* dy == 0, horizontal only */
-        if (dx > 0) a->direction = 2;  /* E  */
-        else        a->direction = 6;  /* W  */
-    }
+    a->pos_x = (WORD)ax;
+    a->pos_y = (WORD)ay;
+
+    /* ------------------------------------------------------------------ */
+    /* 4. Direction lookup via lbB00A228 table (main.asm#L7077)            */
+    /*                                                                      */
+    /*    ASM table (word, 1-based direction values):                       */
+    /*      [0]=0 [1]=5 [2]=1 [3]=0 [4]=3 [5]=4 [6]=2 [7]=0               */
+    /*      [8]=7 [9]=6 [10]=8                                             */
+    /*    Subtract 1 to get 0-based atlas column:                           */
+    /*      dir_bits=1(S)=4  dir_bits=2(N)=0  dir_bits=4(E)=2              */
+    /*      dir_bits=5(SE)=3 dir_bits=6(NE)=1 dir_bits=8(W)=6             */
+    /*      dir_bits=9(SW)=5 dir_bits=10(NW)=7                             */
+    /* ------------------------------------------------------------------ */
+    /* dir_bits: 0=idle  1=S(4)  2=N(0)  4=E(2)  5=SE(3)  6=NE(1)
+     *           8=W(6)  9=SW(5)  10=NW(7)  others=invalid(-1) */
+    static const int k_dir_table[16] = {
+        -1,  4,  0, -1,   /* 0-3  */
+         2,  3,  1, -1,   /* 4-7  */
+         6,  5,  7, -1,   /* 8-11 */
+        -1, -1, -1, -1    /* 12-15 */
+    };
+    if (dir_bits > 0 && dir_bits < 16 && k_dir_table[dir_bits] >= 0)
+        a->direction = k_dir_table[dir_bits];
+    /* If dir_bits == 0 (no movement), keep the current direction. */
 }
 
 void alien_update_all(void)

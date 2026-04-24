@@ -61,7 +61,7 @@
 
 /*
  * Atlas layout types.
- * COMPACT: walk frame Y = frame_idx * ALIEN_SPRITE_W  (most BO files)
+ * COMPACT: walk frame Y = frame_idx * ALIEN_WALK_FRAME_STRIDE  (most BO files)
  * LEGACY : walk frame Y = {0, 96, 128}               (L0BO and reuses as LEGACY)
  */
 #define ALIEN_ATLAS_COMPACT  0
