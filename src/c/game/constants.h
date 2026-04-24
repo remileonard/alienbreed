@@ -175,23 +175,55 @@
 #define TILE_1UP            0x07
 #define TILE_FIRE_DOOR_A    0x08
 #define TILE_FIRE_DOOR_B    0x09
-#define TILE_ALIEN_HATCH    0x0A
+/* 0x0A: player-triggered face-hugger hatch (tile_facehuggers_hatch @ main.asm#L5414).
+ * When the player stands on this tile it spawns facehuggers nearby. */
+#define TILE_FACEHUGGER_HATCH 0x0A
 #define TILE_CREDITS_100    0x0B
 #define TILE_CREDITS_1000   0x0C
-/* One-way doors: passage allowed only in the named direction (Ref: main.asm#L5059) */
-#define TILE_ONEWAY_UP      0x0D  /* can pass moving up,    blocks downward movement */
-#define TILE_ONEWAY_DOWN    0x0E  /* can pass moving down,  blocks upward movement */
-#define TILE_ONEWAY_LEFT    0x0F  /* can pass moving left,  blocks rightward movement */
-#define TILE_ONEWAY_RIGHT   0x10  /* can pass moving right, blocks leftward movement */
-#define TILE_ONEWAY_5       0x11  /* fifth one-way variant */
-#define TILE_DEADLY_HOLE    0x13  /* instant kill */
+/* 0x0D: metallic-grid floor — functionally walkable floor (tile_not_used in ASM).
+ * Ref: tiles_action_table @ main.asm#L5059 (entry 0x0D → bra tile_not_used). */
+#define TILE_METALLIC_FLOOR 0x0D
+/* One-way conveyor tiles — push player in the named direction each frame.
+ * Ref: tiles_action_table @ main.asm#L5073-L5076: entries 0x0E-0x11. */
+#define TILE_ONEWAY_UP      0x0E  /* extra_spd_y = -2 (upward push)   */
+#define TILE_ONEWAY_RIGHT   0x0F  /* extra_spd_x = +2 (rightward push) */
+#define TILE_ONEWAY_DOWN    0x10  /* extra_spd_y = +2 (downward push)  */
+#define TILE_ONEWAY_LEFT    0x11  /* extra_spd_x = -2 (leftward push)  */
+#define TILE_DEADLY_HOLE    0x14  /* instant kill (tile_deadly_hole @ main.asm#L5485).
+                                   * Was incorrectly 0x13 in earlier C port; corrected
+                                   * to match tile_action_table entry 0x14 in main.asm. */
 #define TILE_DESTRUCT_TRIGGER 0x15 /* starts self-destruct countdown */
 #define TILE_ACID_POOL      0x16  /* -1 HP every 25 frames */
-#define TILE_INTEX          0x17  /* INTEX terminal */
-#define TILE_BOSS_TRIGGER   0x3D  /* triggers boss encounter */
+#define TILE_INTEX          0x17  /* INTEX terminal — activated by FIRE2 */
+/* 0x26: one-way-right that kills the player if they try to go left.
+ * 0x2E: one-way-left that kills the player if they try to go right.
+ * Ref: tile_one_deadly_way_right/left @ main.asm#L5600-L5630. */
+#define TILE_ONE_DEADLY_WAY_RIGHT 0x26
+#define TILE_CLIMB_LEFT     0x27  /* extra_spd_x = +1 (slows leftward movement)  */
+/* Alien spawn tiles (Ref: levelmaps_format.txt) */
+#define TILE_ALIEN_SPAWN_BIG   0x28  /* respawning location of big aliens */
+#define TILE_ALIEN_SPAWN_SMALL 0x29  /* respawning location of small aliens */
+#define TILE_ONE_DEADLY_WAY_LEFT  0x2E
+#define TILE_CLIMB_RIGHT    0x2F  /* extra_spd_x = -1 (slows rightward movement) */
+#define TILE_ALIEN_HOLE        0x34  /* hole with aliens coming out */
+#define TILE_CLIMB_UP       0x37  /* extra_spd_y = +1 (slows upward movement)   */
+/* Diagonal one-way tiles (push in two directions simultaneously).
+ * Ref: tile_one_way_up_right/down_right/down_left/up_left @ main.asm#L5818-L5852. */
+#define TILE_ONEWAY_DIAG_UR 0x38  /* extra_spd_x=+2, extra_spd_y=-2 */
+#define TILE_ONEWAY_DIAG_DR 0x39  /* extra_spd_x=+2, extra_spd_y=+2 */
+#define TILE_ONEWAY_DIAG_DL 0x3A  /* extra_spd_x=-2, extra_spd_y=+2 */
+#define TILE_ONEWAY_DIAG_UL 0x3B  /* extra_spd_x=-2, extra_spd_y=-2 */
+#define TILE_BOSS_TRIGGER      0x3D  /* triggers boss encounter */
+#define TILE_CLIMB_DOWN     0x3F  /* extra_spd_y = -1 (slows downward movement)  */
 
-/* Convenience: true if tile is any one-way door */
-#define TILE_IS_ONEWAY(a)   ((a) >= TILE_ONEWAY_UP && (a) <= TILE_ONEWAY_5)
+/* Convenience: true if tile applies a directional push (one-way or climb).
+ * Ref: tiles_action_table entry range @ main.asm#L5059. */
+#define TILE_IS_ONEWAY(a)   (((a) >= TILE_ONEWAY_UP && (a) <= TILE_ONEWAY_LEFT) || \
+                             (a) == TILE_ONE_DEADLY_WAY_RIGHT || \
+                             (a) == TILE_ONE_DEADLY_WAY_LEFT  || \
+                             (a) == TILE_CLIMB_LEFT  || (a) == TILE_CLIMB_RIGHT || \
+                             (a) == TILE_CLIMB_UP    || (a) == TILE_CLIMB_DOWN  || \
+                             ((a) >= TILE_ONEWAY_DIAG_UR && (a) <= TILE_ONEWAY_DIAG_UL))
 
 /* Tile attribute mask */
 #define TILE_ATTR_MASK      0x3F

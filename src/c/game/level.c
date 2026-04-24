@@ -8,6 +8,7 @@
 #include "alien.h"
 #include "../engine/tilemap.h"
 #include "../engine/palette.h"
+#include "../engine/alien_gfx.h"
 #include "../hal/audio.h"
 #include "../hal/video.h"
 #include <stdio.h>
@@ -17,19 +18,33 @@
 /* Level definitions — map filenames and settings                     */
 /* Cross-referenced from main.asm level sequences                     */
 /* ------------------------------------------------------------------ */
+/*
+ * Level BO file assignments (Ref: main.asm#L7972-L8018):
+ *   Levels 1-6 each have their own BO file (L0BO-L5BO).
+ *   Levels 7-9 reuse L2BO (lev7_load_struct#L7998, lev8#L8002, lev9#L8006).
+ *   Level 10 reuses L1BO (lev10_load_struct#L8010).
+ *   Level 11 reuses L2BO (lev11_load_struct#L8014).
+ *   Level 12 reuses L5BO (lev12_load_struct#L8018).
+ * Only 6 distinct BO files (L0BO-L5BO) exist; the original game reused them
+ * for later levels that share the same alien sprite set.
+ *
+ * Atlas type per level (Ref: lbL000554 assignments @ main.asm#L1030-L1227):
+ *   LEGACY  (lbW01945E): levels 1, 10, 11  — walk frames at y={0, 96, 128}
+ *   COMPACT (all others): walk frames at y={0, 32, 64}
+ */
 const LevelDef k_level_defs[NUM_LEVELS] = {
-    /* lvl 1 */ { "L0AN", "L0BO", "L0MA",  0, "Level 1: Research Base",          "level" },
-    /* lvl 2 */ { "L1AN", "L1BO", "L1MA",  0, "Level 2: Bio-Containment",        "level" },
-    /* lvl 3 */ { "L2AN", "L2BO", "L2MA",  0, "Level 3: Reactor Core",           "level" },
-    /* lvl 4 */ { "L3AN", "L3BO", "L3MA",  0, "Level 4: Alien Hive",             "boss"  },
-    /* lvl 5 */ { "L4AN", "L4BO", "L4MA",  0, "Level 5: Service Tunnels",        "level" },
-    /* lvl 6 */ { "L5AN", "L5BO", "L5MA",  0, "Level 6: Weapons Bay",            "boss"  },
-    /* lvl 7 */ { "L6MA", NULL,   "L6MA",  0, "Level 7: Upper Decks",            "level" },
-    /* lvl 8 */ { "L7MA", NULL,   "L7MA",  0, "Level 8: Engine Room",            "boss"  },
-    /* lvl 9 */ { "L8MA", NULL,   "L8MA",  5, "Level 9: Alien Command",          "level" },
-    /* lvl10 */ { "L9MA", NULL,   "L9MA", 10, "Level 10: Central Hive",          "boss"  },
-    /* lvl11 */ { "LAMA", "LABM", "LAMA", 15, "Level 11: Breeding Grounds",      "level" },
-    /* lvl12 */ { "LBMA", "LBBM", "LBMA", 20, "Level 12: Final Confrontation",   "boss"  },
+    /* lvl 1  */ { "L0AN", "L0BO", "L0MA",  0, "Level 1: Research Base",          "level", ALIEN_ATLAS_LEGACY  },
+    /* lvl 2  */ { "L1AN", "L1BO", "L1MA",  0, "Level 2: Bio-Containment",        "level", ALIEN_ATLAS_COMPACT },
+    /* lvl 3  */ { "L2AN", "L2BO", "L2MA",  0, "Level 3: Reactor Core",           "level", ALIEN_ATLAS_COMPACT },
+    /* lvl 4  */ { "L3AN", "L3BO", "L3MA",  0, "Level 4: Alien Hive",             "boss",  ALIEN_ATLAS_COMPACT },
+    /* lvl 5  */ { "L4AN", "L4BO", "L4MA",  0, "Level 5: Service Tunnels",        "level", ALIEN_ATLAS_COMPACT },
+    /* lvl 6  */ { "L5AN", "L5BO", "L5MA",  0, "Level 6: Weapons Bay",            "boss",  ALIEN_ATLAS_COMPACT },
+    /* lvl 7  */ { "L3AN", "L2BO", "L6MA",  0, "Level 7: Upper Decks",            "level", ALIEN_ATLAS_COMPACT },
+    /* lvl 8  */ { "L3AN", "L2BO", "L7MA",  0, "Level 8: Engine Room",            "boss",  ALIEN_ATLAS_COMPACT },
+    /* lvl 9  */ { "L2AN", "L2BO", "L8MA",  5, "Level 9: Alien Command",          "level", ALIEN_ATLAS_COMPACT },
+    /* lvl10  */ { "L1AN", "L1BO", "L9MA", 10, "Level 10: Central Hive",          "boss",  ALIEN_ATLAS_LEGACY  },
+    /* lvl11  */ { "L1AN", "L2BO", "LAMA", 15, "Level 11: Breeding Grounds",      "level", ALIEN_ATLAS_LEGACY  },
+    /* lvl12  */ { "L5AN", "L5BO", "LBMA", 20, "Level 12: Final Confrontation",   "boss",  ALIEN_ATLAS_COMPACT },
 };
 
 /* ------------------------------------------------------------------ */
@@ -91,8 +106,15 @@ void level_tick_timer(void)
         audio_play_sample(SAMPLE_CARET_MOVE);
 
     /* Switch palette to destruction colors when sequence starts */
-    if (g_destruction_timer == (LONG)DESTRUCTION_TIMER_SECONDS * TIMER_FRAMES_PER_SECOND - 1)
+    if (g_destruction_timer == (LONG)DESTRUCTION_TIMER_SECONDS * TIMER_FRAMES_PER_SECOND - 1) {
         palette_set_immediate(g_cur_map.palette_b, 32);
+        /* Replicate copper override: at beam line 51 the copper forces COLOR02
+         * and COLOR03 to black for the main 5-bitplane play area regardless of
+         * the loaded palette (Ref: lbW09A20C dc.w COLOR02,0,COLOR03,0
+         * @ main.asm#L18513). */
+        video_set_palette_entry(2, 0x000);
+        video_set_palette_entry(3, 0x000);
+    }
 
     /* Timer expired: game over */
     if (g_destruction_timer == 0) {
@@ -139,8 +161,15 @@ void level_trigger_end(void)
 void level_finalize(void)
 {
     /* Apply level palette */
-    if (g_cur_map.valid)
+    if (g_cur_map.valid) {
         palette_set_immediate(g_cur_map.palette_a, 32);
+        /* Replicate copper override: at beam line 51 the copper forces COLOR02
+         * and COLOR03 to black for the main 5-bitplane play area regardless of
+         * the loaded palette (Ref: lbW09A20C dc.w COLOR02,0,COLOR03,0
+         * @ main.asm#L18513). */
+        video_set_palette_entry(2, 0x000);
+        video_set_palette_entry(3, 0x000);
+    }
 
     /* Set map overview flag if player has supply */
     /* (handled when player collects SUPPLY_MAP_OVERVIEW) */
@@ -180,6 +209,17 @@ void level_run(int level_idx)
 
     /* Load tileset */
     tileset_load(g_cur_map.bg_filename, &g_tileset);
+
+    /* Load alien graphics atlas from the level BO file.
+     * Ref: copy_gfx @ main.asm#L12592 — called once per level after init_level_N.
+     * The BO file is a raw 5-plane sequential bitmap (320×384, 76800 bytes)
+     * containing all alien type sprites arranged as a sprite atlas.
+     * Ref: lev1_load_struct @ main.asm#L7972 */
+    if (def->map_bo) {
+        char bo_path[256];
+        snprintf(bo_path, sizeof(bo_path), "game/%s", def->map_bo);
+        alien_gfx_load(bo_path, def->atlas_type);
+    }
 
     /* Set alien extra strength from level def (Ref: main.asm#L429-L465) */
     g_global_aliens_extra_strength = (WORD)def->alien_extra_strength;

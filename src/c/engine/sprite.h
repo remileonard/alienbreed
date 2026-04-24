@@ -62,7 +62,26 @@ void sprite_draw_digit(int digit, int x, int y);
 /* Draw the animated player sprite for player index p at screen position. */
 void sprite_draw_player(int player_idx, int x, int y, int facing);
 
-/* Draw an alien sprite (type index) at screen position. */
-void sprite_draw_alien(int type_idx, int x, int y);
+/*
+ * Draw alien walk sprite for the given compass direction (0=N,1=NE,…,7=NW)
+ * at screen position (x, y).
+ * anim_frame: 0, 1, or 2 — index into the 3-frame walk cycle.
+ * Atlas column = direction * 32 px.
+ * Atlas row depends on the loaded atlas type:
+ *   COMPACT → y = anim_frame * 32       (most BO files)
+ *   LEGACY  → y = {0, 96, 128}          (L0BO and LEGACY-flagged levels)
+ * Color index 0 is transparent (Ref: blitter minterm $CA, main.asm#L12365).
+ */
+void sprite_draw_alien(int direction, int anim_frame, int x, int y);
+
+/*
+ * Draw a death/explosion frame for a dying alien at screen position (x, y).
+ * death_frame: 0-15 (16-frame explosion sequence).
+ * Sprite size: ALIEN_DEATH_W × ALIEN_DEATH_H (16 × 14 px).
+ * Atlas position: x = ALIEN_DEATH_ATLAS_X + (death_frame%8)*16,
+ *                 y = ALIEN_DEATH_ATLAS_Y + (death_frame/8)*16
+ * (Ref: lbW0188CE @ main.asm#L13833, death anim lbL018C2E#L13907)
+ */
+void sprite_draw_alien_death(int death_frame, int x, int y);
 
 #endif /* AB_SPRITE_H */

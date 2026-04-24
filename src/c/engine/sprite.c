@@ -15,7 +15,9 @@
  */
 
 #include "sprite.h"
+#include "alien_gfx.h"
 #include "../hal/video.h"
+#include "../game/player.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -146,29 +148,158 @@ void sprite_draw_digit(int digit, int x, int y)
     video_blit(img->pixels, img->w, x, y, img->w, img->h, 0);
 }
 
-/* Draw animated player sprite at (x,y) using facing direction (1-8). */
+/* Draw animated player sprite using the full ASM animation state machine.
+ *
+ * Sprite layout per player (40 sprites each, player 1 = 0-39, player 2 = 40-79):
+ *   spr  0- 7 (1-indexed 1-8):  base idle pose, one per cur_sprite direction
+ *   spr  8- 9 (9-10):           fire mid-walk for directions 1-2
+ *   spr 10-17 (11-18):          walk frame A, one per direction
+ *   spr 18-19 (19-20):          fire mid-walk for directions 3-4
+ *   spr 20-27 (21-28):          walk frame B, one per direction
+ *   spr 28-29 (29-30):          fire mid-walk for directions 5-6
+ *   spr 30-37 (31-38):          fire flash pose, one per direction
+ *   spr 38-39 (39-40):          fire mid-walk for directions 7-8
+ *
+ * Offsets within the walk cycle frames (all relative to spr = cur_sprite - 1):
+ *   +0  : base idle (no legs movement)
+ *   +10 : walk frame A (legs forward)
+ *   +20 : walk frame B (legs back)
+ *   +30 : fire flash (gun extended)
+ *
+ * Fire mid-walk sprite (alternates with walk frames while firing):
+ *   cur_sprite 1→idx 8, 2→9, 3→18, 4→19, 5→28, 6→29, 7→38, 8→39
+ *
+ * Animation sequences (mirrors player_1_data sprite tables @ main.asm#L12900):
+ *   Idle (state 0):       [base]
+ *   Walk (state 1-8):     [base, +10, +20, +10]  2 ticks/frame
+ *   Fire-idle (state 9):  [+30, +20]              1 tick/frame
+ *   Fire-walk (10-17):    [+30, base, +30, +10]   1 tick/frame
+ *   Hit/fire (18-26):     [base, fire-mid, +10, fire-mid]  1 tick/frame
+ *   Respawn (27-35):      blink at 4-tick rate using g_player_invincibility
+ */
 void sprite_draw_player(int player_idx, int x, int y, int facing)
 {
-    /* Sprite index: player 0 uses sprites 0-39, player 1 uses 40-79.
-     * Within each half: 8 directions × 5 frames stacked in the sheet.
-     * We use one sprite image per direction for simplicity. */
-    int base    = player_idx * 40;
-    int dir_idx = (facing - 1) & 7;   /* clamp 0-7 */
-    int idx     = base + dir_idx;
-    if (idx < 0 || idx >= PLAYER_SPRITE_COUNT) return;
-    SpriteImage *img = &s_player[idx];
+    (void)facing; /* direction is tracked in p->cur_sprite via the walk table */
+
+    if (player_idx < 0 || player_idx >= MAX_PLAYERS) return;
+    const Player *p = &g_players[player_idx];
+    if (!p->alive) return;
+
+    int cur    = p->cur_sprite;    /* body-orientation pose 1-8 */
+    int state  = p->anim_state;    /* 0-35 */
+    int sframe = p->anim_seq_frame;
+    int base   = player_idx * 40;  /* sprite sheet offset for this player */
+    int has_ammo = (p->ammunitions >= 1);
+
+    /* Fire mid-walk sprite offsets indexed by cur_sprite 1-8
+     * (ref: lbL013E02-lbL013F1A @ main.asm#L13020-L13051) */
+    static const int k_fire_mid[9] = { 0, 8, 9, 18, 19, 28, 29, 38, 39 };
+
+    int sprite_idx;
+
+    if (state >= 27) {
+        /* Respawn / invincible: blink at 4-frame intervals.
+         * (ref: lbL014002 = {lbL098E2C,4},{spr_base,4} @ main.asm#L13068) */
+        if ((g_player_invincibility[player_idx] / 4) & 1) return; /* invisible phase */
+        sprite_idx = base + (cur - 1);
+
+    } else if (state >= 18) {
+        /* Hit animation — 4-frame cycle: [base, fire-mid, walk-A, fire-mid]
+         * (ref: lbL013E02 @ main.asm#L13020) */
+        static const int k_hit[4] = { 0, 1, 2, 1 }; /* 0=base, 1=fire-mid, 2=+10 */
+        switch (k_hit[sframe & 3]) {
+            case 0:  sprite_idx = base + (cur - 1);           break;
+            case 1:  sprite_idx = base + k_fire_mid[cur];     break;
+            default: sprite_idx = base + (cur - 1) + 10;      break;
+        }
+
+    } else if (state >= 9) {
+        /* Fire animation */
+        if (!has_ammo) {
+            /* No ammo: fall back to plain walk/idle animation
+             * (ref: state 9-17 handlers: cmp.w #1,PLAYER_AMMUNITIONS; bpl fire; else walk) */
+            if (state == 9) {
+                sprite_idx = base + (cur - 1);                /* idle */
+            } else {
+                static const int k_walk[4] = { 0, 10, 20, 10 };
+                sprite_idx = base + (cur - 1) + k_walk[sframe & 3];
+            }
+        } else if (state == 9) {
+            /* Fire idle: 2-frame [fire-flash, walk-B]
+             * (ref: lbL013B02 = {spr31,1},{spr21,1} @ main.asm#L12940) */
+            static const int k_fire_idle[2] = { 30, 20 };
+            sprite_idx = base + (cur - 1) + k_fire_idle[sframe & 1];
+        } else {
+            /* Fire walk: 4-frame [fire-flash, base, fire-flash, walk-A]
+             * (ref: lbL013BC2 = {spr31,0},{spr1,2},{spr31,0},{spr11,2}... @ main.asm#L12956) */
+            static const int k_fire_walk[4] = { 30, 0, 30, 10 };
+            sprite_idx = base + (cur - 1) + k_fire_walk[sframe & 3];
+        }
+
+    } else if (state >= 1) {
+        /* Walking: 4-frame cycle [base, +10, +20, +10]
+         * (ref: lbL0139C2 = {spr1,2},{spr11,2},{spr21,2},{spr11,2} @ main.asm#L12908) */
+        static const int k_walk[4] = { 0, 10, 20, 10 };
+        sprite_idx = base + (cur - 1) + k_walk[sframe & 3];
+
+    } else {
+        /* Idle: static base pose
+         * (ref: lbL013942 = {spr1,2,-1} @ main.asm#L12900) */
+        sprite_idx = base + (cur - 1);
+    }
+
+    if (sprite_idx < base || sprite_idx >= base + 40) return;
+    if (sprite_idx < 0 || sprite_idx >= PLAYER_SPRITE_COUNT) return;
+    SpriteImage *img = &s_player[sprite_idx];
     if (!img->pixels) return;
     video_blit(img->pixels, img->w, x, y, img->w, img->h, 0);
 }
 
-/* Draw alien sprite (type 0 = basic alien) at (x,y). */
-void sprite_draw_alien(int type_idx, int x, int y)
+/* Draw alien walk sprite (direction=0-7 compass, anim_frame=0-2) at (x,y).
+ * Atlas column = direction * ALIEN_SPRITE_W.
+ * Atlas row depends on atlas type (COMPACT: y=frame*32; LEGACY: y={0,96,128}).
+ * Ref: lbW01945E / lbW019A8E @ main.asm#L14034,L14160; blitter minterm $CA. */
+void sprite_draw_alien(int direction, int anim_frame, int x, int y)
 {
-    /* Alien sprites start at index PLAYER_SPRITE_COUNT/2 as a convention.
-     * For now use a placeholder from the existing sprite set. */
-    int idx = 70 + (type_idx & 7);   /* use last 8 sprites as alien placeholders */
-    if (idx >= PLAYER_SPRITE_COUNT) idx = PLAYER_SPRITE_COUNT - 1;
-    SpriteImage *img = &s_player[idx];
-    if (!img->pixels) return;
-    video_blit(img->pixels, img->w, x, y, img->w, img->h, 0);
+    const UBYTE *atlas = alien_gfx_get_atlas();
+    if (!atlas) return;
+
+    if (direction  < 0) direction  = 0;
+    if (direction  >= ALIEN_DIR_COUNT) direction = ALIEN_DIR_COUNT - 1;
+    if (anim_frame < 0) anim_frame = 0;
+    if (anim_frame >= ALIEN_WALK_FRAMES) anim_frame = ALIEN_WALK_FRAMES - 1;
+
+    int atlas_x = direction * ALIEN_SPRITE_W;
+
+    /* Row depends on atlas layout type (Ref: main.asm atlas descriptors):
+     *   COMPACT (lbW019A8E etc.): y = frame * 32   — most levels
+     *   LEGACY  (lbW01945E):     y = {0, 96, 128}  — L0BO / LEGACY levels */
+    static const int k_legacy_y[3] = {0, 96, 128};
+    int atlas_y;
+    if (alien_gfx_get_atlas_type() == ALIEN_ATLAS_LEGACY) {
+        atlas_y = k_legacy_y[anim_frame];
+    } else {
+        atlas_y = anim_frame * ALIEN_WALK_FRAME_STRIDE;
+    }
+
+    const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
+    video_blit(src, ALIEN_ATLAS_W, x, y, ALIEN_SPRITE_W, ALIEN_SPRITE_H, 0);
+}
+
+/* Draw a death/explosion frame (0-15) at screen position (x,y).
+ * Frames are 16×14 px, stored in 2 rows of 8 starting at (192,160).
+ * Ref: lbW0188CE @ main.asm#L13833; death anim lbL018C2E @ main.asm#L13907. */
+void sprite_draw_alien_death(int death_frame, int x, int y)
+{
+    const UBYTE *atlas = alien_gfx_get_atlas();
+    if (!atlas) return;
+
+    if (death_frame < 0) death_frame = 0;
+    if (death_frame >= ALIEN_DEATH_FRAMES) death_frame = ALIEN_DEATH_FRAMES - 1;
+
+    int atlas_x = ALIEN_DEATH_ATLAS_X + (death_frame % 8) * ALIEN_DEATH_W;
+    int atlas_y = ALIEN_DEATH_ATLAS_Y + (death_frame / 8) * 16;
+
+    const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
+    video_blit(src, ALIEN_ATLAS_W, x, y, ALIEN_DEATH_W, ALIEN_DEATH_H, 0);
 }
