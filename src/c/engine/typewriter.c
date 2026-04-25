@@ -111,13 +111,6 @@ int typewriter_putchar(TextCtx *ctx, char c)
 
     ctx->cursor_x += font->letter_w + 1;
 
-    /* Play typewriter SFX every N characters */
-    ctx->sound_counter++;
-    if (ctx->sound_counter >= ctx->play_sound) {
-        ctx->sound_counter = 0;
-        audio_play_sample(SAMPLE_TYPE_WRITER);
-    }
-
     return 1;
 }
 

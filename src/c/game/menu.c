@@ -476,7 +476,7 @@ static void draw_bg(const Img *title, int copyright_y, const Img *copy)
 MenuResult menu_run(int *out_num_players, int *out_share_credits)
 {
     build_combined_palette();
-
+    audio_play_music("title");
     /* Load resources */
     Img  title = {NULL, 0, 0};
     Img  copy  = {NULL, 0, 0};
