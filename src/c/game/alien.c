@@ -440,19 +440,55 @@ void aliens_collisions_with_weapons(void)
 void aliens_collisions_with_players(void)
 {
     for (int ai = 0; ai < g_alien_count; ai++) {
+        /* Only active (alive == 1) aliens can damage players.
+         * Dying aliens (alive == 2) have already triggered the encounter.
+         * Ref: tst.w 56(a0) / tst.w 52(a0) @ main.asm#L7636-L7656. */
         if (g_aliens[ai].alive != 1) continue;
 
         for (int pi = 0; pi < MAX_PLAYERS; pi++) {
             if (!g_players[pi].alive) continue;
+            /* Skip players already in their death animation */
+            if (g_players[pi].death_counter > 0) continue;
             if (player_is_invincible(&g_players[pi])) continue;
 
-            int dx = g_aliens[ai].pos_x - g_players[pi].pos_x;
-            int dy = g_aliens[ai].pos_y - g_players[pi].pos_y;
-            if (dx < 0) dx = -dx;
-            if (dy < 0) dy = -dy;
+            /* Bounding-box collision (AABB):
+             *   Alien  bbox : [pos_x,   pos_x+32] × [pos_y,   pos_y+32]
+             *   Player bbox : [pos_x+8, pos_x+24] × [pos_y+8, pos_y+24]
+             *
+             * Alien bbox comes from lbW008F14+4={0,0} and lbW008F14+8={32,32}
+             * (the offset pair added to pos when building cur_alien*_dats).
+             * Player bbox comes from add.l #$80008 (top-left +8) and
+             * add.l #$100010 (size 16×16).
+             * Ref: aliens_collisions_with_players @ main.asm#L7598-L7618. */
+            int ax1 = (int)g_aliens[ai].pos_x;
+            int ax2 = ax1 + 32;
+            int ay1 = (int)g_aliens[ai].pos_y;
+            int ay2 = ay1 + 32;
 
-            if (dx < 10 && dy < 10) {
+            int px1 = (int)g_players[pi].pos_x + 8;
+            int px2 = (int)g_players[pi].pos_x + 24;
+            int py1 = (int)g_players[pi].pos_y + 8;
+            int py2 = (int)g_players[pi].pos_y + 24;
+
+            if (ax1 < px2 && ax2 > px1 && ay1 < py2 && ay2 > py1) {
+                /* Award player credits and score for the first contact.
+                 * Ref: add.l #1500,PLAYER_CREDITS / add.l #100,PLAYER_SCORE
+                 *      @ main.asm#L7640-L7641. */
+                g_players[pi].credits += 1500;
+                g_players[pi].score   += 100;
+
+                /* Apply damage: 36(a2)*2 = 1*2 = 2 HP.
+                 * Ref: move.w 36(a2),d5 / add.w d5,d5 / sub.w d5,PLAYER_HEALTH
+                 *      @ main.asm#L7650-L7652. */
                 player_take_damage(&g_players[pi], 2);
+
+                /* Transition the alien to its dying state so it plays the
+                 * explosion animation and is removed from future collision
+                 * checks.  Mirrors the lbC00A582 "touches player" branch that
+                 * eventually calls set_alien_default_vars @ main.asm#L7280. */
+                alien_kill(ai);
+
+                break;  /* alien is now dying; stop checking other players */
             }
         }
     }

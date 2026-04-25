@@ -49,6 +49,7 @@ void player_init_variables(void)
         p->anim_seq_frame    = 0;
         p->anim_seq_timer    = 2;
         p->anim_seq_id       = -1;
+        p->death_counter     = 0;
         player_set_cur_weapon(p, WEAPON_MACHINEGUN);
         p->owned_weapons[WEAPON_MACHINEGUN - 1] = 1;
     }
@@ -504,6 +505,25 @@ void player_update(Player *p, UWORD input_mask)
 {
     if (!p->alive) return;
 
+    /* Death animation: player is shown as an explosion and cannot act.
+     * Mirrors the 280(a0) countdown at lbC006E96 / lbC0077DC @ main.asm#L4044-L4779.
+     * The counter is started by player_take_damage when health reaches 0. */
+    if (p->death_counter > 0) {
+        p->death_counter--;
+        if (p->death_counter == 0) {
+            if (p->lives > 0) {
+                /* Respawn in place: restore health and grant invincibility.
+                 * Ref: lbC00788E @ main.asm#L4774-L4778. */
+                p->health = PLAYER_MAX_HEALTH;
+                p->anim_fire_counter = 0;
+                g_player_invincibility[p->port] = INVINCIBILITY_FRAMES;
+            } else {
+                p->alive = 0;
+            }
+        }
+        return;
+    }
+
     int dx = 0, dy = 0;
     int speed = 2;
 
@@ -674,6 +694,7 @@ void player_take_damage(Player *p, int amount)
 {
     int idx = p->port;
     if (g_player_invincibility[idx] > 0) return;
+    if (p->death_counter > 0) return;  /* already in death animation */
 
     p->health -= (WORD)amount;
     audio_play_sample(SAMPLE_HURT_PLAYER);
@@ -684,12 +705,11 @@ void player_take_damage(Player *p, int amount)
         p->lives--;
         audio_play_sample(SAMPLE_DYING_PLAYER);
         audio_play_sample(VOICE_DEATH);
-        if (p->lives <= 0) {
-            p->alive = 0;
-        } else {
-            p->health = PLAYER_MAX_HEALTH;
-            g_player_invincibility[idx] = INVINCIBILITY_FRAMES;
-        }
+        /* Start death explosion animation; movement/shooting suspended until
+         * the counter expires.  Respawn (or alive=0 if out of lives) is handled
+         * in player_update when the counter reaches 0.
+         * Ref: move.w #200,lbW005D64 @ main.asm#L3938. */
+        p->death_counter = PLAYER_DEATH_FRAMES;
     } else {
         g_player_invincibility[idx] = INVINCIBILITY_FRAMES / 2;
     }

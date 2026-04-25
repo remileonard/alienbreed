@@ -108,9 +108,22 @@ typedef struct {
     int   anim_seq_timer;      /* ticks remaining before advancing to the next frame */
     int   anim_seq_id;         /* opaque id of the current sequence; reset triggers frame restart */
 
+    /* Death animation counter (equivalent to 280(a0) in main.asm).
+     * Set to PLAYER_DEATH_FRAMES when health reaches 0; counts down each frame.
+     * While > 0 the player is shown as an explosion and cannot move or take damage.
+     * When it reaches 0: respawn with full health (if lives > 0) or set alive = 0.
+     * Ref: lbC006C7A / lbC0077DC @ main.asm#L3934-L4046. */
+    int   death_counter;
+
     /* Input (references to global input state) */
     int   port;           /* 0 = player 1, 1 = player 2 */
 } Player;
+
+/* Number of frames the player death explosion animation plays before respawn.
+ * The original ASM counter is 200 frames; we use a shorter value that still
+ * covers two complete passes of the 16-frame explosion atlas.
+ * Ref: move.w #200,lbW005D64 @ main.asm#L3938. */
+#define PLAYER_DEATH_FRAMES  30
 
 extern Player g_players[MAX_PLAYERS];
 

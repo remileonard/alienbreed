@@ -33,6 +33,7 @@
 #include "../engine/palette.h"
 #include "../engine/tilemap.h"
 #include "../engine/sprite.h"
+#include "../engine/alien_gfx.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -245,7 +246,17 @@ void level_game_loop_external(void)
                 if (!g_players[i].alive) continue;
                 int sx = g_players[i].pos_x - g_camera_x;
                 int sy = g_players[i].pos_y - g_camera_y;
-                sprite_draw_player(i, sx, sy, g_players[i].direction);
+                if (g_players[i].death_counter > 0) {
+                    /* Death explosion: show the alien explosion atlas while the
+                     * death_counter counts down.  Cycle through all 16 frames so
+                     * the animation plays regardless of PLAYER_DEATH_FRAMES.
+                     * Ref: lbC00780C / lbL0146A2 @ main.asm#L4737-L4771. */
+                    int df = (PLAYER_DEATH_FRAMES - 1 - g_players[i].death_counter)
+                             % ALIEN_DEATH_FRAMES;
+                    sprite_draw_alien_death(df, sx, sy);
+                } else {
+                    sprite_draw_player(i, sx, sy, g_players[i].direction);
+                }
             }
 
             projectiles_render();
