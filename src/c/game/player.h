@@ -121,9 +121,16 @@ typedef struct {
 
 /* Number of frames the player death explosion animation plays before respawn.
  * The original ASM counter is 200 frames; we use a shorter value that still
- * covers two complete passes of the 16-frame explosion atlas.
+ * gives a visible explosion (≈2 full cycles through the 16-frame atlas at
+ * the rate one atlas-frame advances per rendered frame).
  * Ref: move.w #200,lbW005D64 @ main.asm#L3938. */
-#define PLAYER_DEATH_FRAMES  30
+#define PLAYER_DEATH_FRAMES  32
+
+/* Player hit-box offset and size relative to pos_x/pos_y.
+ * Derived from add.l #$80008 (offset +8) and add.l #$100010 (size 16×16)
+ * in aliens_collisions_with_players @ main.asm#L7600-L7603. */
+#define PLAYER_BBOX_OFFSET  8
+#define PLAYER_BBOX_SIZE   16
 
 extern Player g_players[MAX_PLAYERS];
 

@@ -465,10 +465,10 @@ void aliens_collisions_with_players(void)
             int ay1 = (int)g_aliens[ai].pos_y;
             int ay2 = ay1 + 32;
 
-            int px1 = (int)g_players[pi].pos_x + 8;
-            int px2 = (int)g_players[pi].pos_x + 24;
-            int py1 = (int)g_players[pi].pos_y + 8;
-            int py2 = (int)g_players[pi].pos_y + 24;
+            int px1 = (int)g_players[pi].pos_x + PLAYER_BBOX_OFFSET;
+            int px2 = (int)g_players[pi].pos_x + PLAYER_BBOX_OFFSET + PLAYER_BBOX_SIZE;
+            int py1 = (int)g_players[pi].pos_y + PLAYER_BBOX_OFFSET;
+            int py2 = (int)g_players[pi].pos_y + PLAYER_BBOX_OFFSET + PLAYER_BBOX_SIZE;
 
             if (ax1 < px2 && ax2 > px1 && ay1 < py2 && ay2 > py1) {
                 /* Award player credits and score for the first contact.

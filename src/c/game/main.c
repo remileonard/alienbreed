@@ -248,8 +248,10 @@ void level_game_loop_external(void)
                 int sy = g_players[i].pos_y - g_camera_y;
                 if (g_players[i].death_counter > 0) {
                     /* Death explosion: show the alien explosion atlas while the
-                     * death_counter counts down.  Cycle through all 16 frames so
-                     * the animation plays regardless of PLAYER_DEATH_FRAMES.
+                     * death_counter counts down.  player_update decrements the
+                     * counter before rendering, so on the first rendered frame
+                     * death_counter == PLAYER_DEATH_FRAMES-1 and df == 0.
+                     * The modulo wraps the 16-frame atlas across all death frames.
                      * Ref: lbC00780C / lbL0146A2 @ main.asm#L4737-L4771. */
                     int df = (PLAYER_DEATH_FRAMES - 1 - g_players[i].death_counter)
                              % ALIEN_DEATH_FRAMES;
