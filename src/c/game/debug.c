@@ -5,11 +5,14 @@
 
 #include "debug.h"
 #include "player.h"
+#include "alien.h"
 #include "constants.h"
 #include "../engine/tilemap.h"
 #include "../hal/video.h"
 #include <stdio.h>
 #include <string.h>
+
+extern int g_camera_x, g_camera_y;
 
 int g_debug_overlay_on = 0;
 
@@ -114,6 +117,17 @@ static int is_door(UBYTE a)
 }
 
 /* ------------------------------------------------------------------ */
+/* Bounding-box colors                                                */
+/* ------------------------------------------------------------------ */
+#define COLOR_ALIEN_BBOX_R  255
+#define COLOR_ALIEN_BBOX_G    0
+#define COLOR_ALIEN_BBOX_B    0   /* red   — alien 32×32 collision box */
+
+#define COLOR_PLAYER_BBOX_R   0
+#define COLOR_PLAYER_BBOX_G  255
+#define COLOR_PLAYER_BBOX_B  255  /* cyan  — player 16×16 hit box (+8,+8) */
+
+/* ------------------------------------------------------------------ */
 /* Main overlay renderer                                              */
 /* ------------------------------------------------------------------ */
 void debug_render_overlay(void)
@@ -173,4 +187,26 @@ void debug_render_overlay(void)
              (int)p1->lives);
 
     draw_string(2, 1, buf, 255, 255, 255);
+
+    /* ---- Alien collision bounding boxes (32×32 — red) ---- */
+    for (int i = 0; i < g_alien_count; i++) {
+        if (g_aliens[i].alive == 0) continue;   /* skip fully dead slots */
+        int sx = (int)g_aliens[i].pos_x - g_camera_x;
+        int sy = (int)g_aliens[i].pos_y - g_camera_y;
+        video_overlay_rect_outline(sx, sy, 32, 32,
+                                   COLOR_ALIEN_BBOX_R,
+                                   COLOR_ALIEN_BBOX_G,
+                                   COLOR_ALIEN_BBOX_B, 220);
+    }
+
+    /* ---- Player collision bounding boxes (16×16 at +8,+8 — cyan) ---- */
+    for (int i = 0; i < MAX_PLAYERS; i++) {
+        if (!g_players[i].alive) continue;
+        int sx = (int)g_players[i].pos_x + PLAYER_BBOX_OFFSET - g_camera_x;
+        int sy = (int)g_players[i].pos_y + PLAYER_BBOX_OFFSET - g_camera_y;
+        video_overlay_rect_outline(sx, sy, PLAYER_BBOX_SIZE, PLAYER_BBOX_SIZE,
+                                   COLOR_PLAYER_BBOX_R,
+                                   COLOR_PLAYER_BBOX_G,
+                                   COLOR_PLAYER_BBOX_B, 220);
+    }
 }
