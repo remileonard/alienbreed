@@ -208,40 +208,48 @@ void alien_spawn_near(int wx, int wy)
 /*
  * Per-frame viewport scan — mirrors lbC00D17E / lbC00D1B4 @ main.asm.
  *
- * Expanded viewport (80 px beyond each screen edge):
- *   left   = g_camera_x − 80         right  = g_camera_x + 400 (= left + 480)
- *   top    = g_camera_y − 80         bottom = g_camera_y + 336 (= top  + 416)
+ * ASM zone (lbC00D17E):
+ *   vp_left   = map_pos_x − 80        vp_right  = map_pos_x + 400 (screen+80)
+ *   vp_top    = map_pos_y − 80        vp_bottom = map_pos_y + 416 (screen+80)
  *
- * For each active spawn point:
- *   – If its pixel centre is inside the expanded viewport, the countdown
- *     decrements by 1.  When it reaches −1 a spawn is attempted:
- *       • If any living alien is already within SPAWN_ZONE_RADIUS of the
- *         tile centre the spawn is skipped (mirrors the cur_alien_dats
- *         bounding-box overlap check in do_alien_hatch / lbC00A7EA).
- *       • Otherwise the alien is placed and the countdown reloads.
- *   – If the tile is outside the viewport the countdown resets to
- *     SPAWN_COUNTDOWN_INIT (mirrors lbC00D220 which clears the slot pointer
- *     so the next viewport entry starts fresh).
- *   – One-shot slots (facehugger hatches) play the hatch sound and are
- *     deactivated after the spawn (ref: lbC00D1B4 play_alien_hatching_sample
- *     check @ main.asm#L8579).  Repeating slots (0x28/0x29) are silent.
+ * In the original game, slots are registered via lbC00D22A ONLY when a tile
+ * enters the viewport during scrolling (tile action fired at scroll edge).
+ * So a registered slot always starts near the screen border, and the 20-frame
+ * countdown (lbC00D236: `move.w #20, 8(a0)` / reload from alien struct offset
+ * 44 = $14 = 20) fires just as the tile approaches visibility.
  *
- * Per-spawn-point occupancy (user requirement):
- *   Each map spawn point tracks the index of the alien it last hatched via
- *   sp->spawned_alien_idx.  As long as that alien is alive the point will not
- *   hatch another one (the timer reloads and retries each interval).  Once the
- *   alien dies (alive == 0) the slot is free and a new alien is hatched on the
- *   next countdown expiry.  This ensures at most one living alien per spawn
- *   point at any time, regardless of how far the alien has wandered from the
- *   tile.  (The ASM used a proximity/bbox overlap check via lbC00A7EA; the
- *   per-point tracking is a stricter guarantee that also prevents the "empty
- *   map after wave" issue.)
+ * The C port pre-registers all map spawn tiles at level load, so we must
+ * replicate the "scroll-edge trigger" by restricting spawn checks to the
+ * 80-pixel approach band — the area that is inside the expanded viewport but
+ * NOT yet visible on screen.  When the tile is on screen proper the countdown
+ * is simply paused; when it leaves the expanded zone entirely the countdown
+ * and the dead-alien reference are reset so the next approach starts fresh.
+ *
+ * Summary of per-tick state machine for map spawn points (one_shot = 0):
+ *   OUTSIDE expanded vp   → reset countdown; clear dead alien ref (fresh state)
+ *   ON SCREEN proper      → pause (do nothing)
+ *   IN APPROACH BAND      → decrement countdown; when expired check occupancy:
+ *                             alien alive  → reload timer, wait
+ *                             alien dead   → spawn, reload timer
+ *
+ * Facehugger hatches (one_shot = 1) use the simpler full-expanded-vp zone
+ * since they are always triggered by direct player contact (already visible).
+ *
+ * Alien struct offset 44 = $14 = 20 confirms the reload value (lbC00D1B4:
+ * `move.w 44(a1), 8(a0)` with a1 = lbW008F94 etc. @ main.asm#L8567).
  *
  * Called from alien_update_all() every game tick.
  */
 
 void alien_spawn_tick(void)
 {
+    /* Screen visible area */
+    int sc_left   = g_camera_x;
+    int sc_right  = g_camera_x + SCREEN_W;
+    int sc_top    = g_camera_y;
+    int sc_bottom = g_camera_y + SCREEN_H;
+
+    /* Expanded viewport: 80 px beyond each screen edge (ref lbC00D17E). */
     int vp_left   = g_camera_x - SPAWN_VIEWPORT_MARGIN;
     int vp_right  = g_camera_x + SCREEN_W + SPAWN_VIEWPORT_MARGIN;
     int vp_top    = g_camera_y - SPAWN_VIEWPORT_MARGIN;
@@ -251,41 +259,64 @@ void alien_spawn_tick(void)
         SpawnPoint *sp = &s_spawn_points[i];
         if (!sp->active) continue;
 
-        int in_vp = (sp->world_x >= vp_left  && sp->world_x < vp_right &&
-                     sp->world_y >= vp_top    && sp->world_y < vp_bottom);
+        int in_expanded = (sp->world_x >= vp_left  && sp->world_x < vp_right &&
+                           sp->world_y >= vp_top    && sp->world_y < vp_bottom);
 
-        if (!in_vp) {
-            /* Left viewport: reset countdown (ref lbC00D220). */
+        if (!in_expanded) {
+            /*
+             * Tile is outside the expanded zone: reset countdown.
+             * Also clear the alien reference if that alien has since died,
+             * so the next approach can hatch a fresh one (mirrors lbC00D220
+             * which clears the slot pointer entirely).
+             */
             sp->countdown = SPAWN_COUNTDOWN_INIT;
+            if (sp->spawned_alien_idx >= 0 &&
+                g_aliens[sp->spawned_alien_idx].alive == 0)
+                sp->spawned_alien_idx = -1;
             continue;
         }
 
+        if (!sp->one_shot) {
+            /*
+             * Map spawn point (tile 0x28/0x29): only check in the 80-px
+             * off-screen approach band.  If the tile is already on screen
+             * the countdown is paused — alien spawning from a visible tile
+             * would make the alien appear out of thin air.
+             * (In the original ASM, lbC00D22A registers the slot only when
+             * the tile first enters the viewport during scrolling, so it
+             * always starts at the screen edge — never from mid-screen.)
+             */
+            int on_screen = (sp->world_x >= sc_left  && sp->world_x < sc_right &&
+                             sp->world_y >= sc_top    && sp->world_y < sc_bottom);
+            if (on_screen) continue;  /* visible: pause, don't spawn */
+        }
+
+        /* In approach band (map point) or expanded vp (one_shot): tick. */
         sp->countdown--;
         if (sp->countdown >= 0) continue;
 
         /*
-         * Countdown expired.  Check whether the alien previously hatched from
-         * this specific spawn point is still alive.  If so, reload the timer
-         * and wait — at most one living alien is allowed per spawn point.
-         * (Ref: cur_alien_dats bbox overlap guard in lbC00A7EA @ main.asm.)
+         * Countdown expired.  Check per-point occupancy:
+         * at most one living alien may exist per spawn point at any time.
          */
         if (sp->spawned_alien_idx >= 0 &&
             g_aliens[sp->spawned_alien_idx].alive != 0) {
-            /* Alien still alive — retry after another interval. */
+            /* Alien still alive — reload and keep waiting. */
             sp->countdown = SPAWN_COUNTDOWN_INIT;
             continue;
         }
 
-        /* Spawn alien at the tile's world position (ref lbC00A718/do_alien_hatch). */
+        /* Hatch an alien (ref lbC00A718 / do_alien_hatch @ main.asm#L7455). */
         int idx = spawn_alien_at(sp->world_x, sp->world_y, sp->alien_type);
         if (idx >= 0)
             sp->spawned_alien_idx = idx;
 
         if (sp->one_shot) {
-            /* Facehugger hatch: play hatch sound and deactivate slot. */
+            /* Facehugger hatch: play sound and deactivate slot. */
             audio_play_sample(SAMPLE_HATCHING_ALIEN);
             sp->active = 0;
         } else {
+            /* Map point: reload timer; next spawn gated by occupancy check. */
             sp->countdown = SPAWN_COUNTDOWN_INIT;
         }
     }
