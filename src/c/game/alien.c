@@ -17,6 +17,18 @@ Alien g_aliens[MAX_ALIENS];
 int   g_alien_count             = 0;
 WORD  g_global_aliens_extra_strength = 0;
 
+/*
+ * Player position cache — mirrors lbL0097EA / lbC0097F6 in main.asm.
+ * The original only refreshes the player positions used by alien AI every
+ * lbW0097F2 = 20 VBL frames (~400 ms at 50 Hz), giving aliens their
+ * characteristic "drift past walls before correcting" feel.
+ */
+#define TARGET_REFRESH_FRAMES 20
+static int s_cached_player_x[MAX_PLAYERS];
+static int s_cached_player_y[MAX_PLAYERS];
+static int s_cached_player_alive[MAX_PLAYERS];
+static int s_target_refresh_countdown = 0;
+
 /* Alien type table: HP base values (Ref: alien1_struct–alien7_struct @ main.asm#L5918-L5967) */
 static const WORD k_alien_type_hp[7] = {
     100,  /* type 1 */
@@ -128,8 +140,12 @@ void alien_init_variables(void)
     memset(g_aliens,       0, sizeof(g_aliens));
     memset(s_projectiles,  0, sizeof(s_projectiles));
     memset(s_spawn_points, 0, sizeof(s_spawn_points));
+    memset(s_cached_player_x,     0, sizeof(s_cached_player_x));
+    memset(s_cached_player_y,     0, sizeof(s_cached_player_y));
+    memset(s_cached_player_alive, 0, sizeof(s_cached_player_alive));
     g_alien_count = 0;
     s_spawn_count = 0;
+    s_target_refresh_countdown = 0;
 }
 
 /*
@@ -350,16 +366,19 @@ static int alien_solid_at(int wx, int wy)
 static void alien_move(Alien *a)
 {
     /* ------------------------------------------------------------------ */
-    /* 1. Find nearest living player by Manhattan distance                 */
+    /* 1. Find nearest living player using the cached positions.           */
+    /*    The cache is refreshed every TARGET_REFRESH_FRAMES frames by     */
+    /*    alien_update_all(), mirroring lbC0097F6 / lbW0097F2=20 in the   */
+    /*    original ASM (main.asm#L6396-L6415).                             */
     /* ------------------------------------------------------------------ */
     int tx = -1, ty = -1;
     int best = 0x7FFFFFFF;
     for (int i = 0; i < MAX_PLAYERS; i++) {
-        if (!g_players[i].alive) continue;
-        int ddx = g_players[i].pos_x - (int)a->pos_x;
-        int ddy = g_players[i].pos_y - (int)a->pos_y;
+        if (!s_cached_player_alive[i]) continue;
+        int ddx = s_cached_player_x[i] - (int)a->pos_x;
+        int ddy = s_cached_player_y[i] - (int)a->pos_y;
         int d   = (ddx < 0 ? -ddx : ddx) + (ddy < 0 ? -ddy : ddy);
-        if (d < best) { best = d; tx = g_players[i].pos_x; ty = g_players[i].pos_y; }
+        if (d < best) { best = d; tx = s_cached_player_x[i]; ty = s_cached_player_y[i]; }
     }
     if (tx < 0) return;  /* no living player */
 
@@ -444,6 +463,24 @@ void alien_update_all(void)
 {
     /* Lazy viewport-triggered spawning (mirrors lbC00D17E @ main.asm#L8547). */
     alien_spawn_tick();
+
+    /*
+     * Refresh the player position cache every TARGET_REFRESH_FRAMES frames.
+     * Mirrors lbC0097F6 in the original ASM: the countdown starts at
+     * lbW0097F2=20 and is only reloaded when it underflows, so the alien AI
+     * works from a position snapshot that is up to 20 VBL frames (~400 ms)
+     * old.  This is what gives the original aliens their characteristic
+     * "momentum" — they don't instantly correct course every frame.
+     * (main.asm#L6396-L6415)
+     */
+    if (--s_target_refresh_countdown <= 0) {
+        s_target_refresh_countdown = TARGET_REFRESH_FRAMES;
+        for (int i = 0; i < MAX_PLAYERS; i++) {
+            s_cached_player_alive[i] = g_players[i].alive;
+            s_cached_player_x[i]    = g_players[i].pos_x;
+            s_cached_player_y[i]    = g_players[i].pos_y;
+        }
+    }
 
     for (int i = 0; i < g_alien_count; i++) {
         if (g_aliens[i].alive == 0) continue;
