@@ -24,6 +24,7 @@
 #include "intex.h"
 #include "gameover.h"
 #include "end.h"
+#include "debug.h"
 #include "../hal/hal.h"
 #include "../hal/video.h"
 #include "../hal/input.h"
@@ -167,6 +168,9 @@ void level_game_loop_external(void)
         if (g_key_pressed == KEY_M) {
             g_map_overview_on = !g_map_overview_on;
         }
+        if (g_key_pressed == KEY_D) {
+            g_debug_overlay_on = !g_debug_overlay_on;
+        }
 
         /* --- Update logic --------------------------------------------- */
         for (int i = 0; i < g_number_players; i++) {
@@ -249,7 +253,10 @@ void level_game_loop_external(void)
         }
 
         palette_tick();
-        video_present();
+        video_upload_framebuffer();
+        if (g_debug_overlay_on && !g_map_overview_on)
+            debug_render_overlay();
+        video_flip();
     }
 end_loop:;
 }
