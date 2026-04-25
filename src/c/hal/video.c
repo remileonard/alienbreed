@@ -12,6 +12,10 @@ SDL_Window   *g_window    = NULL;
 UBYTE         g_framebuffer[320 * 256];
 Uint32        g_palette[32];
 
+/* Beam effect: scanline range where non-zero pixels are rendered white */
+int g_beam_y      = -1;
+int g_beam_height =  1;
+
 /* SDL texture used as intermediate upload target */
 static SDL_Texture *s_screen_tex = NULL;
 
@@ -83,9 +87,19 @@ void video_present(void)
 
     Uint32 *dst = (Uint32 *)pixels;
     const UBYTE *src = g_framebuffer;
+    const Uint32 white = 0xFFFFFFFF;
+
+    /* Precompute beam range once so the per-scanline check is a simple int compare */
+    int beam_lo = g_beam_y;
+    int beam_hi = (g_beam_y >= 0) ? g_beam_y + g_beam_height : -1;
+
     for (int y = 0; y < 256; y++) {
+        int is_beam = (y >= beam_lo && y < beam_hi);
         for (int x = 0; x < 320; x++) {
-            dst[x] = g_palette[src[x] & 0x1F];
+            UBYTE idx = src[x] & 0x1F;
+            /* On beam scanlines, all non-zero color indices appear white —
+             * mirrors the Amiga copper overwriting COLOR01-31 with $FFF. */
+            dst[x] = (is_beam && idx != 0) ? white : g_palette[idx];
         }
         src += 320;
         dst  = (Uint32 *)((UBYTE *)dst + pitch);
