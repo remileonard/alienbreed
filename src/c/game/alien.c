@@ -103,23 +103,6 @@ static void spawn_alien_at(int wx, int wy, int alien_type)
     a->type_idx = alien_type - 1;
 }
 
-/* -----------------------------------------------------------------------
- * Probabilistic direct spawn when the player steps on a spawn tile (0x28/0x29).
- *
- * Mirrors lbC00A718 @ main.asm#L7385:
- *   move.w lbW0005AA,d0  ; threshold = 20
- *   move.w rnd_number,d1  ; random 0-255  (rand(256) via VBL update)
- *   cmp.w  d0,d1
- *   bpl    return          ; skip if rnd >= 20  (~92% of frames)
- * ≈7.8% chance per frame (20/256).  No hatching sound.
- * ----------------------------------------------------------------------- */
-void alien_try_spawn_at(int wx, int wy)
-{
-    if ((rand() % 256) >= 20) return;
-    spawn_alien_at(wx, wy, alien_type_for_level());
-    /* No SAMPLE_HATCHING_ALIEN — direct tile-step spawns are silent */
-}
-
 void alien_init_variables(void)
 {
     memset(g_aliens,       0, sizeof(g_aliens));
@@ -130,27 +113,47 @@ void alien_init_variables(void)
 }
 
 /*
- * Reset alien spawn state.
+ * Scan the loaded map for alien spawn tiles and register them as deferred
+ * spawn points.  No aliens are created immediately — spawning is driven by
+ * alien_spawn_tick() which fires when each tile enters the expanded viewport,
+ * exactly as in the original ASM.
  *
- * Tiles 0x28/0x29 (ALIEN_SPAWN_BIG/SMALL) are player-step-on triggers
- * (lbC004914 / lbC0049D6 → lbC00A718) and do NOT register deferred spawn
- * points.  Tile 0x34 (ALIEN_HOLE) is tile_not_used in the main tile action
- * table.  No map scan is needed; just clear the spawn slot array.
+ * Tile attributes that mark alien spawn locations:
+ *   0x28 – TILE_ALIEN_SPAWN_BIG   (respawning large alien, e.g. lbW008F94/lbW009094)
+ *   0x29 – TILE_ALIEN_SPAWN_SMALL (respawning small alien, e.g. lbW008FD4/lbW009414)
  *
- * Ref: lbC004914 / lbC0049D6 → lbC00A718 @ main.asm#L2513-L2569;
- *      lbC00D17E / lbC00D1B4 @ main.asm#L8547-L8575 (slot-based system).
+ * Tile 0x34 (TILE_ALIEN_HOLE) is tile_not_used in the main tile action table
+ * and is NOT a spawn point.
+ *
+ * In the original game the second tile-scan table (lbC0041B8 loop) registers
+ * nearby tiles of these types into the two spawn slots (lbL00D29A / lbL00D2AA)
+ * via lbC00D22A → lbC00D236.  Pre-registering all map tiles at level load is
+ * an equivalent approximation (the viewport gate in alien_spawn_tick() ensures
+ * spawning only happens when the tile is on screen).
+ *
+ * Ref: lbC0049EA / lbC004A18 / lbC004A28 → lbC00D22A → lbC00D236 @
+ *      main.asm#L2204-L2585; lbC00D17E / lbC00D1B4 @ main.asm#L8547-L8575.
  */
 void alien_spawn_from_map(void)
 {
-    /*
-     * In the original ASM, tiles 0x28/0x29 (ALIEN_SPAWN_BIG/SMALL) are
-     * player-step-on triggers that call lbC00A718 directly (random probability
-     * check, immediate spawn) — not deferred viewport spawn points.  Tile 0x34
-     * (ALIEN_HOLE) is tile_not_used in the main tile action table.
-     * No map scan needed here: just reset the spawn state.
-     * Ref: lbC004914 / lbC0049D6 → lbC00A718 @ main.asm#L2513-L2569.
-     */
-    s_spawn_count = 0;
+    int alien_type = alien_type_for_level();
+    s_spawn_count  = 0;
+
+    for (int row = 0; row < MAP_ROWS && s_spawn_count < MAX_SPAWN_POINTS; row++) {
+        for (int col = 0; col < MAP_COLS && s_spawn_count < MAX_SPAWN_POINTS; col++) {
+            UBYTE attr = tilemap_attr(&g_cur_map, col, row);
+            if (attr != TILE_ALIEN_SPAWN_BIG &&
+                attr != TILE_ALIEN_SPAWN_SMALL) continue;
+
+            SpawnPoint *sp = &s_spawn_points[s_spawn_count++];
+            sp->world_x    = (WORD)(col * MAP_TILE_W + MAP_TILE_W / 2);
+            sp->world_y    = (WORD)(row * MAP_TILE_H + MAP_TILE_H / 2);
+            sp->countdown  = SPAWN_COUNTDOWN_INIT;
+            sp->alien_type = alien_type;
+            sp->active     = 1;
+            sp->one_shot   = 0;
+        }
+    }
 }
 
 /*
@@ -189,16 +192,27 @@ void alien_spawn_near(int wx, int wy)
  *
  * For each active spawn point:
  *   – If its pixel centre is inside the expanded viewport, the countdown
- *     decrements by 1.  When it reaches −1 an alien is spawned and the
- *     countdown resets to SPAWN_COUNTDOWN_INIT (mirrors lbC00D1B4 line
- *     `move.w 44(a1), 8(a0)` which reloads the timer).
+ *     decrements by 1.  When it reaches −1 a spawn is attempted:
+ *       • If any living alien is already within SPAWN_ZONE_RADIUS of the
+ *         tile centre the spawn is skipped (mirrors the cur_alien_dats
+ *         bounding-box overlap check in do_alien_hatch / lbC00A7EA).
+ *       • Otherwise the alien is placed and the countdown reloads.
  *   – If the tile is outside the viewport the countdown resets to
  *     SPAWN_COUNTDOWN_INIT (mirrors lbC00D220 which clears the slot pointer
  *     so the next viewport entry starts fresh).
- *   – One-shot slots (facehugger hatches) are deactivated after the spawn.
+ *   – One-shot slots (facehugger hatches) play the hatch sound and are
+ *     deactivated after the spawn (ref: lbC00D1B4 play_alien_hatching_sample
+ *     check @ main.asm#L8579).  Repeating slots (0x28/0x29) are silent.
  *
  * Called from alien_update_all() every game tick.
  */
+
+/* Radius around a spawn tile inside which a living alien blocks re-spawning.
+ * Mirrors the cur_alien_dats bounding-box overlap check (do_alien_hatch /
+ * lbC00A7EA @ main.asm#L7448).  The spawn box for big aliens is ≈20×20 px,
+ * centred 10 px from the tile edge, so 32 px gives a comfortable margin. */
+#define SPAWN_ZONE_RADIUS 32
+
 void alien_spawn_tick(void)
 {
     int vp_left   = g_camera_x - SPAWN_VIEWPORT_MARGIN;
@@ -222,13 +236,38 @@ void alien_spawn_tick(void)
         sp->countdown--;
         if (sp->countdown >= 0) continue;
 
-        /* Countdown expired: spawn alien and reload timer (ref lbC00D1B4). */
+        /*
+         * Countdown expired.  Before spawning, check whether any living alien
+         * is already within SPAWN_ZONE_RADIUS of this tile.  This mirrors the
+         * cur_alien_dats bounding-box overlap check in lbC00A7EA @ main.asm:
+         * the original only hatches if no existing alien's spawn box overlaps
+         * the new one, ensuring at most one alien per spawn zone at a time.
+         */
+        int occupied = 0;
+        for (int j = 0; j < g_alien_count; j++) {
+            Alien *a = &g_aliens[j];
+            if (!a->alive) continue;
+            int dx = (int)a->pos_x - (int)sp->world_x;
+            int dy = (int)a->pos_y - (int)sp->world_y;
+            if (dx < 0) dx = -dx;
+            if (dy < 0) dy = -dy;
+            if (dx < SPAWN_ZONE_RADIUS && dy < SPAWN_ZONE_RADIUS) {
+                occupied = 1;
+                break;
+            }
+        }
+
+        if (occupied) {
+            /* Alien already in zone — reload timer and wait. */
+            sp->countdown = SPAWN_COUNTDOWN_INIT;
+            continue;
+        }
+
+        /* Spawn alien at the tile's world position (ref lbC00A718/do_alien_hatch). */
         spawn_alien_at(sp->world_x, sp->world_y, sp->alien_type);
 
         if (sp->one_shot) {
-            /* Facehugger hatch: play hatch sound and deactivate slot.
-             * Ref: play_alien_hatching_sample check in lbC00D1B4 @ main.asm#L8579.
-             * Direct tile-step spawns (0x28/0x29) do NOT play this sound. */
+            /* Facehugger hatch: play hatch sound and deactivate slot. */
             audio_play_sample(SAMPLE_HATCHING_ALIEN);
             sp->active = 0;
         } else {

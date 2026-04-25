@@ -37,9 +37,9 @@ extern WORD  g_global_aliens_extra_strength;
 /* Initialise alien array. */
 void alien_init_variables(void);
 
-/* Spawn aliens from hatch tiles in the current map.
- * In the ASM, tiles 0x28/0x29 are per-step-on triggers (lbC00A718), not
- * deferred spawn points; this function only resets the spawn slot state. */
+/* Spawn aliens from spawn tiles (0x28/0x29) found in the current map.
+ * Scans the map at level load and registers deferred spawn points.
+ * Ref: lbC0049EA/lbC004A18/lbC004A28 → lbC00D22A → lbC00D236 @ main.asm. */
 void alien_spawn_from_map(void);
 
 /* Update all living aliens (movement + AI). */
@@ -55,16 +55,6 @@ void aliens_collisions_with_players(void);
 
 /* Kill an alien at index i (awards score, plays SFX). */
 void alien_kill(int i);
-
-/*
- * Probabilistic direct spawn triggered when the player steps on a tile with
- * attribute 0x28 (TILE_ALIEN_SPAWN_BIG) or 0x29 (TILE_ALIEN_SPAWN_SMALL).
- * Mirrors lbC004914 / lbC0049D6 → lbC00A718 @ main.asm#L2513-L2568:
- * ~7.8% chance per frame (rnd%256 < 20); NO hatching sound.
- */
-void alien_try_spawn_at(int wx, int wy);
-
-
 
 /*
  * Register a one-shot spawn point at (wx, wy).
