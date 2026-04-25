@@ -174,9 +174,8 @@ void audio_stop_music(void)
 
 void audio_set_music_volume(int vol)
 {
-    /* Not implemented for Soundmon (no global volume in the original player).
-     * SDL_mixer volume affects only Mix_Music tracks, not our hook stream. */
-    (void)vol;
+    /* vol: 0-128 (SDL_mixer scale), forwarded directly to the Soundmon player. */
+    sm_set_volume(s_music, vol);
 }
 
 void audio_pause_music(void)
