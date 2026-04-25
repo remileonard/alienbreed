@@ -347,6 +347,37 @@ static int alien_solid_at(int wx, int wy)
 }
 
 /*
+ * Alien-alien separation check — mirrors lbC00A96C (X-axis) and lbC00A9D6
+ * (Y-axis) in main.asm#L7515-L7596.
+ *
+ * The ASM keeps an array of bounding-box records (cur_alien1_dats …
+ * cur_alien7_dats, each dc.w x1,y1,x2,y2 + dc.l struct_ptr) and iterates
+ * them to detect whether a proposed X or Y step would produce an AABB overlap
+ * with another alien.  If it would, the movement is cancelled for that axis.
+ *
+ * The alien bounding box size comes from lbW008F14: dc.w 0,0,$20,$20
+ * (offsets 0,0 → size 32,32 relative to pos), so the box is
+ * [pos_x, pos_x+32] × [pos_y, pos_y+32].
+ *
+ * Returns 1 if placing alien self_idx at world pixel (nx, ny) would overlap
+ * any other living (alive==1) alien using the same 32×32 box.
+ */
+static int alien_overlaps_other(int self_idx, int nx, int ny)
+{
+    for (int j = 0; j < g_alien_count; j++) {
+        if (j == self_idx) continue;
+        if (g_aliens[j].alive != 1) continue;
+        int ox = (int)g_aliens[j].pos_x;
+        int oy = (int)g_aliens[j].pos_y;
+        /* AABB: [nx, nx+32] vs [ox, ox+32]  and  [ny, ny+32] vs [oy, oy+32] */
+        if (nx < ox + 32 && nx + 32 > ox &&
+            ny < oy + 32 && ny + 32 > oy)
+            return 1;
+    }
+    return 0;
+}
+
+/*
  * Move one alien toward the nearest living player.
  *
  * Re-implementation of the ASM movement at lbC009CE2 / lbC009E1A
@@ -363,7 +394,7 @@ static int alien_solid_at(int wx, int wy)
  * Bounding box half-extents (8 px) are derived from the alien type struct
  * collision offsets (lbW00A29A … lbW00A31E, main.asm#L7085-L7096).
  */
-static void alien_move(Alien *a)
+static void alien_move(int self_idx, Alien *a)
 {
     /* ------------------------------------------------------------------ */
     /* 1. Find nearest living player using the cached positions.           */
@@ -396,7 +427,8 @@ static void alien_move(Alien *a)
         /* Move right: check top-right and bottom-right corners */
         int nx = ax + spd;
         if (!alien_solid_at(nx + 8, ay - 8) &&
-            !alien_solid_at(nx + 8, ay + 8)) {
+            !alien_solid_at(nx + 8, ay + 8) &&
+            !alien_overlaps_other(self_idx, nx, ay)) {
             ax = nx;
             dir_bits |= 4;  /* right */
         }
@@ -404,7 +436,8 @@ static void alien_move(Alien *a)
         /* Move left: check top-left and bottom-left corners */
         int nx = ax - spd;
         if (!alien_solid_at(nx - 8, ay - 8) &&
-            !alien_solid_at(nx - 8, ay + 8)) {
+            !alien_solid_at(nx - 8, ay + 8) &&
+            !alien_overlaps_other(self_idx, nx, ay)) {
             ax = nx;
             dir_bits |= 8;  /* left */
         }
@@ -418,7 +451,8 @@ static void alien_move(Alien *a)
         /* Move down: check bottom-left and bottom-right corners */
         int ny = ay + spd;
         if (!alien_solid_at(ax - 8, ny + 8) &&
-            !alien_solid_at(ax + 8, ny + 8)) {
+            !alien_solid_at(ax + 8, ny + 8) &&
+            !alien_overlaps_other(self_idx, ax, ny)) {
             ay = ny;
             dir_bits |= 1;  /* down */
         }
@@ -426,7 +460,8 @@ static void alien_move(Alien *a)
         /* Move up: check top-left and top-right corners */
         int ny = ay - spd;
         if (!alien_solid_at(ax - 8, ny - 8) &&
-            !alien_solid_at(ax + 8, ny - 8)) {
+            !alien_solid_at(ax + 8, ny - 8) &&
+            !alien_overlaps_other(self_idx, ax, ny)) {
             ay = ny;
             dir_bits |= 2;  /* up */
         }
@@ -495,7 +530,7 @@ void alien_update_all(void)
             continue;
         }
 
-        alien_move(&g_aliens[i]);
+        alien_move(i, &g_aliens[i]);
         g_aliens[i].anim_counter++;
     }
 
