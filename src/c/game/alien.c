@@ -417,12 +417,23 @@ void aliens_collisions_with_weapons(void)
         for (int ai = 0; ai < g_alien_count; ai++) {
             if (g_aliens[ai].alive != 1) continue;
 
-            int dx = s_projectiles[pi].x - g_aliens[ai].pos_x;
-            int dy = s_projectiles[pi].y - g_aliens[ai].pos_y;
-            if (dx < 0) dx = -dx;
-            if (dy < 0) dy = -dy;
+            /* AABB collision: projectile 10×10 box (offset +4) vs alien 32×32 box.
+             * Ref: aliens_collisions_with_weapons @ main.asm:
+             *   projectile bbox: add.l #$40004 (offset x+4, y+4)
+             *                    add.l #$A000A (width 10, height 10)
+             *   alien bbox:      [pos_x, pos_x+32] × [pos_y, pos_y+32]
+             *                    (from lbW008F14 dc.w 0,0,$20,$20). */
+            int bx1 = (int)s_projectiles[pi].x + 4;
+            int bx2 = bx1 + 10;
+            int by1 = (int)s_projectiles[pi].y + 4;
+            int by2 = by1 + 10;
 
-            if (dx < 8 && dy < 8) {
+            int ax1 = (int)g_aliens[ai].pos_x;
+            int ax2 = ax1 + 32;
+            int ay1 = (int)g_aliens[ai].pos_y;
+            int ay2 = ay1 + 32;
+
+            if (ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1) {
                 s_projectiles[pi].active = 0;
                 g_aliens[ai].strength -= s_projectiles[pi].strength;
                 if (g_aliens[ai].strength <= 0) {

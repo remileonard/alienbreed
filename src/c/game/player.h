@@ -127,10 +127,18 @@ typedef struct {
 #define PLAYER_DEATH_FRAMES  32
 
 /* Player hit-box offset and size relative to pos_x/pos_y.
- * Derived from add.l #$80008 (offset +8) and add.l #$100010 (size 16×16)
- * in aliens_collisions_with_players @ main.asm#L7600-L7603. */
-#define PLAYER_BBOX_OFFSET  8
-#define PLAYER_BBOX_SIZE   16
+ *
+ * In the C port pos_x/pos_y is the *centre* of the 32×32 player sprite
+ * (the sprite is blitted at x-w/2, y-h/2).  The ASM origin is the sprite
+ * top-left, and the hit box is the inner 16×16 starting 8 px from that
+ * top-left (add.l #$80008 / add.l #$100010 @ main.asm#L7600-L7603).
+ *
+ * Converting to C centre-origin:
+ *   ASM top-left + 8 = sprite_centre − 16 + 8 = sprite_centre − 8
+ *
+ * So the hit box spans [pos_x−8 … pos_x+8] × [pos_y−8 … pos_y+8]. */
+#define PLAYER_BBOX_OFFSET  (-8)
+#define PLAYER_BBOX_SIZE     16
 
 extern Player g_players[MAX_PLAYERS];
 
