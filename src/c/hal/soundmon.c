@@ -154,6 +154,7 @@ struct SM_Module {
 
     int       playing;
     int       paused;
+    int       master_volume; /* 0-128, applied to final mix output        */
 
     SDL_mutex *mutex;
 };
@@ -294,8 +295,9 @@ void sm_play(SM_Module *m, int output_rate)
     m->output_rate = output_rate;
     m->spf         = (double)output_rate / SM_TICK_HZ;
     m->tick_acc    = 0.0;
-    m->playing     = 1;
-    m->paused      = 0;
+    m->playing       = 1;
+    m->paused        = 0;
+    m->master_volume = 128;
     SDL_UnlockMutex(m->mutex);
 }
 
@@ -946,10 +948,12 @@ void sm_mix_callback(void *udata, Uint8 *stream, int len)
             /* Linear interpolation */
             int sample = (int)s0 + (int)((double)((int)s1 - (int)s0) * frac);
 
-            /* Apply volume (0-64 → scale sample) */
+            /* Apply volume (0-64 → scale sample).
+             * Divide by 4 (not 32) so each channel contributes ≈ ±2032;
+             * four channels combined reach ≈ ±8128 — well within int16. */
             int vol = (int)ch->hw_volume;
             if (vol > 64) vol = 64;
-            sample = sample * vol / 32;  /* result range ≈ -512..511 */
+            sample = sample * vol / 4;
 
             /* Advance position */
             ch->pos += step;
@@ -983,6 +987,10 @@ void sm_mix_callback(void *udata, Uint8 *stream, int len)
             }
         }
 
+        /* Apply master volume (0-128) */
+        mix_l = mix_l * m->master_volume / 128;
+        mix_r = mix_r * m->master_volume / 128;
+
         /* Clamp to int16 range */
         if (mix_l >  32767) mix_l =  32767;
         if (mix_l < -32768) mix_l = -32768;
@@ -993,5 +1001,19 @@ void sm_mix_callback(void *udata, Uint8 *stream, int len)
         out[f * 2 + 1] = (int16_t)mix_r;
     }
 
+    SDL_UnlockMutex(m->mutex);
+}
+
+/* ================================================================== */
+/* sm_set_volume — set master output volume (0 = silent, 128 = full)  */
+/* ================================================================== */
+
+void sm_set_volume(SM_Module *m, int vol)
+{
+    if (!m) return;
+    if (vol < 0)   vol = 0;
+    if (vol > 128) vol = 128;
+    SDL_LockMutex(m->mutex);
+    m->master_volume = vol;
     SDL_UnlockMutex(m->mutex);
 }

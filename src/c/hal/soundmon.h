@@ -67,6 +67,9 @@ void sm_stop(SM_Module *m);
 void sm_pause(SM_Module *m);
 void sm_resume(SM_Module *m);
 
+/* Set master output volume: 0 = silent, 128 = full (default). */
+void sm_set_volume(SM_Module *m, int vol);
+
 /* Mix_HookMusic callback — called by the SDL audio thread. */
 void sm_mix_callback(void *udata, Uint8 *stream, int len);
 
