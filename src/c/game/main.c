@@ -174,18 +174,31 @@ void level_game_loop_external(void)
         }
 
         /* --- Update logic --------------------------------------------- */
+        /* Player input/movement runs every frame, mirroring the Amiga VBL
+         * interrupt handler (lbC00152C @ main.asm) which processes players
+         * at the full 50 Hz VBL rate.                                      */
         for (int i = 0; i < g_number_players; i++) {
             if (g_players[i].alive)
                 player_update(&g_players[i], player_get_input(&g_players[i]));
         }
 
-        alien_update_all();
+        /* Alien AI, collisions and level timers mirror the game_level_loop
+         * in main.asm which only runs every 2 VBLs (25 Hz on PAL).
+         * The lbW0004BC counter (lines 870-874) gates the game loop signal
+         * lbW0004BA to fire once per 2 VBL interrupts.
+         * Running these at 50 Hz in the C port doubled alien speed.        */
+        static int s_game_tick = 0;
+        if (++s_game_tick >= 2) {
+            s_game_tick = 0;
 
-        aliens_collisions_with_weapons();
-        aliens_collisions_with_players();
+            alien_update_all();
 
-        level_tick_timer();
-        level_check_destruction();
+            aliens_collisions_with_weapons();
+            aliens_collisions_with_players();
+
+            level_tick_timer();
+            level_check_destruction();
+        }
 
         /* Check if all players are dead */
         int any_alive = 0;
