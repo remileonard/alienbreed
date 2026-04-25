@@ -62,6 +62,13 @@ typedef struct {
     int  alien_type;         /* 1-based alien type (1=weakest … 7=strongest) */
     int  active;             /* 1 = slot occupied */
     int  one_shot;           /* 1 = deactivate after first spawn (facehugger hatch) */
+    int  spawned_alien_idx;  /* index of the alien last spawned from this point,
+                              * or −1 if none yet.  Re-spawn is suppressed while
+                              * g_aliens[spawned_alien_idx].alive != 0 so that at
+                              * most one alien exists per spawn point at any time.
+                              * (Mirrors the cur_alien_dats bbox overlap check in
+                              * lbC00A7EA @ main.asm, generalised to per-point
+                              * tracking per user requirement.) */
 } SpawnPoint;
 
 static SpawnPoint s_spawn_points[MAX_SPAWN_POINTS];
@@ -85,22 +92,35 @@ static int alien_type_for_level(void)
 
 /* -----------------------------------------------------------------------
  * Place one alien at world-pixel position (wx, wy) of the given type.
+ * Returns the index in g_aliens[] of the newly placed alien, or -1 if
+ * no slot was available.  Dead slots are recycled before appending new
+ * ones so that the pool does not exhaust after many spawns/deaths.
  * ----------------------------------------------------------------------- */
-static void spawn_alien_at(int wx, int wy, int alien_type)
+static int spawn_alien_at(int wx, int wy, int alien_type)
 {
-    if (g_alien_count >= MAX_ALIENS) return;
-
     WORD base_hp = (alien_type >= 1 && alien_type <= 7)
                    ? k_alien_type_hp[alien_type - 1]
                    : k_alien_type_hp[0];
 
-    Alien *a    = &g_aliens[g_alien_count++];
+    /* Recycle the first dead slot before falling back to appending. */
+    int idx = -1;
+    for (int i = 0; i < g_alien_count; i++) {
+        if (g_aliens[i].alive == 0) { idx = i; break; }
+    }
+    if (idx < 0) {
+        if (g_alien_count >= MAX_ALIENS) return -1;
+        idx = g_alien_count++;
+    }
+
+    Alien *a    = &g_aliens[idx];
     a->pos_x    = (WORD)wx;
     a->pos_y    = (WORD)wy;
     a->speed    = (WORD)(2 + g_global_aliens_extra_strength / 5);
     a->strength = (WORD)(base_hp + g_global_aliens_extra_strength);
     a->alive    = 1;
     a->type_idx = alien_type - 1;
+    a->death_frame = 0;
+    return idx;
 }
 
 void alien_init_variables(void)
@@ -152,6 +172,7 @@ void alien_spawn_from_map(void)
             sp->alien_type = alien_type;
             sp->active     = 1;
             sp->one_shot   = 0;
+            sp->spawned_alien_idx = -1;
         }
     }
 }
@@ -181,6 +202,7 @@ void alien_spawn_near(int wx, int wy)
     sp->alien_type = alien_type_for_level();
     sp->active     = 1;
     sp->one_shot   = 1;
+    sp->spawned_alien_idx = -1;
 }
 
 /*
@@ -204,14 +226,19 @@ void alien_spawn_near(int wx, int wy)
  *     deactivated after the spawn (ref: lbC00D1B4 play_alien_hatching_sample
  *     check @ main.asm#L8579).  Repeating slots (0x28/0x29) are silent.
  *
+ * Per-spawn-point occupancy (user requirement):
+ *   Each map spawn point tracks the index of the alien it last hatched via
+ *   sp->spawned_alien_idx.  As long as that alien is alive the point will not
+ *   hatch another one (the timer reloads and retries each interval).  Once the
+ *   alien dies (alive == 0) the slot is free and a new alien is hatched on the
+ *   next countdown expiry.  This ensures at most one living alien per spawn
+ *   point at any time, regardless of how far the alien has wandered from the
+ *   tile.  (The ASM used a proximity/bbox overlap check via lbC00A7EA; the
+ *   per-point tracking is a stricter guarantee that also prevents the "empty
+ *   map after wave" issue.)
+ *
  * Called from alien_update_all() every game tick.
  */
-
-/* Radius around a spawn tile inside which a living alien blocks re-spawning.
- * Mirrors the cur_alien_dats bounding-box overlap check (do_alien_hatch /
- * lbC00A7EA @ main.asm#L7448).  The spawn box for big aliens is ≈20×20 px,
- * centred 10 px from the tile edge, so 32 px gives a comfortable margin. */
-#define SPAWN_ZONE_RADIUS 32
 
 void alien_spawn_tick(void)
 {
@@ -237,34 +264,22 @@ void alien_spawn_tick(void)
         if (sp->countdown >= 0) continue;
 
         /*
-         * Countdown expired.  Before spawning, check whether any living alien
-         * is already within SPAWN_ZONE_RADIUS of this tile.  This mirrors the
-         * cur_alien_dats bounding-box overlap check in lbC00A7EA @ main.asm:
-         * the original only hatches if no existing alien's spawn box overlaps
-         * the new one, ensuring at most one alien per spawn zone at a time.
+         * Countdown expired.  Check whether the alien previously hatched from
+         * this specific spawn point is still alive.  If so, reload the timer
+         * and wait — at most one living alien is allowed per spawn point.
+         * (Ref: cur_alien_dats bbox overlap guard in lbC00A7EA @ main.asm.)
          */
-        int occupied = 0;
-        for (int j = 0; j < g_alien_count; j++) {
-            Alien *a = &g_aliens[j];
-            if (!a->alive) continue;
-            int dx = (int)a->pos_x - (int)sp->world_x;
-            int dy = (int)a->pos_y - (int)sp->world_y;
-            if (dx < 0) dx = -dx;
-            if (dy < 0) dy = -dy;
-            if (dx < SPAWN_ZONE_RADIUS && dy < SPAWN_ZONE_RADIUS) {
-                occupied = 1;
-                break;
-            }
-        }
-
-        if (occupied) {
-            /* Alien already in zone — reload timer and wait. */
+        if (sp->spawned_alien_idx >= 0 &&
+            g_aliens[sp->spawned_alien_idx].alive != 0) {
+            /* Alien still alive — retry after another interval. */
             sp->countdown = SPAWN_COUNTDOWN_INIT;
             continue;
         }
 
         /* Spawn alien at the tile's world position (ref lbC00A718/do_alien_hatch). */
-        spawn_alien_at(sp->world_x, sp->world_y, sp->alien_type);
+        int idx = spawn_alien_at(sp->world_x, sp->world_y, sp->alien_type);
+        if (idx >= 0)
+            sp->spawned_alien_idx = idx;
 
         if (sp->one_shot) {
             /* Facehugger hatch: play hatch sound and deactivate slot. */
