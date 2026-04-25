@@ -79,6 +79,12 @@ void video_quit(void)
 
 void video_present(void)
 {
+    video_upload_framebuffer();
+    video_flip();
+}
+
+void video_upload_framebuffer(void)
+{
     void  *pixels;
     int    pitch;
 
@@ -108,7 +114,36 @@ void video_present(void)
     SDL_UnlockTexture(s_screen_tex);
     SDL_RenderClear(g_renderer);
     SDL_RenderCopy(g_renderer, s_screen_tex, NULL, NULL);
+}
+
+void video_flip(void)
+{
     SDL_RenderPresent(g_renderer);
+}
+
+void video_overlay_fill_rect(int x, int y, int w, int h,
+                              Uint8 r, Uint8 g, Uint8 b, Uint8 a)
+{
+    SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(g_renderer, r, g, b, a);
+    SDL_Rect rect = { x, y, w, h };
+    SDL_RenderFillRect(g_renderer, &rect);
+}
+
+void video_overlay_rect_outline(int x, int y, int w, int h,
+                                 Uint8 r, Uint8 g, Uint8 b, Uint8 a)
+{
+    SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(g_renderer, r, g, b, a);
+    SDL_Rect rect = { x, y, w, h };
+    SDL_RenderDrawRect(g_renderer, &rect);
+}
+
+void video_overlay_draw_point(int x, int y, Uint8 r, Uint8 g, Uint8 b, Uint8 a)
+{
+    SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(g_renderer, r, g, b, a);
+    SDL_RenderDrawPoint(g_renderer, x, y);
 }
 
 void video_clear(void)

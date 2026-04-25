@@ -42,6 +42,7 @@ set(GAME_SOURCES
     src/c/game/alien.c
     src/c/game/level.c
     src/c/game/hud.c
+    src/c/game/debug.c
     src/c/game/story.c
     src/c/game/menu.c
     src/c/game/briefing.c

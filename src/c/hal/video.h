@@ -32,6 +32,32 @@ void video_quit(void);
  * Converts the indexed g_framebuffer through g_palette and blits. */
 void video_present(void);
 
+/* Upload the indexed framebuffer to the renderer without calling
+ * SDL_RenderPresent.  Use this when you need to draw additional
+ * overlays with the video_overlay_* functions before the final flip. */
+void video_upload_framebuffer(void);
+
+/* Present the renderer contents that have already been uploaded.
+ * Pair with video_upload_framebuffer(). */
+void video_flip(void);
+
+/*
+ * Overlay drawing helpers — must be called between
+ * video_upload_framebuffer() and video_flip().
+ * All coordinates are in the 320×256 logical screen space.
+ */
+
+/* Draw a filled rectangle directly on the renderer using an RGBA color. */
+void video_overlay_fill_rect(int x, int y, int w, int h,
+                              Uint8 r, Uint8 g, Uint8 b, Uint8 a);
+
+/* Draw a hollow rectangle outline (1 pixel thick) using an RGBA color. */
+void video_overlay_rect_outline(int x, int y, int w, int h,
+                                 Uint8 r, Uint8 g, Uint8 b, Uint8 a);
+
+/* Draw a single point using an RGBA color. */
+void video_overlay_draw_point(int x, int y, Uint8 r, Uint8 g, Uint8 b, Uint8 a);
+
 /* Clear the framebuffer to color index 0. */
 void video_clear(void);
 
