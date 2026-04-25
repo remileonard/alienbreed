@@ -67,9 +67,9 @@ void sprite_draw_player(int player_idx, int x, int y, int facing);
  * at screen position (x, y).
  * anim_frame: 0, 1, or 2 — index into the 3-frame walk cycle.
  * Atlas column = direction * 32 px.
- * Atlas row depends on the loaded atlas type:
- *   COMPACT → y = anim_frame * 32       (most BO files)
- *   LEGACY  → y = {0, 96, 128}          (L0BO and LEGACY-flagged levels)
+ * Atlas row = anim_frame * 32 (identical for COMPACT and LEGACY atlas types;
+ *   lbL01B036 main walk sequence uses entries at y=0,32,64 in both lbW019A8E
+ *   and lbW01945E — see alien_gfx.h for details).
  * Color index 0 is transparent (Ref: blitter minterm $CA, main.asm#L12365).
  */
 void sprite_draw_alien(int direction, int anim_frame, int x, int y);

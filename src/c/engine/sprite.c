@@ -276,16 +276,13 @@ void sprite_draw_alien(int direction, int anim_frame, int x, int y)
 
     int atlas_x = direction * ALIEN_SPRITE_W;
 
-    /* Row depends on atlas layout type (Ref: main.asm atlas descriptors):
-     *   COMPACT (lbW019A8E etc.): y = frame * 32   — most levels
-     *   LEGACY  (lbW01945E):     y = {0, 96, 128}  — L0BO / LEGACY levels */
-    static const int k_legacy_y[3] = {0, 96, 128};
-    int atlas_y;
-    if (alien_gfx_get_atlas_type() == ALIEN_ATLAS_LEGACY) {
-        atlas_y = k_legacy_y[anim_frame];
-    } else {
-        atlas_y = anim_frame * ALIEN_WALK_FRAME_STRIDE;
-    }
+    /* Walk frame Y = frame_idx * 32 for ALL atlas types.
+     * Both COMPACT (lbW019A8E) and LEGACY (lbW01945E) store the main walk
+     * cycle at y=0, y=32, y=64: lbL01B036 references entries 100-123 in
+     * lbW01945E which are at (dir*32, frame*32) — identical layout to COMPACT.
+     * (lbW01945E entries 8-23 at y=96/128 are SECONDARY BOBs for a different
+     *  idle-animation layer and must NOT be used here.) */
+    int atlas_y = anim_frame * ALIEN_WALK_FRAME_STRIDE;
 
     const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
     video_blit(src, ALIEN_ATLAS_W, x, y, ALIEN_SPRITE_W, ALIEN_SPRITE_H, 0);

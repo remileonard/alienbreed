@@ -13,14 +13,21 @@
  * Walk sprite layout (Ref: lbW01945E / lbW019A8E @ main.asm#L14034,L14160):
  *   Column (X): direction * ALIEN_SPRITE_W
  *     8 compass directions: N(0) NE(1) E(2) SE(3) S(4) SW(5) W(6) NW(7)
- *   Row (Y) depends on atlas type (see ALIEN_ATLAS_COMPACT / ALIEN_ATLAS_LEGACY).
+ *   Row (Y):   frame * ALIEN_WALK_FRAME_STRIDE  (same for ALL atlas types)
  *   Frame size: ALIEN_SPRITE_W × ALIEN_SPRITE_H  (32 × 30 px)
  *
- * ALIEN_ATLAS_COMPACT (lbW019A8E, lbW018D4A, lbW01A1A2, lbW01A922 — most levels):
- *   frame 0 → y = 0,  frame 1 → y = 32,  frame 2 → y = 64  (stride = 32)
+ * Walk frame layout — IDENTICAL for COMPACT and LEGACY atlas types:
+ *   frame 0 → y =  0  (entries 0-7 of COMPACT; entries 100-107 of LEGACY)
+ *   frame 1 → y = 32  (stride = ALIEN_WALK_FRAME_STRIDE = 32)
+ *   frame 2 → y = 64
  *
- * ALIEN_ATLAS_LEGACY (lbW01945E — L0BO / level 1, and levels 10-11):
- *   frame 0 → y = 0,  frame 1 → y = 96,  frame 2 → y = 128
+ * (Note: lbW01945E LEGACY entries 8-23 at y=96/128 are *secondary* idle BOBs
+ *  used by a different layer, NOT by the main walk cycle lbL01B036.)
+ *
+ * COMPACT (lbW019A8E, lbW018D4A, lbW01A1A2, lbW01A922): most levels.
+ * LEGACY  (lbW01945E): L0BO / level 1, levels 10-11.
+ *   Both share the same walk-frame Y layout; the atlas_type field is retained
+ *   for potential future use (e.g., secondary BOB layers).
  *
  * Death/explosion sprites (Ref: lbW0188CE @ main.asm#L13833, lbL018C2E#L13907):
  *   16 frames of 32×30 px in two rows of the atlas.
