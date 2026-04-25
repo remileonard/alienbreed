@@ -88,9 +88,19 @@ static void draw_string(int x, int y, const char *s,
 #define COLOR_DOOR_G   255
 #define COLOR_DOOR_B   255  /* cyan */
 
+#define COLOR_SPAWN_R  255
+#define COLOR_SPAWN_G  140
+#define COLOR_SPAWN_B    0  /* orange — alien spawn tiles 0x28/0x29 */
+
 #define COLOR_OTHER_R  255
 #define COLOR_OTHER_G  255
 #define COLOR_OTHER_B    0  /* yellow */
+
+/* Returns 1 if attr is a spawn tile (0x28 ALIEN_SPAWN_BIG / 0x29 ALIEN_SPAWN_SMALL). */
+static int is_spawn(UBYTE a)
+{
+    return (a == TILE_ALIEN_SPAWN_BIG || a == TILE_ALIEN_SPAWN_SMALL);
+}
 
 /* Returns 1 if attr is a wall tile.                                 */
 static int is_wall(UBYTE a)
@@ -158,6 +168,8 @@ void debug_render_overlay(void)
                 r = COLOR_ITEM_R;  g = COLOR_ITEM_G;  b = COLOR_ITEM_B;
             } else if (is_door(attr)) {
                 r = COLOR_DOOR_R;  g = COLOR_DOOR_G;  b = COLOR_DOOR_B;
+            } else if (is_spawn(attr)) {
+                r = COLOR_SPAWN_R; g = COLOR_SPAWN_G; b = COLOR_SPAWN_B;
             } else {
                 r = COLOR_OTHER_R; g = COLOR_OTHER_G; b = COLOR_OTHER_B;
             }
