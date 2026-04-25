@@ -169,11 +169,15 @@ static void run_title_phase(StoryImg *title)
             if (title->pixels)
                 video_blit(title->pixels, title->w, 0, 0, 320, 256, -1);
 
-            /* Bright scan-line beam (simulates hardware sprite in asm) */
+            /* Beam effect: at the current scanline all non-zero pixels
+             * appear white, just as the Amiga copper overwrites COLOR01-31
+             * with $FFF for one scanline then restores the palette.
+             * We set g_beam_y so video_present() applies the effect without
+             * touching the framebuffer. */
             if (!beam_done) {
-                video_fill_rect(0, beam_y, 320, 2, 1);
+                g_beam_y = beam_y;
                 beam_y++;
-                if (beam_y >= 256) beam_done = 1;
+                if (beam_y >= 256) { beam_done = 1; g_beam_y = -1; }
             }
 
             palette_tick();
@@ -183,6 +187,7 @@ static void run_title_phase(StoryImg *title)
                 if (++hold >= 300) break;
             }
         }
+        g_beam_y = -1;  /* ensure beam is disabled when loop exits */
     }
 
     if (g_quit_requested) return;

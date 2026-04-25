@@ -58,4 +58,19 @@ void video_fill_rect(int x, int y, int w, int h, UBYTE color_index);
 /* Copy a region of the framebuffer to another location (scroll helper). */
 void video_scroll_copy(int src_x, int src_y, int dst_x, int dst_y, int w, int h);
 
+/*
+ * Beam effect (Amiga copper bitplane simulation).
+ *
+ * When g_beam_y >= 0, video_present() renders all pixels in the scanline
+ * range [g_beam_y, g_beam_y + g_beam_height) as pure white if their color
+ * index is non-zero.  This matches the Amiga copper-list trick used by the
+ * original story.asm display_beam_title: at the beam scanline the copper
+ * overwrites COLOR01-COLOR31 with $FFF so every non-background pixel
+ * becomes white, then restores the palette one line later.
+ *
+ * Set g_beam_y = -1 to disable the effect.
+ */
+extern int g_beam_y;
+extern int g_beam_height;
+
 #endif /* AB_VIDEO_H */
