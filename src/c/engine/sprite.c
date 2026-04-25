@@ -292,8 +292,10 @@ void sprite_draw_alien(int direction, int anim_frame, int x, int y)
 }
 
 /* Draw a death/explosion frame (0-15) at screen position (x,y).
- * Frames are 16×14 px, stored in 2 rows of 8 starting at (192,160).
- * Ref: lbW0188CE @ main.asm#L13833; death anim lbL018C2E @ main.asm#L13907. */
+ * Frames are 32×30 px (same size as walk sprites), laid out in two rows:
+ *   Row 1 (y=0xC0=192): frames  0-9,  x = frame_idx * 32
+ *   Row 2 (y=0xE0=224): frames 10-15, x = (frame_idx-10) * 32
+ * Ref: lbL018C2E @ main.asm#L13907 → lbW0188CE entries 40-55 (#L13874-L13889). */
 void sprite_draw_alien_death(int death_frame, int x, int y)
 {
     const UBYTE *atlas = alien_gfx_get_atlas();
@@ -302,8 +304,14 @@ void sprite_draw_alien_death(int death_frame, int x, int y)
     if (death_frame < 0) death_frame = 0;
     if (death_frame >= ALIEN_DEATH_FRAMES) death_frame = ALIEN_DEATH_FRAMES - 1;
 
-    int atlas_x = ALIEN_DEATH_ATLAS_X + (death_frame % 8) * ALIEN_DEATH_W;
-    int atlas_y = ALIEN_DEATH_ATLAS_Y + (death_frame / 8) * 16;
+    int atlas_x, atlas_y;
+    if (death_frame < ALIEN_DEATH_ROW1_COUNT) {
+        atlas_x = death_frame * ALIEN_DEATH_W;
+        atlas_y = ALIEN_DEATH_ROW1_Y;
+    } else {
+        atlas_x = (death_frame - ALIEN_DEATH_ROW1_COUNT) * ALIEN_DEATH_W;
+        atlas_y = ALIEN_DEATH_ROW2_Y;
+    }
 
     const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
     video_blit(src, ALIEN_ATLAS_W, x, y, ALIEN_DEATH_W, ALIEN_DEATH_H, 0);

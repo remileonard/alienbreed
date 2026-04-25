@@ -77,10 +77,11 @@ void sprite_draw_alien(int direction, int anim_frame, int x, int y);
 /*
  * Draw a death/explosion frame for a dying alien at screen position (x, y).
  * death_frame: 0-15 (16-frame explosion sequence).
- * Sprite size: ALIEN_DEATH_W × ALIEN_DEATH_H (16 × 14 px).
- * Atlas position: x = ALIEN_DEATH_ATLAS_X + (death_frame%8)*16,
- *                 y = ALIEN_DEATH_ATLAS_Y + (death_frame/8)*16
- * (Ref: lbW0188CE @ main.asm#L13833, death anim lbL018C2E#L13907)
+ * Sprite size: ALIEN_DEATH_W × ALIEN_DEATH_H (32 × 30 px, same as walk sprites).
+ * Atlas layout:
+ *   frames  0-9:  x = death_frame * 32,          y = ALIEN_DEATH_ROW1_Y (192)
+ *   frames 10-15: x = (death_frame-10) * 32,     y = ALIEN_DEATH_ROW2_Y (224)
+ * (Ref: lbW0188CE entries 40-55 @ main.asm#L13874, death anim lbL018C2E#L13907)
  */
 void sprite_draw_alien_death(int death_frame, int x, int y);
 
