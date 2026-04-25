@@ -297,7 +297,7 @@ void sm_play(SM_Module *m, int output_rate)
     m->tick_acc    = 0.0;
     m->playing       = 1;
     m->paused        = 0;
-    m->master_volume = 128;
+    m->master_volume = 1280;
     SDL_UnlockMutex(m->mutex);
 }
 
@@ -1012,7 +1012,6 @@ void sm_set_volume(SM_Module *m, int vol)
 {
     if (!m) return;
     if (vol < 0)   vol = 0;
-    if (vol > 128) vol = 128;
     SDL_LockMutex(m->mutex);
     m->master_volume = vol;
     SDL_UnlockMutex(m->mutex);

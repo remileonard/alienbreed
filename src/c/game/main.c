@@ -54,6 +54,7 @@ int main(int argc, char **argv)
     }
     hud_init();
     audio_load_all();
+    audio_set_music_volume(1280);
 
     /* Attract-mode cycle matching the original CD32 game sequence:
      *
