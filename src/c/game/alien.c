@@ -103,6 +103,23 @@ static void spawn_alien_at(int wx, int wy, int alien_type)
     a->type_idx = alien_type - 1;
 }
 
+/* -----------------------------------------------------------------------
+ * Probabilistic direct spawn when the player steps on a spawn tile (0x28/0x29).
+ *
+ * Mirrors lbC00A718 @ main.asm#L7385:
+ *   move.w lbW0005AA,d0  ; threshold = 20
+ *   move.w rnd_number,d1  ; random 0-255  (rand(256) via VBL update)
+ *   cmp.w  d0,d1
+ *   bpl    return          ; skip if rnd >= 20  (~92% of frames)
+ * ≈7.8% chance per frame (20/256).  No hatching sound.
+ * ----------------------------------------------------------------------- */
+void alien_try_spawn_at(int wx, int wy)
+{
+    if ((rand() % 256) >= 20) return;
+    spawn_alien_at(wx, wy, alien_type_for_level());
+    /* No SAMPLE_HATCHING_ALIEN — direct tile-step spawns are silent */
+}
+
 void alien_init_variables(void)
 {
     memset(g_aliens,       0, sizeof(g_aliens));
@@ -113,40 +130,27 @@ void alien_init_variables(void)
 }
 
 /*
- * Scan the loaded map for spawn tiles and register them as pending spawn
- * points.  No aliens are created yet — spawning is deferred to
- * alien_spawn_tick() which fires lazily when each tile enters the player's
- * (expanded) viewport, exactly as in the original ASM.
+ * Reset alien spawn state.
  *
- * Tile attributes that mark alien spawn locations:
- *   0x28 – TILE_ALIEN_SPAWN_BIG   (respawning big-alien location)
- *   0x29 – TILE_ALIEN_SPAWN_SMALL (respawning small-alien location)
- *   0x34 – TILE_ALIEN_HOLE        (hole from which aliens emerge)
+ * Tiles 0x28/0x29 (ALIEN_SPAWN_BIG/SMALL) are player-step-on triggers
+ * (lbC004914 / lbC0049D6 → lbC00A718) and do NOT register deferred spawn
+ * points.  Tile 0x34 (ALIEN_HOLE) is tile_not_used in the main tile action
+ * table.  No map scan is needed; just clear the spawn slot array.
  *
- * Ref: lbC00D17E / lbC00D1B4 / lbC00D236 @ main.asm#L8547-L8623;
- *      set_all_aliens_to_default @ main.asm#L8628.
+ * Ref: lbC004914 / lbC0049D6 → lbC00A718 @ main.asm#L2513-L2569;
+ *      lbC00D17E / lbC00D1B4 @ main.asm#L8547-L8575 (slot-based system).
  */
 void alien_spawn_from_map(void)
 {
-    int alien_type = alien_type_for_level();
-    s_spawn_count  = 0;
-
-    for (int row = 0; row < MAP_ROWS && s_spawn_count < MAX_SPAWN_POINTS; row++) {
-        for (int col = 0; col < MAP_COLS && s_spawn_count < MAX_SPAWN_POINTS; col++) {
-            UBYTE attr = tilemap_attr(&g_cur_map, col, row);
-            if (attr != TILE_ALIEN_SPAWN_BIG  &&
-                attr != TILE_ALIEN_SPAWN_SMALL &&
-                attr != TILE_ALIEN_HOLE) continue;
-
-            SpawnPoint *sp = &s_spawn_points[s_spawn_count++];
-            sp->world_x    = (WORD)(col * MAP_TILE_W + MAP_TILE_W / 2);
-            sp->world_y    = (WORD)(row * MAP_TILE_H + MAP_TILE_H / 2);
-            sp->countdown  = SPAWN_COUNTDOWN_INIT;
-            sp->alien_type = alien_type;
-            sp->active     = 1;
-            sp->one_shot   = 0;
-        }
-    }
+    /*
+     * In the original ASM, tiles 0x28/0x29 (ALIEN_SPAWN_BIG/SMALL) are
+     * player-step-on triggers that call lbC00A718 directly (random probability
+     * check, immediate spawn) — not deferred viewport spawn points.  Tile 0x34
+     * (ALIEN_HOLE) is tile_not_used in the main tile action table.
+     * No map scan needed here: just reset the spawn state.
+     * Ref: lbC004914 / lbC0049D6 → lbC00A718 @ main.asm#L2513-L2569.
+     */
+    s_spawn_count = 0;
 }
 
 /*
@@ -220,9 +224,12 @@ void alien_spawn_tick(void)
 
         /* Countdown expired: spawn alien and reload timer (ref lbC00D1B4). */
         spawn_alien_at(sp->world_x, sp->world_y, sp->alien_type);
-        audio_play_sample(SAMPLE_HATCHING_ALIEN);
 
         if (sp->one_shot) {
+            /* Facehugger hatch: play hatch sound and deactivate slot.
+             * Ref: play_alien_hatching_sample check in lbC00D1B4 @ main.asm#L8579.
+             * Direct tile-step spawns (0x28/0x29) do NOT play this sound. */
+            audio_play_sample(SAMPLE_HATCHING_ALIEN);
             sp->active = 0;
         } else {
             sp->countdown = SPAWN_COUNTDOWN_INIT;

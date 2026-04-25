@@ -366,6 +366,15 @@ void check_tile_interaction(Player *p)
         tilemap_replace_tile(&g_cur_map, col, row);
         break;
 
+    case TILE_ALIEN_SPAWN_BIG:
+    case TILE_ALIEN_SPAWN_SMALL:
+        /* Player stepped on an alien spawn tile: probabilistic direct spawn.
+         * Mirrors lbC004914 (tile 0x28) / lbC0049D6 (tile 0x29) → lbC00A718 @
+         * main.asm#L2513-L2569: ~7.8% chance per frame (rnd%256 < 20), no
+         * hatch sound, tile not replaced (repeatable). */
+        alien_try_spawn_at(p->pos_x, p->pos_y);
+        break;
+
     case TILE_INTEX:
         /* INTEX terminal: activated when the player presses fire-2 (or SPACE).
          * Ref: tile_intex_terminal @ main.asm#L5537 — checks btst #7 player input. */
