@@ -318,7 +318,7 @@ void sprite_draw_alien_death(int death_frame, int x, int y)
 
 int sprite_get_player_raw(int idx, const UBYTE **pixels, int *w, int *h)
 {
-    if (idx < 0 || idx >= PLAYER_SPRITE_COUNT) return -1;
+    if (idx < 0 || idx >= PLAYER_SPRITE_TOTAL) return -1;
     if (!s_player[idx].pixels) return -1;
     *pixels = s_player[idx].pixels;
     *w      = s_player[idx].w;

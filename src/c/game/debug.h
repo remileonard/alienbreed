@@ -29,7 +29,7 @@ void debug_render_overlay(void);
 
 /*
  * Full-screen scrollable graphics viewer.
- * Pauses the game and shows all current-level graphics in three sections:
+ * Pauses the game and shows all current-level graphics in four sections:
  *   TILES    — every tile in the loaded tileset, labelled by tile index.
  *   WALK     — alien walk sprites for all 8 directions × 3 frames.
  *   DEATH    — alien death/explosion animation frames.
