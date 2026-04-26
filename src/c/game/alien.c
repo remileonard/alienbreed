@@ -102,6 +102,9 @@ static int alien_type_for_level(void)
     return t;
 }
 
+/* Forward declaration — defined later in this file. */
+static int alien_overlaps_other(int self_idx, int nx, int ny);
+
 /* -----------------------------------------------------------------------
  * Place one alien at world-pixel position (wx, wy) of the given type.
  * Returns the index in g_aliens[] of the newly placed alien, or -1 if
@@ -123,6 +126,12 @@ static int spawn_alien_at(int wx, int wy, int alien_type)
         if (g_alien_count >= MAX_ALIENS) return -1;
         idx = g_alien_count++;
     }
+
+    /* Do not spawn if the target position already overlaps a living alien.
+     * The alien-alien separation logic only cancels *movement* into an overlap;
+     * it cannot resolve an overlap that already exists at birth, which leaves
+     * both aliens permanently stuck.  Return -1 so the caller retries later. */
+    if (alien_overlaps_other(idx, wx, wy)) return -1;
 
     Alien *a    = &g_aliens[idx];
     a->pos_x    = (WORD)wx;
