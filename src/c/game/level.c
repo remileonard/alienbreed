@@ -73,7 +73,11 @@ void level_init_variables(void)
     g_flag_destruct_level     = 0;
     g_self_destruct_initiated = 0;
     g_map_overview_on         = 0;
-    g_game_running_flag       = 0;
+    /* g_game_running_flag is managed by game_run() — do NOT reset it here.
+     * Resetting it in level_init_variables() (called at the start of every
+     * level) would cause the outer game loop to exit after the first level
+     * completes, sending the player back to the menu instead of the next
+     * level. */
     g_boss_active             = 0;
     /* Timer set by level_finalize based on level def */
     g_destruction_timer = (LONG)DESTRUCTION_TIMER_SECONDS * TIMER_FRAMES_PER_SECOND;
