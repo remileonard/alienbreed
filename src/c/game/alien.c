@@ -371,7 +371,11 @@ static int alien_overlaps_other(int self_idx, int nx, int ny)
         if (g_aliens[j].alive != 1) continue;
         int ox = (int)g_aliens[j].pos_x;
         int oy = (int)g_aliens[j].pos_y;
-        /* AABB: [nx, nx+32] vs [ox, ox+32]  and  [ny, ny+32] vs [oy, oy+32] */
+        /* AABB overlap test.  Both nx/ox and ny/oy are the centres of 32×32
+         * boxes.  The test `nx < ox+32 && nx+32 > ox` is equivalent to
+         * `|nx-ox| < 32`, which is identical to testing [nx-16,nx+16] vs
+         * [ox-16,ox+16] since (nx-16) < (ox+16) ↔ nx < ox+32, and
+         * (nx+16) > (ox-16) ↔ nx+32 > ox.  No change needed vs top-left form. */
         if (nx < ox + 32 && nx + 32 > ox &&
             ny < oy + 32 && ny + 32 > oy)
             return 1;
