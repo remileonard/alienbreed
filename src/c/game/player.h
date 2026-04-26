@@ -19,44 +19,34 @@
 #define OWNED_WEAPONS_SIZE 8
 
 /*
- * Directional probe offsets translated from the ASM probe tables.
+ * Directional probe offsets from the ASM probe tables for the player.
  *
  * The original game stores four probe tables in main.asm:
- *   lbW007B16 (LEFT):  x = -4,       y = {-6,  4, 16}
- *   lbW007B22 (RIGHT): x = +30,      y = {-6,  4, 16}
- *   lbW007B2E (UP):    x = {0,10,22}, y = -10
- *   lbW007B3A (DOWN):  x = {0,10,22}, y = +20
+ *   lbW007B16 (LEFT):  dc.w -4,-4,-4,-6,4,16   → x=-4,  y={-6,4,16}
+ *   lbW007B22 (RIGHT): dc.w 30,30,30,-6,4,16   → x=+30, y={-6,4,16}
+ *   lbW007B2E (UP):    dc.w 0,10,22,-10,-10,-10 → x={0,10,22}, y=-10
+ *   lbW007B3A (DOWN):  dc.w 0,10,22,20,20,20   → x={0,10,22}, y=+20
+ * Plus a fixed 4th centre probe at (pos_x+10, pos_y+6) added inline.
  *
- * The ASM origin is pos_x = col*16+4, pos_y = row*16+58 (with a +3-row
- * header in cur_map_datas that shifts all row lookups by 3).
- * The C port uses pos_x = col*16+8, pos_y = row*16+8 (tile centre).
- *
- * Conversion so that both reach the same map tile:
- *   c_x_offset = asm_x_offset - 4   (pos_x differs by +4)
- *   c_y_offset = asm_y_offset + 2   (pos_y differs by -50; +3-row header
- *                                    adds 48 px; net: +58-48-8 = +2)
- *
- * Resulting C-space offsets:
- *   LEFT  x : pos_x - 8              (ASM -4  → C -4-4  = -8)
- *   RIGHT x : pos_x + 26             (ASM +30 → C 30-4  = +26)
- *   UP    y : pos_y - 8              (ASM -10 → C -10+2 = -8)
- *   DOWN  y : pos_y + 22             (ASM +20 → C 20+2  = +22)
- *   H y pts : pos_y + {-4, +6, +18}  (ASM {-6,4,16} → C {-4,6,18})
- *   V x pts : pos_x + {-4, +6, +18}  (ASM {0,10,22} → C {-4,6,18})
+ * These are the SAME offsets as the regular alien probe tables
+ * (lbW00A2CA/D6/E2/EE) — the player and small alien share a 32×32 bbox.
+ * No orientation rotation applies; probes are purely direction-of-movement.
+ * The C predictive approach checks the proposed position (nx/ny) just as
+ * the ASM checks the current position before applying speed.
  */
 
-/* X offset of the single probe column for left/right movement */
-#define PROBE_LEFT_X   (-8)
-#define PROBE_RIGHT_X  (8)
+/* X offset of the probe column for left/right movement */
+#define PROBE_LEFT_X   (-4)
+#define PROBE_RIGHT_X  (30)
 
-/* Y offset of the single probe row for up/down movement */
-#define PROBE_UP_Y     (-8)
-#define PROBE_DOWN_Y   (8)
+/* Y offset of the probe row for up/down movement */
+#define PROBE_UP_Y     (-10)
+#define PROBE_DOWN_Y   (20)
 
-/* Three y-sample offsets used when probing left or right */
-static const int k_probe_hy[3] = { -4, 6, 18 };
-/* Three x-sample offsets used when probing up or down */
-static const int k_probe_vx[3] = { -4, 6, 18 };
+/* Three y-sample offsets used when probing left or right (lbW007B16/22) */
+static const int k_probe_hy[3] = { -6, 4, 16 };
+/* Three x-sample offsets used when probing up or down (lbW007B2E/3A) */
+static const int k_probe_vx[3] = { 0, 10, 22 };
 
 typedef struct {
     /* Position (pixels, fixed-point ×1) */

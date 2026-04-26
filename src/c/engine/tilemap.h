@@ -76,7 +76,8 @@ static inline UBYTE tilemap_attr(const LevelMap *map, int col, int row)
 }
 
 /*
- * Returns 1 if the tile blocks movement (all wall variants from tiles_action_table):
+ * Returns 1 if the tile blocks movement for the PLAYER (tiles_action_table
+ * entries that jump to tile_wall @ main.asm#L5059-L5104):
  *   0x01 = wall
  *   0x1d = wall (variant)
  *   0x2a-0x2d = reactor walls
@@ -86,6 +87,29 @@ static inline int tilemap_is_solid(const LevelMap *map, int col, int row)
 {
     UBYTE a = tilemap_attr(map, col, row);
     return (a == 0x01 || a == 0x1d || (a >= 0x2a && a <= 0x2d));
+}
+
+/*
+ * Returns 1 if the tile blocks movement for ALIENS (aliens_collisions_table
+ * entries that jump to aliens_collision_stop or aliens_collision_door
+ * @ main.asm#L7172-L7268):
+ *   0x01        = wall
+ *   0x03        = door (aliens_collision_door → stop)
+ *   0x0d-0x11   = metallic floor / one-way tiles (passable for player, solid for alien)
+ *   0x1c        = wall variant (solid for alien, NOT for player)
+ *   0x23        = hard-climb right (solid for alien)
+ *   0x2a-0x2d   = reactor walls
+ *   0x38-0x3b   = diagonal one-way tiles (solid for alien)
+ * NOTE: 0x1d is a player wall but NOT an alien wall.
+ */
+static inline int tilemap_is_alien_solid(const LevelMap *map, int col, int row)
+{
+    UBYTE a = tilemap_attr(map, col, row);
+    return (a == 0x01 || a == 0x03 ||
+            (a >= 0x0d && a <= 0x11) ||
+            a == 0x1c || a == 0x23 ||
+            (a >= 0x2a && a <= 0x2d) ||
+            (a >= 0x38 && a <= 0x3b));
 }
 
 /* Convert pixel coordinates to tile coordinates. */

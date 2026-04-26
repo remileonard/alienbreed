@@ -157,7 +157,9 @@ static int try_move(Player *p, int dx, int dy)
 
     int has_key = (p->keys > 0);
 
-    /* Horizontal leading-edge check (right or left only) */
+    /* Horizontal leading-edge check (right or left only).
+     * 3 probes from the probe table (lbW007B22/lbW007B16) + fixed centre
+     * probe at (nx+10, ny+6) mirroring lbC007B98 main.asm#L5038-5054. */
     if (dx > 0) {
         int px = nx + PROBE_RIGHT_X;
         for (int i = 0; i < 3; i++)
@@ -168,7 +170,8 @@ static int try_move(Player *p, int dx, int dy)
             if (tile_blocks(px, ny + k_probe_hy[i], has_key)) return 0;
     }
 
-    /* Vertical leading-edge check (down or up only) */
+    /* Vertical leading-edge check (down or up only).
+     * 3 probes from the probe table (lbW007B3A/lbW007B2E). */
     if (dy > 0) {
         int py = ny + PROBE_DOWN_Y;
         for (int i = 0; i < 3; i++)
@@ -178,6 +181,10 @@ static int try_move(Player *p, int dx, int dy)
         for (int i = 0; i < 3; i++)
             if (tile_blocks(nx + k_probe_vx[i], py, has_key)) return 0;
     }
+
+    /* Fixed 4th centre probe at (nx+10, ny+6) — always checked regardless
+     * of direction, mirroring the inline probe at main.asm#L5038-5054. */
+    if (tile_blocks(nx + 10, ny + 6, has_key)) return 0;
 
     p->pos_x = (WORD)nx;
     p->pos_y = (WORD)ny;

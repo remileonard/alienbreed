@@ -341,9 +341,9 @@ void alien_spawn_tick(void)
 /* Return 1 if the world pixel (wx, wy) falls inside a solid tile. */
 static int alien_solid_at(int wx, int wy)
 {
-    return tilemap_is_solid(&g_cur_map,
-                            tilemap_pixel_to_col(wx),
-                            tilemap_pixel_to_row(wy));
+    return tilemap_is_alien_solid(&g_cur_map,
+                                  tilemap_pixel_to_col(wx),
+                                  tilemap_pixel_to_row(wy));
 }
 
 /*
@@ -384,21 +384,24 @@ static int alien_overlaps_other(int self_idx, int nx, int ny)
  * (main.asm#L6810-L6989):
  *
  *  1. Find the nearest player by Manhattan distance.
- *  2. X axis: if |dx| > 4, move by a->speed; check two leading-edge probe
+ *  2. X axis: if |dx| > 4, move by a->speed; check three leading-edge probe
  *     points of the proposed new bounding box for solid tiles.
  *  3. Y axis: same treatment independently of X.
  *  4. Build a direction-bit word (bit0=down, bit1=up, bit2=right, bit3=left)
  *     from the actual movement and map it to the 0-based compass direction
  *     using the lbB00A228 look-up table (main.asm#L7077).
  *
- * Probe offsets mirror the ASM type-struct collision tables for a 32×32 bbox
- * (dc.w 0,0,$20,$20 at offset 4 of lbW008F14, main.asm#L5979):
- *   RIGHT  lbW00A2D6: x+30 at y+4 and y+16  (main.asm#L7090)
- *   LEFT   lbW00A2CA: x-4  at y+4 and y+16  (main.asm#L7089)
- *     (C predictive: nx is already new left edge → check nx and nx-1)
- *   DOWN   lbW00A2EE: y+20 at x+0  and x+22 (main.asm#L7088)
- *   UP     lbW00A2E2: y-10 at x+0  and x+22 (main.asm#L7087)
- *     (C predictive: ny is new top edge → check ny and ny-1)
+ * Probe offsets exactly mirror the ASM type-struct collision tables for a
+ * 32×32 bbox (dc.w 0,0,$20,$20 at offset 4 of lbW008F14, main.asm#L5979).
+ * Each direction uses 3 probe points from the table layout dc.w x0,x1,x2,y0,y1,y2
+ * (probes executed in order 0, 2, 1 by the ASM — all 3 must be clear to move):
+ *   RIGHT  lbW00A2D6: dc.w 30,30,30,-6,4,16  → (nx+30,ay-6),(nx+30,ay+16),(nx+30,ay+4)
+ *   LEFT   lbW00A2CA: dc.w -4,-4,-4,-6,4,16  → (nx-4,ay-6),(nx-4,ay+16),(nx-4,ay+4)
+ *   DOWN   lbW00A2EE: dc.w 0,10,22,20,20,20  → (ax+0,ny+20),(ax+22,ny+20),(ax+10,ny+20)
+ *   UP     lbW00A2E2: dc.w 0,10,22,-10,-10,-10→(ax+0,ny-10),(ax+22,ny-10),(ax+10,ny-10)
+ * where nx/ny = proposed position after applying speed.
+ * No orientation-based rotation: probes are purely direction-of-movement driven,
+ * matching the original ASM (no rotation in check_aliens_collisions).
  */
 static void alien_move(int self_idx, Alien *a)
 {
@@ -427,25 +430,26 @@ static void alien_move(int self_idx, Alien *a)
     /* ------------------------------------------------------------------ */
     /* 2. X movement — independent of Y                                    */
     /*    Threshold of 4 px mirrors ASM `cmp.w #4,d4` (main.asm#L6926).   */
-    /*    Probes at the actual leading right/left edge of the 32-px bbox.  */
-    /*    Two Y values (ay+4, ay+16) mirror the ASM probe-table Y offsets  */
-    /*    for lbW00A2CA / lbW00A2D6.                                       */
+    /*    3 probes along the leading edge of the proposed bbox, matching   */
+    /*    lbW00A2D6 (right) and lbW00A2CA (left) at main.asm#L7089-7090.  */
     /* ------------------------------------------------------------------ */
     int dx = tx - ax;
     if (dx > 4) {
-        /* Move right: probe the right edge of the proposed bbox (x+30). */
+        /* Move right: 3 probes at the right edge (nx+30), y = -6, +16, +4 */
         int nx = ax + spd;
-        if (!alien_solid_at(nx + 30, ay + 4) &&
+        if (!alien_solid_at(nx + 30, ay - 6) &&
             !alien_solid_at(nx + 30, ay + 16) &&
+            !alien_solid_at(nx + 30, ay + 4) &&
             !alien_overlaps_other(self_idx, nx, ay)) {
             ax = nx;
             dir_bits |= 4;  /* right */
         }
     } else if (dx < -4) {
-        /* Move left: probe the left edge of the proposed bbox (x-1). */
+        /* Move left: 3 probes at the left edge (nx-4), y = -6, +16, +4 */
         int nx = ax - spd;
-        if (!alien_solid_at(nx - 1, ay + 4) &&
-            !alien_solid_at(nx - 1, ay + 16) &&
+        if (!alien_solid_at(nx - 4, ay - 6) &&
+            !alien_solid_at(nx - 4, ay + 16) &&
+            !alien_solid_at(nx - 4, ay + 4) &&
             !alien_overlaps_other(self_idx, nx, ay)) {
             ax = nx;
             dir_bits |= 8;  /* left */
@@ -454,24 +458,26 @@ static void alien_move(int self_idx, Alien *a)
 
     /* ------------------------------------------------------------------ */
     /* 3. Y movement — independent of X                                    */
-    /*    Probes at the actual leading bottom/top edge of the 32-px bbox.  */
-    /*    Two X values (ax+0, ax+22) mirror lbW00A2EE / lbW00A2E2.        */
+    /*    3 probes along the leading edge of the proposed bbox, matching   */
+    /*    lbW00A2EE (down) and lbW00A2E2 (up) at main.asm#L7087-7088.     */
     /* ------------------------------------------------------------------ */
     int dy = ty - ay;
     if (dy > 4) {
-        /* Move down: probe the bottom edge of the proposed bbox (y+20). */
+        /* Move down: 3 probes at bottom edge (ny+20), x = 0, +22, +10 */
         int ny = ay + spd;
-        if (!alien_solid_at(ax + 0, ny + 20) &&
+        if (!alien_solid_at(ax + 0,  ny + 20) &&
             !alien_solid_at(ax + 22, ny + 20) &&
+            !alien_solid_at(ax + 10, ny + 20) &&
             !alien_overlaps_other(self_idx, ax, ny)) {
             ay = ny;
             dir_bits |= 1;  /* down */
         }
     } else if (dy < -4) {
-        /* Move up: probe just above the top edge of the proposed bbox. */
+        /* Move up: 3 probes at top edge (ny-10), x = 0, +22, +10 */
         int ny = ay - spd;
-        if (!alien_solid_at(ax + 0, ny - 1) &&
-            !alien_solid_at(ax + 22, ny - 1) &&
+        if (!alien_solid_at(ax + 0,  ny - 10) &&
+            !alien_solid_at(ax + 22, ny - 10) &&
+            !alien_solid_at(ax + 10, ny - 10) &&
             !alien_overlaps_other(self_idx, ax, ny)) {
             ay = ny;
             dir_bits |= 2;  /* up */
