@@ -182,10 +182,10 @@ static int try_move(Player *p, int dx, int dy)
             if (tile_blocks(nx + k_probe_vx[i], py, has_key)) return 0;
     }
 
-    /* Fixed 4th centre probe at ASM (pos+10, pos+6) — always checked regardless
-     * of direction, mirroring the inline probe at main.asm#L5038-5054.
-     * Adjusted by -16 for centre-based pos_x/pos_y: 10-16=-6, 6-16=-10. */
-    if (tile_blocks(nx - 6, ny - 10, has_key)) return 0;
+    /* Fixed centre probe — always checked regardless of direction.
+     * Catches solid tiles at the player's exact centre (safety net for
+     * corner cases not covered by the three directional samples). */
+    if (tile_blocks(nx, ny, has_key)) return 0;
 
     p->pos_x = (WORD)nx;
     p->pos_y = (WORD)ny;

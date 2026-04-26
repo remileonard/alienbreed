@@ -19,40 +19,40 @@
 #define OWNED_WEAPONS_SIZE 8
 
 /*
- * Directional probe offsets from the ASM probe tables for the player.
+ * Directional probe offsets for player wall collision.
  *
- * The original game stores four probe tables in main.asm:
- *   lbW007B16 (LEFT):  dc.w -4,-4,-4,-6,4,16   → x=-4,  y={-6,4,16}
- *   lbW007B22 (RIGHT): dc.w 30,30,30,-6,4,16   → x=+30, y={-6,4,16}
- *   lbW007B2E (UP):    dc.w 0,10,22,-10,-10,-10 → x={0,10,22}, y=-10
- *   lbW007B3A (DOWN):  dc.w 0,10,22,20,20,20   → x={0,10,22}, y=+20
- * Plus a fixed 4th centre probe at (pos_x+10, pos_y+6) added inline.
+ * The player's visible body occupies the inner 16×16 region of its sprite,
+ * confirmed by the hit-box at [pos_x−8 … pos_x+8] × [pos_y−8 … pos_y+8]
+ * (PLAYER_BBOX_OFFSET = −8, PLAYER_BBOX_SIZE = 16).
  *
- * These are the SAME offsets as the regular alien probe tables
- * (lbW00A2CA/D6/E2/EE) — the player and small alien share a 32×32 bbox.
- * No orientation rotation applies; probes are purely direction-of-movement.
- * The C predictive approach checks the proposed position (nx/ny) just as
- * the ASM checks the current position before applying speed.
+ * All probe offsets are chosen so that, with 16-px tiles and integer-division
+ * tile lookup (pixel / 16), the body edge stops exactly at the tile boundary
+ * when the leading probe first enters a solid tile:
  *
- * In the C port pos_x/pos_y is the CENTRE of the 32×32 bbox (sprite is
- * blitted at x-16, y-16), whereas the ASM uses the top-left corner.
- * All probe offsets are therefore shifted by -16 relative to the raw ASM
- * values so that they address the same world pixels:
- *   C_offset = ASM_offset - 16
+ *   LEFT  probe at center − 8  → player stops with hitbox left  = wall right+1
+ *   RIGHT probe at center + 7  → player stops with hitbox right = wall left
+ *   UP    probe at center − 8  → player stops with hitbox top   = ceil bottom+1
+ *   DOWN  probe at center + 7  → player stops with hitbox bottom= floor top
+ *
+ * The three perpendicular samples {−6, 0, +6} span the body width/height
+ * while remaining within the ±8 body boundary.
+ *
+ * A fixed centre probe at (nx, ny) catches any solid tile at the player's
+ * exact centre (safety net for corner cases).
  */
 
 /* X offset of the probe column for left/right movement */
-#define PROBE_LEFT_X   (-20)   /* ASM: -4  → center: -4 - 16 = -20 */
-#define PROBE_RIGHT_X  (14)    /* ASM: +30 → center: 30 - 16 = +14 */
+#define PROBE_LEFT_X   (-8)    /* 1 probe at hitbox left edge  (body: −8 … +8) */
+#define PROBE_RIGHT_X  (7)     /* 1 probe at hitbox right edge (body: −8 … +8) */
 
 /* Y offset of the probe row for up/down movement */
-#define PROBE_UP_Y     (-26)   /* ASM: -10 → center: -10 - 16 = -26 */
-#define PROBE_DOWN_Y   (4)     /* ASM: +20 → center:  20 - 16 =  +4 */
+#define PROBE_UP_Y     (-8)    /* 1 probe at hitbox top edge   (body: −8 … +8) */
+#define PROBE_DOWN_Y   (7)     /* 1 probe at hitbox bottom edge(body: −8 … +8) */
 
-/* Three y-sample offsets used when probing left or right (lbW007B16/22) */
-static const int k_probe_hy[3] = { -22, -12, 0 };  /* ASM: {-6,4,16} - 16 */
-/* Three x-sample offsets used when probing up or down (lbW007B2E/3A) */
-static const int k_probe_vx[3] = { -16, -6, 6 };   /* ASM: {0,10,22} - 16 */
+/* Three y-sample offsets used when probing left or right */
+static const int k_probe_hy[3] = { -6, 0, 6 };   /* spans body height ±6 ⊆ ±8 */
+/* Three x-sample offsets used when probing up or down */
+static const int k_probe_vx[3] = { -6, 0, 6 };   /* spans body width  ±6 ⊆ ±8 */
 
 typedef struct {
     /* Position (pixels, fixed-point ×1) */
