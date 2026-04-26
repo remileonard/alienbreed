@@ -85,4 +85,14 @@ void sprite_draw_alien(int direction, int anim_frame, int x, int y);
  */
 void sprite_draw_alien_death(int death_frame, int x, int y);
 
+/* Total number of player sprites available (both players, 1-based in game = 1-80) */
+#define PLAYER_SPRITE_TOTAL 80
+
+/*
+ * Get raw pixel data for a player sprite by 0-based index (0 to PLAYER_SPRITE_TOTAL-1).
+ * On success sets *pixels, *w, *h and returns 0.
+ * Returns -1 if the index is out of range or the sprite was not loaded.
+ */
+int sprite_get_player_raw(int idx, const UBYTE **pixels, int *w, int *h);
+
 #endif /* AB_SPRITE_H */
