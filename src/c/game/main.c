@@ -240,7 +240,8 @@ void level_game_loop_external(void)
                 if (g_aliens[i].alive == 0) continue;
                 int sx = g_aliens[i].pos_x - g_camera_x;
                 int sy = g_aliens[i].pos_y - g_camera_y;
-                if (sx > -32 && sx < SCREEN_W && sy > -32 && sy < SCREEN_H) {
+                /* pos_x/pos_y is the centre; sprite extends ±16 px around it. */
+                if (sx > -48 && sx < SCREEN_W + 16 && sy > -48 && sy < SCREEN_H + 16) {
                     if (g_aliens[i].alive == 2) {
                         /* Dying: render explosion animation.
                          * Ref: lbL018C2E @ main.asm#L13907; 16 frames at delay=0. */

@@ -33,20 +33,26 @@
  * No orientation rotation applies; probes are purely direction-of-movement.
  * The C predictive approach checks the proposed position (nx/ny) just as
  * the ASM checks the current position before applying speed.
+ *
+ * In the C port pos_x/pos_y is the CENTRE of the 32×32 bbox (sprite is
+ * blitted at x-16, y-16), whereas the ASM uses the top-left corner.
+ * All probe offsets are therefore shifted by -16 relative to the raw ASM
+ * values so that they address the same world pixels:
+ *   C_offset = ASM_offset - 16
  */
 
 /* X offset of the probe column for left/right movement */
-#define PROBE_LEFT_X   (-4)
-#define PROBE_RIGHT_X  (30)
+#define PROBE_LEFT_X   (-20)   /* ASM: -4  → center: -4 - 16 = -20 */
+#define PROBE_RIGHT_X  (14)    /* ASM: +30 → center: 30 - 16 = +14 */
 
 /* Y offset of the probe row for up/down movement */
-#define PROBE_UP_Y     (-10)
-#define PROBE_DOWN_Y   (20)
+#define PROBE_UP_Y     (-26)   /* ASM: -10 → center: -10 - 16 = -26 */
+#define PROBE_DOWN_Y   (4)     /* ASM: +20 → center:  20 - 16 =  +4 */
 
 /* Three y-sample offsets used when probing left or right (lbW007B16/22) */
-static const int k_probe_hy[3] = { -6, 4, 16 };
+static const int k_probe_hy[3] = { -22, -12, 0 };  /* ASM: {-6,4,16} - 16 */
 /* Three x-sample offsets used when probing up or down (lbW007B2E/3A) */
-static const int k_probe_vx[3] = { 0, 10, 22 };
+static const int k_probe_vx[3] = { -16, -6, 6 };   /* ASM: {0,10,22} - 16 */
 
 typedef struct {
     /* Position (pixels, fixed-point ×1) */

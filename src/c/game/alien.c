@@ -360,7 +360,9 @@ static int alien_solid_at(int wx, int wy)
  * [pos_x, pos_x+32] × [pos_y, pos_y+32].
  *
  * Returns 1 if placing alien self_idx at world pixel (nx, ny) would overlap
- * any other living (alive==1) alien using the same 32×32 box.
+ * any other living (alive==1) alien using the same 32×32 box centred on pos.
+ * The overlap test nx < ox+32 && nx+32 > ox is equivalent to |nx-ox| < 32
+ * which holds for both top-left and centre conventions when box size = 32.
  */
 static int alien_overlaps_other(int self_idx, int nx, int ny)
 {
@@ -402,6 +404,10 @@ static int alien_overlaps_other(int self_idx, int nx, int ny)
  * where nx/ny = proposed position after applying speed.
  * No orientation-based rotation: probes are purely direction-of-movement driven,
  * matching the original ASM (no rotation in check_aliens_collisions).
+ *
+ * In the C port pos_x/pos_y is the CENTRE of the 32×32 bbox (sprite is blitted
+ * at x-16, y-16), whereas the ASM uses the top-left corner.  All probe offsets
+ * are shifted by -16 relative to the raw ASM values:  C_offset = ASM_offset - 16.
  */
 static void alien_move(int self_idx, Alien *a)
 {
@@ -432,24 +438,25 @@ static void alien_move(int self_idx, Alien *a)
     /*    Threshold of 4 px mirrors ASM `cmp.w #4,d4` (main.asm#L6926).   */
     /*    3 probes along the leading edge of the proposed bbox, matching   */
     /*    lbW00A2D6 (right) and lbW00A2CA (left) at main.asm#L7089-7090.  */
+    /*    Offsets are ASM values − 16 (centre-based pos_x/pos_y).         */
     /* ------------------------------------------------------------------ */
     int dx = tx - ax;
     if (dx > 4) {
-        /* Move right: 3 probes at the right edge (nx+30), y = -6, +16, +4 */
+        /* Move right: 3 probes at right edge (nx+14), y = -22, 0, -12 */
         int nx = ax + spd;
-        if (!alien_solid_at(nx + 30, ay - 6) &&
-            !alien_solid_at(nx + 30, ay + 16) &&
-            !alien_solid_at(nx + 30, ay + 4) &&
+        if (!alien_solid_at(nx + 14, ay - 22) &&
+            !alien_solid_at(nx + 14, ay +  0) &&
+            !alien_solid_at(nx + 14, ay - 12) &&
             !alien_overlaps_other(self_idx, nx, ay)) {
             ax = nx;
             dir_bits |= 4;  /* right */
         }
     } else if (dx < -4) {
-        /* Move left: 3 probes at the left edge (nx-4), y = -6, +16, +4 */
+        /* Move left: 3 probes at left edge (nx-20), y = -22, 0, -12 */
         int nx = ax - spd;
-        if (!alien_solid_at(nx - 4, ay - 6) &&
-            !alien_solid_at(nx - 4, ay + 16) &&
-            !alien_solid_at(nx - 4, ay + 4) &&
+        if (!alien_solid_at(nx - 20, ay - 22) &&
+            !alien_solid_at(nx - 20, ay +  0) &&
+            !alien_solid_at(nx - 20, ay - 12) &&
             !alien_overlaps_other(self_idx, nx, ay)) {
             ax = nx;
             dir_bits |= 8;  /* left */
@@ -460,24 +467,25 @@ static void alien_move(int self_idx, Alien *a)
     /* 3. Y movement — independent of X                                    */
     /*    3 probes along the leading edge of the proposed bbox, matching   */
     /*    lbW00A2EE (down) and lbW00A2E2 (up) at main.asm#L7087-7088.     */
+    /*    Offsets are ASM values − 16 (centre-based pos_x/pos_y).         */
     /* ------------------------------------------------------------------ */
     int dy = ty - ay;
     if (dy > 4) {
-        /* Move down: 3 probes at bottom edge (ny+20), x = 0, +22, +10 */
+        /* Move down: 3 probes at bottom edge (ny+4), x = -16, +6, -6 */
         int ny = ay + spd;
-        if (!alien_solid_at(ax + 0,  ny + 20) &&
-            !alien_solid_at(ax + 22, ny + 20) &&
-            !alien_solid_at(ax + 10, ny + 20) &&
+        if (!alien_solid_at(ax - 16, ny + 4) &&
+            !alien_solid_at(ax +  6, ny + 4) &&
+            !alien_solid_at(ax -  6, ny + 4) &&
             !alien_overlaps_other(self_idx, ax, ny)) {
             ay = ny;
             dir_bits |= 1;  /* down */
         }
     } else if (dy < -4) {
-        /* Move up: 3 probes at top edge (ny-10), x = 0, +22, +10 */
+        /* Move up: 3 probes at top edge (ny-26), x = -16, +6, -6 */
         int ny = ay - spd;
-        if (!alien_solid_at(ax + 0,  ny - 10) &&
-            !alien_solid_at(ax + 22, ny - 10) &&
-            !alien_solid_at(ax + 10, ny - 10) &&
+        if (!alien_solid_at(ax - 16, ny - 26) &&
+            !alien_solid_at(ax +  6, ny - 26) &&
+            !alien_solid_at(ax -  6, ny - 26) &&
             !alien_overlaps_other(self_idx, ax, ny)) {
             ay = ny;
             dir_bits |= 2;  /* up */
@@ -602,17 +610,18 @@ void aliens_collisions_with_weapons(void)
              * Ref: aliens_collisions_with_weapons @ main.asm:
              *   projectile bbox: add.l #$40004 (offset x+4, y+4)
              *                    add.l #$A000A (width 10, height 10)
-             *   alien bbox:      [pos_x, pos_x+32] × [pos_y, pos_y+32]
+             *   alien bbox:      [pos_x-16, pos_x+16] × [pos_y-16, pos_y+16]
+             *                    centre-based; equivalent to ASM [pos_x, pos_x+32].
              *                    (from lbW008F14 dc.w 0,0,$20,$20). */
             int bx1 = (int)s_projectiles[pi].x + 4;
             int bx2 = bx1 + 10;
             int by1 = (int)s_projectiles[pi].y + 4;
             int by2 = by1 + 10;
 
-            int ax1 = (int)g_aliens[ai].pos_x;
-            int ax2 = ax1 + 32;
-            int ay1 = (int)g_aliens[ai].pos_y;
-            int ay2 = ay1 + 32;
+            int ax1 = (int)g_aliens[ai].pos_x - 16;
+            int ax2 = (int)g_aliens[ai].pos_x + 16;
+            int ay1 = (int)g_aliens[ai].pos_y - 16;
+            int ay2 = (int)g_aliens[ai].pos_y + 16;
 
             if (ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1) {
                 s_projectiles[pi].active = 0;
@@ -644,18 +653,19 @@ void aliens_collisions_with_players(void)
             if (player_is_invincible(&g_players[pi])) continue;
 
             /* Bounding-box collision (AABB):
-             *   Alien  bbox : [pos_x,   pos_x+32] × [pos_y,   pos_y+32]
-             *   Player bbox : [pos_x+8, pos_x+24] × [pos_y+8, pos_y+24]
+             *   Alien  bbox : [pos_x-16, pos_x+16] × [pos_y-16, pos_y+16]
+             *                 (centre-based; equivalent to ASM [pos_x, pos_x+32])
+             *   Player bbox : [pos_x+BBOX_OFFSET, pos_x+BBOX_OFFSET+SIZE]
+             *                 = [pos_x−8, pos_x+8] × [pos_y−8, pos_y+8]
              *
-             * Alien bbox comes from lbW008F14+4={0,0} and lbW008F14+8={32,32}
-             * (the offset pair added to pos when building cur_alien*_dats).
+             * Alien bbox comes from lbW008F14+4={0,0} and lbW008F14+8={32,32}.
              * Player bbox comes from add.l #$80008 (top-left +8) and
              * add.l #$100010 (size 16×16).
              * Ref: aliens_collisions_with_players @ main.asm#L7598-L7618. */
-            int ax1 = (int)g_aliens[ai].pos_x;
-            int ax2 = ax1 + 32;
-            int ay1 = (int)g_aliens[ai].pos_y;
-            int ay2 = ay1 + 32;
+            int ax1 = (int)g_aliens[ai].pos_x - 16;
+            int ax2 = (int)g_aliens[ai].pos_x + 16;
+            int ay1 = (int)g_aliens[ai].pos_y - 16;
+            int ay2 = (int)g_aliens[ai].pos_y + 16;
 
             int px1 = (int)g_players[pi].pos_x + PLAYER_BBOX_OFFSET;
             int px2 = (int)g_players[pi].pos_x + PLAYER_BBOX_OFFSET + PLAYER_BBOX_SIZE;

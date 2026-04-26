@@ -285,7 +285,8 @@ void sprite_draw_alien(int direction, int anim_frame, int x, int y)
     int atlas_y = anim_frame * ALIEN_WALK_FRAME_STRIDE;
 
     const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
-    video_blit(src, ALIEN_ATLAS_W, x, y, ALIEN_SPRITE_W, ALIEN_SPRITE_H, 0);
+    /* (x,y) is the centre of the 32×32 alien world bbox; blit at top-left. */
+    video_blit(src, ALIEN_ATLAS_W, x - 16, y - 16, ALIEN_SPRITE_W, ALIEN_SPRITE_H, 0);
 }
 
 /* Draw a death/explosion frame (0-15) at screen position (x,y).
@@ -311,5 +312,6 @@ void sprite_draw_alien_death(int death_frame, int x, int y)
     }
 
     const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
-    video_blit(src, ALIEN_ATLAS_W, x, y, ALIEN_DEATH_W, ALIEN_DEATH_H, 0);
+    /* (x,y) is the centre of the 32×32 alien world bbox; blit at top-left. */
+    video_blit(src, ALIEN_ATLAS_W, x - 16, y - 16, ALIEN_DEATH_W, ALIEN_DEATH_H, 0);
 }

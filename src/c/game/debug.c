@@ -203,8 +203,9 @@ void debug_render_overlay(void)
     /* ---- Alien collision bounding boxes (32×32 — red) ---- */
     for (int i = 0; i < g_alien_count; i++) {
         if (g_aliens[i].alive == 0) continue;   /* skip fully dead slots */
-        int sx = (int)g_aliens[i].pos_x - g_camera_x;
-        int sy = (int)g_aliens[i].pos_y - g_camera_y;
+        /* pos_x/pos_y is the centre of the 32×32 bbox; draw centred. */
+        int sx = (int)g_aliens[i].pos_x - g_camera_x - 16;
+        int sy = (int)g_aliens[i].pos_y - g_camera_y - 16;
         video_overlay_rect_outline(sx, sy, 32, 32,
                                    COLOR_ALIEN_BBOX_R,
                                    COLOR_ALIEN_BBOX_G,
