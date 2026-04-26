@@ -253,11 +253,11 @@ void sprite_draw_player(int player_idx, int x, int y, int facing)
     SpriteImage *img = &s_player[sprite_idx];
     if (!img->pixels) return;
     video_blit(img->pixels, img->w, x-(img->w/2), y-(img->h/2), img->w, img->h, 0);
-    video_plot_pixel(x, y, 12);  /* debug: plot top-left pixel of alien sprite */
-    video_plot_pixel(x + PROBE_LEFT_X, y, 15);  /* debug: plot first probe point */
-    video_plot_pixel(x + PROBE_RIGHT_X, y, 15); /* debug: plot second probe point */
-    video_plot_pixel(x, y + PROBE_UP_Y, 15);    /* debug: plot third probe point */
-    video_plot_pixel(x, y + PROBE_DOWN_Y, 15);  /* debug: plot fourth probe point */
+    video_plot_pixel(x, y, 12);  /* debug: centre of player sprite */
+    video_plot_pixel(x + PROBE_LEFT_X,  y,              15);  /* debug: left  wall probe */
+    video_plot_pixel(x + PROBE_RIGHT_X, y,              15);  /* debug: right wall probe */
+    video_plot_pixel(x,                 y + PROBE_UP_Y, 15);  /* debug: up    wall probe */
+    video_plot_pixel(x,                 y + PROBE_DOWN_Y, 15);/* debug: down  wall probe */
 }
 
 /* Draw alien walk sprite (direction=0-7 compass, anim_frame=0-2) at (x,y).
@@ -276,24 +276,24 @@ void sprite_draw_alien(int direction, int anim_frame, int x, int y)
 
     int atlas_x = direction * ALIEN_SPRITE_W;
 
-    /* Row depends on atlas layout type (Ref: main.asm atlas descriptors):
-     *   COMPACT (lbW019A8E etc.): y = frame * 32   — most levels
-     *   LEGACY  (lbW01945E):     y = {0, 96, 128}  — L0BO / LEGACY levels */
-    static const int k_legacy_y[3] = {0, 96, 128};
-    int atlas_y;
-    if (alien_gfx_get_atlas_type() == ALIEN_ATLAS_LEGACY) {
-        atlas_y = k_legacy_y[anim_frame];
-    } else {
-        atlas_y = anim_frame * ALIEN_WALK_FRAME_STRIDE;
-    }
+    /* Walk frame Y = frame_idx * 32 for ALL atlas types.
+     * Both COMPACT (lbW019A8E) and LEGACY (lbW01945E) store the main walk
+     * cycle at y=0, y=32, y=64: lbL01B036 references entries 100-123 in
+     * lbW01945E which are at (dir*32, frame*32) — identical layout to COMPACT.
+     * (lbW01945E entries 8-23 at y=96/128 are SECONDARY BOBs for a different
+     *  idle-animation layer and must NOT be used here.) */
+    int atlas_y = anim_frame * ALIEN_WALK_FRAME_STRIDE;
 
     const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
-    video_blit(src, ALIEN_ATLAS_W, x, y, ALIEN_SPRITE_W, ALIEN_SPRITE_H, 0);
+    /* (x,y) is the centre of the 32×32 alien world bbox; blit at top-left. */
+    video_blit(src, ALIEN_ATLAS_W, x - 16, y - 16, ALIEN_SPRITE_W, ALIEN_SPRITE_H, 0);
 }
 
 /* Draw a death/explosion frame (0-15) at screen position (x,y).
- * Frames are 16×14 px, stored in 2 rows of 8 starting at (192,160).
- * Ref: lbW0188CE @ main.asm#L13833; death anim lbL018C2E @ main.asm#L13907. */
+ * Frames are 32×30 px (same size as walk sprites), laid out in two rows:
+ *   Row 1 (y=0xC0=192): frames  0-9,  x = frame_idx * 32
+ *   Row 2 (y=0xE0=224): frames 10-15, x = (frame_idx-10) * 32
+ * Ref: lbL018C2E @ main.asm#L13907 → lbW0188CE entries 40-55 (#L13874-L13889). */
 void sprite_draw_alien_death(int death_frame, int x, int y)
 {
     const UBYTE *atlas = alien_gfx_get_atlas();
@@ -302,9 +302,16 @@ void sprite_draw_alien_death(int death_frame, int x, int y)
     if (death_frame < 0) death_frame = 0;
     if (death_frame >= ALIEN_DEATH_FRAMES) death_frame = ALIEN_DEATH_FRAMES - 1;
 
-    int atlas_x = ALIEN_DEATH_ATLAS_X + (death_frame % 8) * ALIEN_DEATH_W;
-    int atlas_y = ALIEN_DEATH_ATLAS_Y + (death_frame / 8) * 16;
+    int atlas_x, atlas_y;
+    if (death_frame < ALIEN_DEATH_ROW1_COUNT) {
+        atlas_x = death_frame * ALIEN_DEATH_W;
+        atlas_y = ALIEN_DEATH_ROW1_Y;
+    } else {
+        atlas_x = (death_frame - ALIEN_DEATH_ROW1_COUNT) * ALIEN_DEATH_W;
+        atlas_y = ALIEN_DEATH_ROW2_Y;
+    }
 
     const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
-    video_blit(src, ALIEN_ATLAS_W, x, y, ALIEN_DEATH_W, ALIEN_DEATH_H, 0);
+    /* (x,y) is the centre of the 32×32 alien world bbox; blit at top-left. */
+    video_blit(src, ALIEN_ATLAS_W, x - 16, y - 16, ALIEN_DEATH_W, ALIEN_DEATH_H, 0);
 }

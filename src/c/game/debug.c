@@ -5,11 +5,14 @@
 
 #include "debug.h"
 #include "player.h"
+#include "alien.h"
 #include "constants.h"
 #include "../engine/tilemap.h"
 #include "../hal/video.h"
 #include <stdio.h>
 #include <string.h>
+
+extern int g_camera_x, g_camera_y;
 
 int g_debug_overlay_on = 0;
 
@@ -85,9 +88,19 @@ static void draw_string(int x, int y, const char *s,
 #define COLOR_DOOR_G   255
 #define COLOR_DOOR_B   255  /* cyan */
 
+#define COLOR_SPAWN_R  255
+#define COLOR_SPAWN_G  140
+#define COLOR_SPAWN_B    0  /* orange — alien spawn tiles 0x28/0x29 */
+
 #define COLOR_OTHER_R  255
 #define COLOR_OTHER_G  255
 #define COLOR_OTHER_B    0  /* yellow */
+
+/* Returns 1 if attr is a spawn tile (0x28 ALIEN_SPAWN_BIG / 0x29 ALIEN_SPAWN_SMALL). */
+static int is_spawn(UBYTE a)
+{
+    return (a == TILE_ALIEN_SPAWN_BIG || a == TILE_ALIEN_SPAWN_SMALL);
+}
 
 /* Returns 1 if attr is a wall tile.                                 */
 static int is_wall(UBYTE a)
@@ -112,6 +125,17 @@ static int is_door(UBYTE a)
             a == TILE_FIRE_DOOR_A ||
             a == TILE_FIRE_DOOR_B);
 }
+
+/* ------------------------------------------------------------------ */
+/* Bounding-box colors                                                */
+/* ------------------------------------------------------------------ */
+#define COLOR_ALIEN_BBOX_R  255
+#define COLOR_ALIEN_BBOX_G    0
+#define COLOR_ALIEN_BBOX_B    0   /* red   — alien 32×32 collision box */
+
+#define COLOR_PLAYER_BBOX_R   0
+#define COLOR_PLAYER_BBOX_G  255
+#define COLOR_PLAYER_BBOX_B  255  /* cyan  — player 16×16 hit box (+8,+8) */
 
 /* ------------------------------------------------------------------ */
 /* Main overlay renderer                                              */
@@ -144,6 +168,8 @@ void debug_render_overlay(void)
                 r = COLOR_ITEM_R;  g = COLOR_ITEM_G;  b = COLOR_ITEM_B;
             } else if (is_door(attr)) {
                 r = COLOR_DOOR_R;  g = COLOR_DOOR_G;  b = COLOR_DOOR_B;
+            } else if (is_spawn(attr)) {
+                r = COLOR_SPAWN_R; g = COLOR_SPAWN_G; b = COLOR_SPAWN_B;
             } else {
                 r = COLOR_OTHER_R; g = COLOR_OTHER_G; b = COLOR_OTHER_B;
             }
@@ -173,4 +199,27 @@ void debug_render_overlay(void)
              (int)p1->lives);
 
     draw_string(2, 1, buf, 255, 255, 255);
+
+    /* ---- Alien collision bounding boxes (32×32 — red) ---- */
+    for (int i = 0; i < g_alien_count; i++) {
+        if (g_aliens[i].alive == 0) continue;   /* skip fully dead slots */
+        /* pos_x/pos_y is the centre of the 32×32 bbox; draw centred. */
+        int sx = (int)g_aliens[i].pos_x - g_camera_x - 16;
+        int sy = (int)g_aliens[i].pos_y - g_camera_y - 16;
+        video_overlay_rect_outline(sx, sy, 32, 32,
+                                   COLOR_ALIEN_BBOX_R,
+                                   COLOR_ALIEN_BBOX_G,
+                                   COLOR_ALIEN_BBOX_B, 220);
+    }
+
+    /* ---- Player collision bounding boxes (16×16 at +8,+8 — cyan) ---- */
+    for (int i = 0; i < MAX_PLAYERS; i++) {
+        if (!g_players[i].alive) continue;
+        int sx = (int)g_players[i].pos_x + PLAYER_BBOX_OFFSET - g_camera_x;
+        int sy = (int)g_players[i].pos_y + PLAYER_BBOX_OFFSET - g_camera_y;
+        video_overlay_rect_outline(sx, sy, PLAYER_BBOX_SIZE, PLAYER_BBOX_SIZE,
+                                   COLOR_PLAYER_BBOX_R,
+                                   COLOR_PLAYER_BBOX_G,
+                                   COLOR_PLAYER_BBOX_B, 220);
+    }
 }

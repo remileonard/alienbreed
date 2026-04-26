@@ -13,19 +13,30 @@
  * Walk sprite layout (Ref: lbW01945E / lbW019A8E @ main.asm#L14034,L14160):
  *   Column (X): direction * ALIEN_SPRITE_W
  *     8 compass directions: N(0) NE(1) E(2) SE(3) S(4) SW(5) W(6) NW(7)
- *   Row (Y) depends on atlas type (see ALIEN_ATLAS_COMPACT / ALIEN_ATLAS_LEGACY).
+ *   Row (Y):   frame * ALIEN_WALK_FRAME_STRIDE  (same for ALL atlas types)
  *   Frame size: ALIEN_SPRITE_W × ALIEN_SPRITE_H  (32 × 30 px)
  *
- * ALIEN_ATLAS_COMPACT (lbW019A8E, lbW018D4A, lbW01A1A2, lbW01A922 — most levels):
- *   frame 0 → y = 0,  frame 1 → y = 32,  frame 2 → y = 64  (stride = 32)
+ * Walk frame layout — IDENTICAL for COMPACT and LEGACY atlas types:
+ *   frame 0 → y =  0  (entries 0-7 of COMPACT; entries 100-107 of LEGACY)
+ *   frame 1 → y = 32  (stride = ALIEN_WALK_FRAME_STRIDE = 32)
+ *   frame 2 → y = 64
  *
- * ALIEN_ATLAS_LEGACY (lbW01945E — L0BO / level 1, and levels 10-11):
- *   frame 0 → y = 0,  frame 1 → y = 96,  frame 2 → y = 128
+ * (Note: lbW01945E LEGACY entries 8-23 at y=96/128 are *secondary* idle BOBs
+ *  used by a different layer, NOT by the main walk cycle lbL01B036.)
  *
- * Death/explosion sprites (Ref: lbW0188CE @ main.asm#L13833,  lbL018C2E#L13907):
- *   16 frames of 16×14 px arranged in 2 rows of 8 at the bottom of the atlas.
- *   Frame i:  atlas_x = ALIEN_DEATH_ATLAS_X + (i % 8) * ALIEN_DEATH_W
- *             atlas_y = ALIEN_DEATH_ATLAS_Y + (i / 8) * 16
+ * COMPACT (lbW019A8E, lbW018D4A, lbW01A1A2, lbW01A922): most levels.
+ * LEGACY  (lbW01945E): L0BO / level 1, levels 10-11.
+ *   Both share the same walk-frame Y layout; the atlas_type field is retained
+ *   for potential future use (e.g., secondary BOB layers).
+ *
+ * Death/explosion sprites (Ref: lbW0188CE @ main.asm#L13833, lbL018C2E#L13907):
+ *   16 frames of 32×30 px in two rows of the atlas.
+ *   lbL018C2E uses BOB descriptors at indices 40-55 of lbL01790A, which receive
+ *   coordinates from lbW0188CE entries 40-55:
+ *     Row 1 (y=0xC0=192): 10 frames, x = frame_idx * 32  (frames 0-9)
+ *     Row 2 (y=0xE0=224): 6 frames, x = (frame_idx-10) * 32  (frames 10-15)
+ *   Frame i: atlas_x = (i < ALIEN_DEATH_ROW1_COUNT) ? i*32 : (i-ALIEN_DEATH_ROW1_COUNT)*32
+ *            atlas_y = (i < ALIEN_DEATH_ROW1_COUNT) ? ALIEN_DEATH_ROW1_Y : ALIEN_DEATH_ROW2_Y
  *
  * Transparency: color index 0 (all bitplanes = 0) is transparent, matching
  * the Amiga blitter minterm $CA used in the original BOB rendering code
@@ -68,11 +79,12 @@
 #define ALIEN_ATLAS_LEGACY   1
 
 /* Death/explosion sprite dimensions and atlas position */
-#define ALIEN_DEATH_FRAMES   16  /* 16 explosion frames total */
-#define ALIEN_DEATH_W        16  /* pixels wide  (0x10) */
-#define ALIEN_DEATH_H        14  /* pixels tall  (0x0E) */
-#define ALIEN_DEATH_ATLAS_X 192  /* first frame at x=0xC0 in atlas */
-#define ALIEN_DEATH_ATLAS_Y 160  /* row 0 at y=0xA0; row 1 at y=0xB0 (+16) */
+#define ALIEN_DEATH_FRAMES      16  /* 16 explosion frames total */
+#define ALIEN_DEATH_W           32  /* pixels wide  (0x20 = ALIEN_SPRITE_W) */
+#define ALIEN_DEATH_H           30  /* pixels tall  (0x1E = ALIEN_SPRITE_H) */
+#define ALIEN_DEATH_ROW1_Y     192  /* first row y  = 0xC0; 10 frames */
+#define ALIEN_DEATH_ROW1_COUNT  10  /* frames 0-9 in first row */
+#define ALIEN_DEATH_ROW2_Y     224  /* second row y = 0xE0; 6 frames */
 
 /*
  * Load the BO file at path, decode 5 sequential bitplanes to an indexed-color

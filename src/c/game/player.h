@@ -19,44 +19,40 @@
 #define OWNED_WEAPONS_SIZE 8
 
 /*
- * Directional probe offsets translated from the ASM probe tables.
+ * Directional probe offsets for player wall collision.
  *
- * The original game stores four probe tables in main.asm:
- *   lbW007B16 (LEFT):  x = -4,       y = {-6,  4, 16}
- *   lbW007B22 (RIGHT): x = +30,      y = {-6,  4, 16}
- *   lbW007B2E (UP):    x = {0,10,22}, y = -10
- *   lbW007B3A (DOWN):  x = {0,10,22}, y = +20
+ * The player's visible body occupies the inner 16×16 region of its sprite,
+ * confirmed by the hit-box at [pos_x−8 … pos_x+8] × [pos_y−8 … pos_y+8]
+ * (PLAYER_BBOX_OFFSET = −8, PLAYER_BBOX_SIZE = 16).
  *
- * The ASM origin is pos_x = col*16+4, pos_y = row*16+58 (with a +3-row
- * header in cur_map_datas that shifts all row lookups by 3).
- * The C port uses pos_x = col*16+8, pos_y = row*16+8 (tile centre).
+ * All probe offsets are chosen so that, with 16-px tiles and integer-division
+ * tile lookup (pixel / 16), the body edge stops exactly at the tile boundary
+ * when the leading probe first enters a solid tile:
  *
- * Conversion so that both reach the same map tile:
- *   c_x_offset = asm_x_offset - 4   (pos_x differs by +4)
- *   c_y_offset = asm_y_offset + 2   (pos_y differs by -50; +3-row header
- *                                    adds 48 px; net: +58-48-8 = +2)
+ *   LEFT  probe at center − 8  → player stops with hitbox left  = wall right+1
+ *   RIGHT probe at center + 7  → player stops with hitbox right = wall left
+ *   UP    probe at center − 8  → player stops with hitbox top   = ceil bottom+1
+ *   DOWN  probe at center + 7  → player stops with hitbox bottom= floor top
  *
- * Resulting C-space offsets:
- *   LEFT  x : pos_x - 8              (ASM -4  → C -4-4  = -8)
- *   RIGHT x : pos_x + 26             (ASM +30 → C 30-4  = +26)
- *   UP    y : pos_y - 8              (ASM -10 → C -10+2 = -8)
- *   DOWN  y : pos_y + 22             (ASM +20 → C 20+2  = +22)
- *   H y pts : pos_y + {-4, +6, +18}  (ASM {-6,4,16} → C {-4,6,18})
- *   V x pts : pos_x + {-4, +6, +18}  (ASM {0,10,22} → C {-4,6,18})
+ * The three perpendicular samples {−6, 0, +6} span the body width/height
+ * while remaining within the ±8 body boundary.
+ *
+ * A fixed centre probe at (nx, ny) catches any solid tile at the player's
+ * exact centre (safety net for corner cases).
  */
 
-/* X offset of the single probe column for left/right movement */
-#define PROBE_LEFT_X   (-8)
-#define PROBE_RIGHT_X  (8)
+/* X offset of the probe column for left/right movement */
+#define PROBE_LEFT_X   (-8)    /* 1 probe at hitbox left edge  (body: −8 … +8) */
+#define PROBE_RIGHT_X  (7)     /* 1 probe at hitbox right edge (body: −8 … +8) */
 
-/* Y offset of the single probe row for up/down movement */
-#define PROBE_UP_Y     (-8)
-#define PROBE_DOWN_Y   (8)
+/* Y offset of the probe row for up/down movement */
+#define PROBE_UP_Y     (-8)    /* 1 probe at hitbox top edge   (body: −8 … +8) */
+#define PROBE_DOWN_Y   (7)     /* 1 probe at hitbox bottom edge(body: −8 … +8) */
 
 /* Three y-sample offsets used when probing left or right */
-static const int k_probe_hy[3] = { -4, 6, 18 };
+static const int k_probe_hy[3] = { -6, 0, 6 };   /* spans body height ±6 ⊆ ±8 */
 /* Three x-sample offsets used when probing up or down */
-static const int k_probe_vx[3] = { -4, 6, 18 };
+static const int k_probe_vx[3] = { -6, 0, 6 };   /* spans body width  ±6 ⊆ ±8 */
 
 typedef struct {
     /* Position (pixels, fixed-point ×1) */
@@ -108,9 +104,37 @@ typedef struct {
     int   anim_seq_timer;      /* ticks remaining before advancing to the next frame */
     int   anim_seq_id;         /* opaque id of the current sequence; reset triggers frame restart */
 
+    /* Death animation counter (equivalent to 280(a0) in main.asm).
+     * Set to PLAYER_DEATH_FRAMES when health reaches 0; counts down each frame.
+     * While > 0 the player is shown as an explosion and cannot move or take damage.
+     * When it reaches 0: respawn with full health (if lives > 0) or set alive = 0.
+     * Ref: lbC006C7A / lbC0077DC @ main.asm#L3934-L4046. */
+    int   death_counter;
+
     /* Input (references to global input state) */
     int   port;           /* 0 = player 1, 1 = player 2 */
 } Player;
+
+/* Number of frames the player death explosion animation plays before respawn.
+ * The original ASM counter is 200 frames; we use a shorter value that still
+ * gives a visible explosion (≈2 full cycles through the 16-frame atlas at
+ * the rate one atlas-frame advances per rendered frame).
+ * Ref: move.w #200,lbW005D64 @ main.asm#L3938. */
+#define PLAYER_DEATH_FRAMES  32
+
+/* Player hit-box offset and size relative to pos_x/pos_y.
+ *
+ * In the C port pos_x/pos_y is the *centre* of the 32×32 player sprite
+ * (the sprite is blitted at x-w/2, y-h/2).  The ASM origin is the sprite
+ * top-left, and the hit box is the inner 16×16 starting 8 px from that
+ * top-left (add.l #$80008 / add.l #$100010 @ main.asm#L7600-L7603).
+ *
+ * Converting to C centre-origin:
+ *   ASM top-left + 8 = sprite_centre − 16 + 8 = sprite_centre − 8
+ *
+ * So the hit box spans [pos_x−8 … pos_x+8] × [pos_y−8 … pos_y+8]. */
+#define PLAYER_BBOX_OFFSET  (-8)
+#define PLAYER_BBOX_SIZE     16
 
 extern Player g_players[MAX_PLAYERS];
 

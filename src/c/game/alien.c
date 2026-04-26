@@ -17,6 +17,18 @@ Alien g_aliens[MAX_ALIENS];
 int   g_alien_count             = 0;
 WORD  g_global_aliens_extra_strength = 0;
 
+/*
+ * Player position cache — mirrors lbL0097EA / lbC0097F6 in main.asm.
+ * The original only refreshes the player positions used by alien AI every
+ * lbW0097F2 = 20 VBL frames (~400 ms at 50 Hz), giving aliens their
+ * characteristic "drift past walls before correcting" feel.
+ */
+#define TARGET_REFRESH_FRAMES 20
+static int s_cached_player_x[MAX_PLAYERS];
+static int s_cached_player_y[MAX_PLAYERS];
+static int s_cached_player_alive[MAX_PLAYERS];
+static int s_target_refresh_countdown = 0;
+
 /* Alien type table: HP base values (Ref: alien1_struct–alien7_struct @ main.asm#L5918-L5967) */
 static const WORD k_alien_type_hp[7] = {
     100,  /* type 1 */
@@ -62,6 +74,13 @@ typedef struct {
     int  alien_type;         /* 1-based alien type (1=weakest … 7=strongest) */
     int  active;             /* 1 = slot occupied */
     int  one_shot;           /* 1 = deactivate after first spawn (facehugger hatch) */
+    int  spawned_alien_idx;  /* index of the alien last spawned from this point,
+                              * or −1 if none yet.  Re-spawn is suppressed while
+                              * g_aliens[spawned_alien_idx].alive != 0 so that at
+                              * most one alien exists per spawn point at any time.
+                              * (Mirrors the cur_alien_dats bbox overlap check in
+                              * lbC00A7EA @ main.asm, generalised to per-point
+                              * tracking per user requirement.) */
 } SpawnPoint;
 
 static SpawnPoint s_spawn_points[MAX_SPAWN_POINTS];
@@ -83,24 +102,46 @@ static int alien_type_for_level(void)
     return t;
 }
 
+/* Forward declaration — defined later in this file. */
+static int alien_overlaps_other(int self_idx, int nx, int ny);
+
 /* -----------------------------------------------------------------------
  * Place one alien at world-pixel position (wx, wy) of the given type.
+ * Returns the index in g_aliens[] of the newly placed alien, or -1 if
+ * no slot was available.  Dead slots are recycled before appending new
+ * ones so that the pool does not exhaust after many spawns/deaths.
  * ----------------------------------------------------------------------- */
-static void spawn_alien_at(int wx, int wy, int alien_type)
+static int spawn_alien_at(int wx, int wy, int alien_type)
 {
-    if (g_alien_count >= MAX_ALIENS) return;
-
     WORD base_hp = (alien_type >= 1 && alien_type <= 7)
                    ? k_alien_type_hp[alien_type - 1]
                    : k_alien_type_hp[0];
 
-    Alien *a    = &g_aliens[g_alien_count++];
+    /* Recycle the first dead slot before falling back to appending. */
+    int idx = -1;
+    for (int i = 0; i < g_alien_count; i++) {
+        if (g_aliens[i].alive == 0) { idx = i; break; }
+    }
+    if (idx < 0) {
+        if (g_alien_count >= MAX_ALIENS) return -1;
+        idx = g_alien_count++;
+    }
+
+    /* Do not spawn if the target position already overlaps a living alien.
+     * The alien-alien separation logic only cancels *movement* into an overlap;
+     * it cannot resolve an overlap that already exists at birth, which leaves
+     * both aliens permanently stuck.  Return -1 so the caller retries later. */
+    if (alien_overlaps_other(idx, wx, wy)) return -1;
+
+    Alien *a    = &g_aliens[idx];
     a->pos_x    = (WORD)wx;
     a->pos_y    = (WORD)wy;
     a->speed    = (WORD)(2 + g_global_aliens_extra_strength / 5);
     a->strength = (WORD)(base_hp + g_global_aliens_extra_strength);
     a->alive    = 1;
     a->type_idx = alien_type - 1;
+    a->death_frame = 0;
+    return idx;
 }
 
 void alien_init_variables(void)
@@ -108,23 +149,35 @@ void alien_init_variables(void)
     memset(g_aliens,       0, sizeof(g_aliens));
     memset(s_projectiles,  0, sizeof(s_projectiles));
     memset(s_spawn_points, 0, sizeof(s_spawn_points));
+    memset(s_cached_player_x,     0, sizeof(s_cached_player_x));
+    memset(s_cached_player_y,     0, sizeof(s_cached_player_y));
+    memset(s_cached_player_alive, 0, sizeof(s_cached_player_alive));
     g_alien_count = 0;
     s_spawn_count = 0;
+    s_target_refresh_countdown = 0;
 }
 
 /*
- * Scan the loaded map for spawn tiles and register them as pending spawn
- * points.  No aliens are created yet — spawning is deferred to
- * alien_spawn_tick() which fires lazily when each tile enters the player's
- * (expanded) viewport, exactly as in the original ASM.
+ * Scan the loaded map for alien spawn tiles and register them as deferred
+ * spawn points.  No aliens are created immediately — spawning is driven by
+ * alien_spawn_tick() which fires when each tile enters the expanded viewport,
+ * exactly as in the original ASM.
  *
  * Tile attributes that mark alien spawn locations:
- *   0x28 – TILE_ALIEN_SPAWN_BIG   (respawning big-alien location)
- *   0x29 – TILE_ALIEN_SPAWN_SMALL (respawning small-alien location)
- *   0x34 – TILE_ALIEN_HOLE        (hole from which aliens emerge)
+ *   0x28 – TILE_ALIEN_SPAWN_BIG   (respawning large alien, e.g. lbW008F94/lbW009094)
+ *   0x29 – TILE_ALIEN_SPAWN_SMALL (respawning small alien, e.g. lbW008FD4/lbW009414)
  *
- * Ref: lbC00D17E / lbC00D1B4 / lbC00D236 @ main.asm#L8547-L8623;
- *      set_all_aliens_to_default @ main.asm#L8628.
+ * Tile 0x34 (TILE_ALIEN_HOLE) is tile_not_used in the main tile action table
+ * and is NOT a spawn point.
+ *
+ * In the original game the second tile-scan table (lbC0041B8 loop) registers
+ * nearby tiles of these types into the two spawn slots (lbL00D29A / lbL00D2AA)
+ * via lbC00D22A → lbC00D236.  Pre-registering all map tiles at level load is
+ * an equivalent approximation (the viewport gate in alien_spawn_tick() ensures
+ * spawning only happens when the tile is on screen).
+ *
+ * Ref: lbC0049EA / lbC004A18 / lbC004A28 → lbC00D22A → lbC00D236 @
+ *      main.asm#L2204-L2585; lbC00D17E / lbC00D1B4 @ main.asm#L8547-L8575.
  */
 void alien_spawn_from_map(void)
 {
@@ -134,9 +187,8 @@ void alien_spawn_from_map(void)
     for (int row = 0; row < MAP_ROWS && s_spawn_count < MAX_SPAWN_POINTS; row++) {
         for (int col = 0; col < MAP_COLS && s_spawn_count < MAX_SPAWN_POINTS; col++) {
             UBYTE attr = tilemap_attr(&g_cur_map, col, row);
-            if (attr != TILE_ALIEN_SPAWN_BIG  &&
-                attr != TILE_ALIEN_SPAWN_SMALL &&
-                attr != TILE_ALIEN_HOLE) continue;
+            if (attr != TILE_ALIEN_SPAWN_BIG &&
+                attr != TILE_ALIEN_SPAWN_SMALL) continue;
 
             SpawnPoint *sp = &s_spawn_points[s_spawn_count++];
             sp->world_x    = (WORD)(col * MAP_TILE_W + MAP_TILE_W / 2);
@@ -145,6 +197,7 @@ void alien_spawn_from_map(void)
             sp->alien_type = alien_type;
             sp->active     = 1;
             sp->one_shot   = 0;
+            sp->spawned_alien_idx = -1;
         }
     }
 }
@@ -174,29 +227,54 @@ void alien_spawn_near(int wx, int wy)
     sp->alien_type = alien_type_for_level();
     sp->active     = 1;
     sp->one_shot   = 1;
+    sp->spawned_alien_idx = -1;
 }
 
 /*
  * Per-frame viewport scan — mirrors lbC00D17E / lbC00D1B4 @ main.asm.
  *
- * Expanded viewport (80 px beyond each screen edge):
- *   left   = g_camera_x − 80         right  = g_camera_x + 400 (= left + 480)
- *   top    = g_camera_y − 80         bottom = g_camera_y + 336 (= top  + 416)
+ * ASM zone (lbC00D17E):
+ *   vp_left   = map_pos_x − 80        vp_right  = map_pos_x + 400 (screen+80)
+ *   vp_top    = map_pos_y − 80        vp_bottom = map_pos_y + 416 (screen+80)
  *
- * For each active spawn point:
- *   – If its pixel centre is inside the expanded viewport, the countdown
- *     decrements by 1.  When it reaches −1 an alien is spawned and the
- *     countdown resets to SPAWN_COUNTDOWN_INIT (mirrors lbC00D1B4 line
- *     `move.w 44(a1), 8(a0)` which reloads the timer).
- *   – If the tile is outside the viewport the countdown resets to
- *     SPAWN_COUNTDOWN_INIT (mirrors lbC00D220 which clears the slot pointer
- *     so the next viewport entry starts fresh).
- *   – One-shot slots (facehugger hatches) are deactivated after the spawn.
+ * In the original game, slots are registered via lbC00D22A ONLY when a tile
+ * enters the viewport during scrolling (tile action fired at scroll edge).
+ * So a registered slot always starts near the screen border, and the 20-frame
+ * countdown (lbC00D236: `move.w #20, 8(a0)` / reload from alien struct offset
+ * 44 = $14 = 20) fires just as the tile approaches visibility.
+ *
+ * The C port pre-registers all map spawn tiles at level load, so we must
+ * replicate the "scroll-edge trigger" by restricting spawn checks to the
+ * 80-pixel approach band — the area that is inside the expanded viewport but
+ * NOT yet visible on screen.  When the tile is on screen proper the countdown
+ * is simply paused; when it leaves the expanded zone entirely the countdown
+ * and the dead-alien reference are reset so the next approach starts fresh.
+ *
+ * Summary of per-tick state machine for map spawn points (one_shot = 0):
+ *   OUTSIDE expanded vp   → reset countdown; clear dead alien ref (fresh state)
+ *   ON SCREEN proper      → pause (do nothing)
+ *   IN APPROACH BAND      → decrement countdown; when expired check occupancy:
+ *                             alien alive  → reload timer, wait
+ *                             alien dead   → spawn, reload timer
+ *
+ * Facehugger hatches (one_shot = 1) use the simpler full-expanded-vp zone
+ * since they are always triggered by direct player contact (already visible).
+ *
+ * Alien struct offset 44 = $14 = 20 confirms the reload value (lbC00D1B4:
+ * `move.w 44(a1), 8(a0)` with a1 = lbW008F94 etc. @ main.asm#L8567).
  *
  * Called from alien_update_all() every game tick.
  */
+
 void alien_spawn_tick(void)
 {
+    /* Screen visible area */
+    int sc_left   = g_camera_x;
+    int sc_right  = g_camera_x + SCREEN_W;
+    int sc_top    = g_camera_y;
+    int sc_bottom = g_camera_y + SCREEN_H;
+
+    /* Expanded viewport: 80 px beyond each screen edge (ref lbC00D17E). */
     int vp_left   = g_camera_x - SPAWN_VIEWPORT_MARGIN;
     int vp_right  = g_camera_x + SCREEN_W + SPAWN_VIEWPORT_MARGIN;
     int vp_top    = g_camera_y - SPAWN_VIEWPORT_MARGIN;
@@ -206,25 +284,64 @@ void alien_spawn_tick(void)
         SpawnPoint *sp = &s_spawn_points[i];
         if (!sp->active) continue;
 
-        int in_vp = (sp->world_x >= vp_left  && sp->world_x < vp_right &&
-                     sp->world_y >= vp_top    && sp->world_y < vp_bottom);
+        int in_expanded = (sp->world_x >= vp_left  && sp->world_x < vp_right &&
+                           sp->world_y >= vp_top    && sp->world_y < vp_bottom);
 
-        if (!in_vp) {
-            /* Left viewport: reset countdown (ref lbC00D220). */
+        if (!in_expanded) {
+            /*
+             * Tile is outside the expanded zone: reset countdown.
+             * Also clear the alien reference if that alien has since died,
+             * so the next approach can hatch a fresh one (mirrors lbC00D220
+             * which clears the slot pointer entirely).
+             */
+            sp->countdown = SPAWN_COUNTDOWN_INIT;
+            if (sp->spawned_alien_idx >= 0 &&
+                g_aliens[sp->spawned_alien_idx].alive == 0)
+                sp->spawned_alien_idx = -1;
+            continue;
+        }
+
+        if (!sp->one_shot) {
+            /*
+             * Map spawn point (tile 0x28/0x29): only check in the 80-px
+             * off-screen approach band.  If the tile is already on screen
+             * the countdown is paused — alien spawning from a visible tile
+             * would make the alien appear out of thin air.
+             * (In the original ASM, lbC00D22A registers the slot only when
+             * the tile first enters the viewport during scrolling, so it
+             * always starts at the screen edge — never from mid-screen.)
+             */
+            int on_screen = (sp->world_x >= sc_left  && sp->world_x < sc_right &&
+                             sp->world_y >= sc_top    && sp->world_y < sc_bottom);
+            if (on_screen) continue;  /* visible: pause, don't spawn */
+        }
+
+        /* In approach band (map point) or expanded vp (one_shot): tick. */
+        sp->countdown--;
+        if (sp->countdown >= 0) continue;
+
+        /*
+         * Countdown expired.  Check per-point occupancy:
+         * at most one living alien may exist per spawn point at any time.
+         */
+        if (sp->spawned_alien_idx >= 0 &&
+            g_aliens[sp->spawned_alien_idx].alive != 0) {
+            /* Alien still alive — reload and keep waiting. */
             sp->countdown = SPAWN_COUNTDOWN_INIT;
             continue;
         }
 
-        sp->countdown--;
-        if (sp->countdown >= 0) continue;
-
-        /* Countdown expired: spawn alien and reload timer (ref lbC00D1B4). */
-        spawn_alien_at(sp->world_x, sp->world_y, sp->alien_type);
-        audio_play_sample(SAMPLE_HATCHING_ALIEN);
+        /* Hatch an alien (ref lbC00A718 / do_alien_hatch @ main.asm#L7455). */
+        int idx = spawn_alien_at(sp->world_x, sp->world_y, sp->alien_type);
+        if (idx >= 0)
+            sp->spawned_alien_idx = idx;
 
         if (sp->one_shot) {
+            /* Facehugger hatch: play sound and deactivate slot. */
+            audio_play_sample(SAMPLE_HATCHING_ALIEN);
             sp->active = 0;
         } else {
+            /* Map point: reload timer; next spawn gated by occupancy check. */
             sp->countdown = SPAWN_COUNTDOWN_INIT;
         }
     }
@@ -233,9 +350,46 @@ void alien_spawn_tick(void)
 /* Return 1 if the world pixel (wx, wy) falls inside a solid tile. */
 static int alien_solid_at(int wx, int wy)
 {
-    return tilemap_is_solid(&g_cur_map,
-                            tilemap_pixel_to_col(wx),
-                            tilemap_pixel_to_row(wy));
+    return tilemap_is_alien_solid(&g_cur_map,
+                                  tilemap_pixel_to_col(wx),
+                                  tilemap_pixel_to_row(wy));
+}
+
+/*
+ * Alien-alien separation check — mirrors lbC00A96C (X-axis) and lbC00A9D6
+ * (Y-axis) in main.asm#L7515-L7596.
+ *
+ * The ASM keeps an array of bounding-box records (cur_alien1_dats …
+ * cur_alien7_dats, each dc.w x1,y1,x2,y2 + dc.l struct_ptr) and iterates
+ * them to detect whether a proposed X or Y step would produce an AABB overlap
+ * with another alien.  If it would, the movement is cancelled for that axis.
+ *
+ * The alien bounding box size comes from lbW008F14: dc.w 0,0,$20,$20
+ * (offsets 0,0 → size 32,32 relative to pos), so the box is
+ * [pos_x, pos_x+32] × [pos_y, pos_y+32].
+ *
+ * Returns 1 if placing alien self_idx at world pixel (nx, ny) would overlap
+ * any other living (alive==1) alien using the same 32×32 box centred on pos.
+ * The overlap test nx < ox+32 && nx+32 > ox is equivalent to |nx-ox| < 32
+ * which holds for both top-left and centre conventions when box size = 32.
+ */
+static int alien_overlaps_other(int self_idx, int nx, int ny)
+{
+    for (int j = 0; j < g_alien_count; j++) {
+        if (j == self_idx) continue;
+        if (g_aliens[j].alive != 1) continue;
+        int ox = (int)g_aliens[j].pos_x;
+        int oy = (int)g_aliens[j].pos_y;
+        /* AABB overlap test.  Both nx/ox and ny/oy are the centres of 32×32
+         * boxes.  The test `nx < ox+32 && nx+32 > ox` is equivalent to
+         * `|nx-ox| < 32`, which is identical to testing [nx-16,nx+16] vs
+         * [ox-16,ox+16] since (nx-16) < (ox+16) ↔ nx < ox+32, and
+         * (nx+16) > (ox-16) ↔ nx+32 > ox.  No change needed vs top-left form. */
+        if (nx < ox + 32 && nx + 32 > ox &&
+            ny < oy + 32 && ny + 32 > oy)
+            return 1;
+    }
+    return 0;
 }
 
 /*
@@ -245,29 +399,45 @@ static int alien_solid_at(int wx, int wy)
  * (main.asm#L6810-L6989):
  *
  *  1. Find the nearest player by Manhattan distance.
- *  2. X axis: if |dx| > 4, move by a->speed; check two leading corners
- *     of the bounding box for solid tiles before committing.
+ *  2. X axis: if |dx| > 4, move by a->speed; check three leading-edge probe
+ *     points of the proposed new bounding box for solid tiles.
  *  3. Y axis: same treatment independently of X.
  *  4. Build a direction-bit word (bit0=down, bit1=up, bit2=right, bit3=left)
  *     from the actual movement and map it to the 0-based compass direction
  *     using the lbB00A228 look-up table (main.asm#L7077).
  *
- * Bounding box half-extents (8 px) are derived from the alien type struct
- * collision offsets (lbW00A29A … lbW00A31E, main.asm#L7085-L7096).
+ * Probe offsets exactly mirror the ASM type-struct collision tables for a
+ * 32×32 bbox (dc.w 0,0,$20,$20 at offset 4 of lbW008F14, main.asm#L5979).
+ * Each direction uses 3 probe points from the table layout dc.w x0,x1,x2,y0,y1,y2
+ * (probes executed in order 0, 2, 1 by the ASM — all 3 must be clear to move):
+ *   RIGHT  lbW00A2D6: dc.w 30,30,30,-6,4,16  → (nx+30,ay-6),(nx+30,ay+16),(nx+30,ay+4)
+ *   LEFT   lbW00A2CA: dc.w -4,-4,-4,-6,4,16  → (nx-4,ay-6),(nx-4,ay+16),(nx-4,ay+4)
+ *   DOWN   lbW00A2EE: dc.w 0,10,22,20,20,20  → (ax+0,ny+20),(ax+22,ny+20),(ax+10,ny+20)
+ *   UP     lbW00A2E2: dc.w 0,10,22,-10,-10,-10→(ax+0,ny-10),(ax+22,ny-10),(ax+10,ny-10)
+ * where nx/ny = proposed position after applying speed.
+ * No orientation-based rotation: probes are purely direction-of-movement driven,
+ * matching the original ASM (no rotation in check_aliens_collisions).
+ *
+ * In the C port pos_x/pos_y is the CENTRE of the 32×32 bbox (sprite is blitted
+ * at x-16, y-16), whereas the ASM uses the top-left corner.  All probe offsets
+ * are shifted by -16 relative to the raw ASM values:  C_offset = ASM_offset - 16.
  */
-static void alien_move(Alien *a)
+static void alien_move(int self_idx, Alien *a)
 {
     /* ------------------------------------------------------------------ */
-    /* 1. Find nearest living player by Manhattan distance                 */
+    /* 1. Find nearest living player using the cached positions.           */
+    /*    The cache is refreshed every TARGET_REFRESH_FRAMES frames by     */
+    /*    alien_update_all(), mirroring lbC0097F6 / lbW0097F2=20 in the   */
+    /*    original ASM (main.asm#L6396-L6415).                             */
     /* ------------------------------------------------------------------ */
     int tx = -1, ty = -1;
     int best = 0x7FFFFFFF;
     for (int i = 0; i < MAX_PLAYERS; i++) {
-        if (!g_players[i].alive) continue;
-        int ddx = g_players[i].pos_x - (int)a->pos_x;
-        int ddy = g_players[i].pos_y - (int)a->pos_y;
+        if (!s_cached_player_alive[i]) continue;
+        int ddx = s_cached_player_x[i] - (int)a->pos_x;
+        int ddy = s_cached_player_y[i] - (int)a->pos_y;
         int d   = (ddx < 0 ? -ddx : ddx) + (ddy < 0 ? -ddy : ddy);
-        if (d < best) { best = d; tx = g_players[i].pos_x; ty = g_players[i].pos_y; }
+        if (d < best) { best = d; tx = s_cached_player_x[i]; ty = s_cached_player_y[i]; }
     }
     if (tx < 0) return;  /* no living player */
 
@@ -279,21 +449,28 @@ static void alien_move(Alien *a)
     /* ------------------------------------------------------------------ */
     /* 2. X movement — independent of Y                                    */
     /*    Threshold of 4 px mirrors ASM `cmp.w #4,d4` (main.asm#L6926).   */
+    /*    3 probes along the leading edge of the proposed bbox, matching   */
+    /*    lbW00A2D6 (right) and lbW00A2CA (left) at main.asm#L7089-7090.  */
+    /*    Offsets are ASM values − 16 (centre-based pos_x/pos_y).         */
     /* ------------------------------------------------------------------ */
     int dx = tx - ax;
     if (dx > 4) {
-        /* Move right: check top-right and bottom-right corners */
+        /* Move right: 3 probes at right edge (nx+14), y = -22, 0, -12 */
         int nx = ax + spd;
-        if (!alien_solid_at(nx + 8, ay - 8) &&
-            !alien_solid_at(nx + 8, ay + 8)) {
+        if (!alien_solid_at(nx + 14, ay - 22) &&
+            !alien_solid_at(nx + 14, ay +  0) &&
+            !alien_solid_at(nx + 14, ay - 12) &&
+            !alien_overlaps_other(self_idx, nx, ay)) {
             ax = nx;
             dir_bits |= 4;  /* right */
         }
     } else if (dx < -4) {
-        /* Move left: check top-left and bottom-left corners */
+        /* Move left: 3 probes at left edge (nx-20), y = -22, 0, -12 */
         int nx = ax - spd;
-        if (!alien_solid_at(nx - 8, ay - 8) &&
-            !alien_solid_at(nx - 8, ay + 8)) {
+        if (!alien_solid_at(nx - 20, ay - 22) &&
+            !alien_solid_at(nx - 20, ay +  0) &&
+            !alien_solid_at(nx - 20, ay - 12) &&
+            !alien_overlaps_other(self_idx, nx, ay)) {
             ax = nx;
             dir_bits |= 8;  /* left */
         }
@@ -301,21 +478,28 @@ static void alien_move(Alien *a)
 
     /* ------------------------------------------------------------------ */
     /* 3. Y movement — independent of X                                    */
+    /*    3 probes along the leading edge of the proposed bbox, matching   */
+    /*    lbW00A2EE (down) and lbW00A2E2 (up) at main.asm#L7087-7088.     */
+    /*    Offsets are ASM values − 16 (centre-based pos_x/pos_y).         */
     /* ------------------------------------------------------------------ */
     int dy = ty - ay;
     if (dy > 4) {
-        /* Move down: check bottom-left and bottom-right corners */
+        /* Move down: 3 probes at bottom edge (ny+4), x = -16, +6, -6 */
         int ny = ay + spd;
-        if (!alien_solid_at(ax - 8, ny + 8) &&
-            !alien_solid_at(ax + 8, ny + 8)) {
+        if (!alien_solid_at(ax - 16, ny + 4) &&
+            !alien_solid_at(ax +  6, ny + 4) &&
+            !alien_solid_at(ax -  6, ny + 4) &&
+            !alien_overlaps_other(self_idx, ax, ny)) {
             ay = ny;
             dir_bits |= 1;  /* down */
         }
     } else if (dy < -4) {
-        /* Move up: check top-left and top-right corners */
+        /* Move up: 3 probes at top edge (ny-26), x = -16, +6, -6 */
         int ny = ay - spd;
-        if (!alien_solid_at(ax - 8, ny - 8) &&
-            !alien_solid_at(ax + 8, ny - 8)) {
+        if (!alien_solid_at(ax - 16, ny - 26) &&
+            !alien_solid_at(ax +  6, ny - 26) &&
+            !alien_solid_at(ax -  6, ny - 26) &&
+            !alien_overlaps_other(self_idx, ax, ny)) {
             ay = ny;
             dir_bits |= 2;  /* up */
         }
@@ -353,6 +537,24 @@ void alien_update_all(void)
     /* Lazy viewport-triggered spawning (mirrors lbC00D17E @ main.asm#L8547). */
     alien_spawn_tick();
 
+    /*
+     * Refresh the player position cache every TARGET_REFRESH_FRAMES frames.
+     * Mirrors lbC0097F6 in the original ASM: the countdown starts at
+     * lbW0097F2=20 and is only reloaded when it underflows, so the alien AI
+     * works from a position snapshot that is up to 20 VBL frames (~400 ms)
+     * old.  This is what gives the original aliens their characteristic
+     * "momentum" — they don't instantly correct course every frame.
+     * (main.asm#L6396-L6415)
+     */
+    if (--s_target_refresh_countdown <= 0) {
+        s_target_refresh_countdown = TARGET_REFRESH_FRAMES;
+        for (int i = 0; i < MAX_PLAYERS; i++) {
+            s_cached_player_alive[i] = g_players[i].alive;
+            s_cached_player_x[i]    = g_players[i].pos_x;
+            s_cached_player_y[i]    = g_players[i].pos_y;
+        }
+    }
+
     for (int i = 0; i < g_alien_count; i++) {
         if (g_aliens[i].alive == 0) continue;
 
@@ -366,7 +568,7 @@ void alien_update_all(void)
             continue;
         }
 
-        alien_move(&g_aliens[i]);
+        alien_move(i, &g_aliens[i]);
         g_aliens[i].anim_counter++;
     }
 
@@ -417,12 +619,24 @@ void aliens_collisions_with_weapons(void)
         for (int ai = 0; ai < g_alien_count; ai++) {
             if (g_aliens[ai].alive != 1) continue;
 
-            int dx = s_projectiles[pi].x - g_aliens[ai].pos_x;
-            int dy = s_projectiles[pi].y - g_aliens[ai].pos_y;
-            if (dx < 0) dx = -dx;
-            if (dy < 0) dy = -dy;
+            /* AABB collision: projectile 10×10 box (offset +4) vs alien 32×32 box.
+             * Ref: aliens_collisions_with_weapons @ main.asm:
+             *   projectile bbox: add.l #$40004 (offset x+4, y+4)
+             *                    add.l #$A000A (width 10, height 10)
+             *   alien bbox:      [pos_x-16, pos_x+16] × [pos_y-16, pos_y+16]
+             *                    centre-based; equivalent to ASM [pos_x, pos_x+32].
+             *                    (from lbW008F14 dc.w 0,0,$20,$20). */
+            int bx1 = (int)s_projectiles[pi].x + 4;
+            int bx2 = bx1 + 10;
+            int by1 = (int)s_projectiles[pi].y + 4;
+            int by2 = by1 + 10;
 
-            if (dx < 8 && dy < 8) {
+            int ax1 = (int)g_aliens[ai].pos_x - 16;
+            int ax2 = (int)g_aliens[ai].pos_x + 16;
+            int ay1 = (int)g_aliens[ai].pos_y - 16;
+            int ay2 = (int)g_aliens[ai].pos_y + 16;
+
+            if (ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1) {
                 s_projectiles[pi].active = 0;
                 g_aliens[ai].strength -= s_projectiles[pi].strength;
                 if (g_aliens[ai].strength <= 0) {
@@ -440,19 +654,56 @@ void aliens_collisions_with_weapons(void)
 void aliens_collisions_with_players(void)
 {
     for (int ai = 0; ai < g_alien_count; ai++) {
+        /* Only active (alive == 1) aliens can damage players.
+         * Dying aliens (alive == 2) have already triggered the encounter.
+         * Ref: tst.w 56(a0) / tst.w 52(a0) @ main.asm#L7636-L7656. */
         if (g_aliens[ai].alive != 1) continue;
 
         for (int pi = 0; pi < MAX_PLAYERS; pi++) {
             if (!g_players[pi].alive) continue;
+            /* Skip players already in their death animation */
+            if (g_players[pi].death_counter > 0) continue;
             if (player_is_invincible(&g_players[pi])) continue;
 
-            int dx = g_aliens[ai].pos_x - g_players[pi].pos_x;
-            int dy = g_aliens[ai].pos_y - g_players[pi].pos_y;
-            if (dx < 0) dx = -dx;
-            if (dy < 0) dy = -dy;
+            /* Bounding-box collision (AABB):
+             *   Alien  bbox : [pos_x-16, pos_x+16] × [pos_y-16, pos_y+16]
+             *                 (centre-based; equivalent to ASM [pos_x, pos_x+32])
+             *   Player bbox : [pos_x+BBOX_OFFSET, pos_x+BBOX_OFFSET+SIZE]
+             *                 = [pos_x−8, pos_x+8] × [pos_y−8, pos_y+8]
+             *
+             * Alien bbox comes from lbW008F14+4={0,0} and lbW008F14+8={32,32}.
+             * Player bbox comes from add.l #$80008 (top-left +8) and
+             * add.l #$100010 (size 16×16).
+             * Ref: aliens_collisions_with_players @ main.asm#L7598-L7618. */
+            int ax1 = (int)g_aliens[ai].pos_x - 16;
+            int ax2 = (int)g_aliens[ai].pos_x + 16;
+            int ay1 = (int)g_aliens[ai].pos_y - 16;
+            int ay2 = (int)g_aliens[ai].pos_y + 16;
 
-            if (dx < 10 && dy < 10) {
+            int px1 = (int)g_players[pi].pos_x + PLAYER_BBOX_OFFSET;
+            int px2 = (int)g_players[pi].pos_x + PLAYER_BBOX_OFFSET + PLAYER_BBOX_SIZE;
+            int py1 = (int)g_players[pi].pos_y + PLAYER_BBOX_OFFSET;
+            int py2 = (int)g_players[pi].pos_y + PLAYER_BBOX_OFFSET + PLAYER_BBOX_SIZE;
+
+            if (ax1 < px2 && ax2 > px1 && ay1 < py2 && ay2 > py1) {
+                /* Award player credits and score for the first contact.
+                 * Ref: add.l #1500,PLAYER_CREDITS / add.l #100,PLAYER_SCORE
+                 *      @ main.asm#L7640-L7641. */
+                g_players[pi].credits += 1500;
+                g_players[pi].score   += 100;
+
+                /* Apply damage: 36(a2)*2 = 1*2 = 2 HP.
+                 * Ref: move.w 36(a2),d5 / add.w d5,d5 / sub.w d5,PLAYER_HEALTH
+                 *      @ main.asm#L7650-L7652. */
                 player_take_damage(&g_players[pi], 2);
+
+                /* Transition the alien to its dying state so it plays the
+                 * explosion animation and is removed from future collision
+                 * checks.  Mirrors the lbC00A582 "touches player" branch that
+                 * eventually calls set_alien_default_vars @ main.asm#L7280. */
+                alien_kill(ai);
+
+                break;  /* alien is now dying; stop checking other players */
             }
         }
     }

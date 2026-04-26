@@ -33,6 +33,7 @@
 #include "../engine/palette.h"
 #include "../engine/tilemap.h"
 #include "../engine/sprite.h"
+#include "../engine/alien_gfx.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -173,18 +174,31 @@ void level_game_loop_external(void)
         }
 
         /* --- Update logic --------------------------------------------- */
+        /* Player input/movement runs every frame, mirroring the Amiga VBL
+         * interrupt handler (lbC00152C @ main.asm) which processes players
+         * at the full 50 Hz VBL rate.                                      */
         for (int i = 0; i < g_number_players; i++) {
             if (g_players[i].alive)
                 player_update(&g_players[i], player_get_input(&g_players[i]));
         }
 
-        alien_update_all();
+        /* Alien AI, collisions and level timers mirror the game_level_loop
+         * in main.asm which only runs every 2 VBLs (25 Hz on PAL).
+         * The lbW0004BC counter (lines 870-874) gates the game loop signal
+         * lbW0004BA to fire once per 2 VBL interrupts.
+         * Running these at 50 Hz in the C port doubled alien speed.        */
+        static int s_game_tick = 0;
+        if (++s_game_tick >= 2) {
+            s_game_tick = 0;
 
-        aliens_collisions_with_weapons();
-        aliens_collisions_with_players();
+            alien_update_all();
 
-        level_tick_timer();
-        level_check_destruction();
+            aliens_collisions_with_weapons();
+            aliens_collisions_with_players();
+
+            level_tick_timer();
+            level_check_destruction();
+        }
 
         /* Check if all players are dead */
         int any_alive = 0;
@@ -226,7 +240,8 @@ void level_game_loop_external(void)
                 if (g_aliens[i].alive == 0) continue;
                 int sx = g_aliens[i].pos_x - g_camera_x;
                 int sy = g_aliens[i].pos_y - g_camera_y;
-                if (sx > -32 && sx < SCREEN_W && sy > -32 && sy < SCREEN_H) {
+                /* pos_x/pos_y is the centre; sprite extends ±16 px around it. */
+                if (sx > -48 && sx < SCREEN_W + 16 && sy > -48 && sy < SCREEN_H + 16) {
                     if (g_aliens[i].alive == 2) {
                         /* Dying: render explosion animation.
                          * Ref: lbL018C2E @ main.asm#L13907; 16 frames at delay=0. */
@@ -245,7 +260,19 @@ void level_game_loop_external(void)
                 if (!g_players[i].alive) continue;
                 int sx = g_players[i].pos_x - g_camera_x;
                 int sy = g_players[i].pos_y - g_camera_y;
-                sprite_draw_player(i, sx, sy, g_players[i].direction);
+                if (g_players[i].death_counter > 0) {
+                    /* Death explosion: show the alien explosion atlas while the
+                     * death_counter counts down.  player_update decrements the
+                     * counter before rendering, so on the first rendered frame
+                     * death_counter == PLAYER_DEATH_FRAMES-1 and df == 0.
+                     * The modulo wraps the 16-frame atlas across all death frames.
+                     * Ref: lbC00780C / lbL0146A2 @ main.asm#L4737-L4771. */
+                    int df = (PLAYER_DEATH_FRAMES - 1 - g_players[i].death_counter)
+                             % ALIEN_DEATH_FRAMES;
+                    sprite_draw_alien_death(df, sx, sy);
+                } else {
+                    sprite_draw_player(i, sx, sy, g_players[i].direction);
+                }
             }
 
             projectiles_render();

@@ -67,9 +67,9 @@ void sprite_draw_player(int player_idx, int x, int y, int facing);
  * at screen position (x, y).
  * anim_frame: 0, 1, or 2 — index into the 3-frame walk cycle.
  * Atlas column = direction * 32 px.
- * Atlas row depends on the loaded atlas type:
- *   COMPACT → y = anim_frame * 32       (most BO files)
- *   LEGACY  → y = {0, 96, 128}          (L0BO and LEGACY-flagged levels)
+ * Atlas row = anim_frame * 32 (identical for COMPACT and LEGACY atlas types;
+ *   lbL01B036 main walk sequence uses entries at y=0,32,64 in both lbW019A8E
+ *   and lbW01945E — see alien_gfx.h for details).
  * Color index 0 is transparent (Ref: blitter minterm $CA, main.asm#L12365).
  */
 void sprite_draw_alien(int direction, int anim_frame, int x, int y);
@@ -77,10 +77,11 @@ void sprite_draw_alien(int direction, int anim_frame, int x, int y);
 /*
  * Draw a death/explosion frame for a dying alien at screen position (x, y).
  * death_frame: 0-15 (16-frame explosion sequence).
- * Sprite size: ALIEN_DEATH_W × ALIEN_DEATH_H (16 × 14 px).
- * Atlas position: x = ALIEN_DEATH_ATLAS_X + (death_frame%8)*16,
- *                 y = ALIEN_DEATH_ATLAS_Y + (death_frame/8)*16
- * (Ref: lbW0188CE @ main.asm#L13833, death anim lbL018C2E#L13907)
+ * Sprite size: ALIEN_DEATH_W × ALIEN_DEATH_H (32 × 30 px, same as walk sprites).
+ * Atlas layout:
+ *   frames  0-9:  x = death_frame * 32,          y = ALIEN_DEATH_ROW1_Y (192)
+ *   frames 10-15: x = (death_frame-10) * 32,     y = ALIEN_DEATH_ROW2_Y (224)
+ * (Ref: lbW0188CE entries 40-55 @ main.asm#L13874, death anim lbL018C2E#L13907)
  */
 void sprite_draw_alien_death(int death_frame, int x, int y);
 

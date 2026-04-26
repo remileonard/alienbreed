@@ -49,6 +49,7 @@ void player_init_variables(void)
         p->anim_seq_frame    = 0;
         p->anim_seq_timer    = 2;
         p->anim_seq_id       = -1;
+        p->death_counter     = 0;
         player_set_cur_weapon(p, WEAPON_MACHINEGUN);
         p->owned_weapons[WEAPON_MACHINEGUN - 1] = 1;
     }
@@ -59,17 +60,24 @@ void player_set_cur_weapon(Player *p, int weapon_id)
     if (weapon_id < WEAPON_MACHINEGUN || weapon_id >= WEAPON_MAX) return;
     p->cur_weapon = (WORD)weapon_id;
 
-    /* Weapon parameters (speed, rate, strength) from original game data.
-     * Values cross-referenced from main.asm weapon tables. */
-    static const struct { WORD speed; WORD rate; WORD strength; WORD smp; } k_wdata[] = {
-        { 0, 0, 0, 0 },               /* placeholder (index 0 unused) */
-        { 6, 3,  2, SAMPLE_FIRE_GUN }, /* 1: MACHINEGUN  */
-        { 7, 2,  3, SAMPLE_FIRE_GUN }, /* 2: TWINFIRE    */
-        { 5, 4,  4, SAMPLE_FIRE_GUN }, /* 3: FLAMEARC    */
-        { 8, 5,  5, SAMPLE_FIRE_GUN }, /* 4: PLASMAGUN   */
-        { 4, 3,  6, SAMPLE_FIRE_GUN }, /* 5: FLAMETHROWER*/
-        { 6, 4,  7, SAMPLE_FIRE_GUN }, /* 6: SIDEWINDERS */
-        {10, 8, 10, SAMPLE_FIRE_GUN }, /* 7: LAZER       */
+    /* Weapon parameters from weapons_attr_table @ main.asm#L736.
+     * Format: index, speed, rate, strength, ???, sample, shots_per_ammo
+     * dc.w  01,16,03, 9,00,SAMPLE_FIRE_GUN,4
+     * dc.w  02,16,08,13,00,4,3
+     * dc.w  03,12,09,19,00,2,2
+     * dc.w  04,14,08,12,01,0,1
+     * dc.w  05, 8,03,12,01,6,1
+     * dc.w  06,16,08,32,00,4,1
+     * dc.w  07, 8,08,18,01,3,1 */
+    static const struct { WORD speed; WORD rate; WORD strength; WORD smp; WORD shot_amount; } k_wdata[] = {
+        {  0,  0,  0, 0,              0 }, /* placeholder (index 0 unused) */
+        { 16,  3,  9, SAMPLE_FIRE_GUN, 4 }, /* 1: MACHINEGUN   */
+        { 16,  8, 13, SAMPLE_FIRE_GUN, 3 }, /* 2: TWINFIRE     */
+        { 12,  9, 19, SAMPLE_FIRE_GUN, 2 }, /* 3: FLAMEARC     */
+        { 14,  8, 12, SAMPLE_FIRE_GUN, 1 }, /* 4: PLASMAGUN    */
+        {  8,  3, 12, SAMPLE_FIRE_GUN, 1 }, /* 5: FLAMETHROWER */
+        { 16,  8, 32, SAMPLE_FIRE_GUN, 1 }, /* 6: SIDEWINDERS  */
+        {  8,  8, 18, SAMPLE_FIRE_GUN, 1 }, /* 7: LAZER        */
     };
 
     if (weapon_id < WEAPON_MAX) {
@@ -77,8 +85,10 @@ void player_set_cur_weapon(Player *p, int weapon_id)
         p->weapon_rate     = k_wdata[weapon_id].rate;
         p->weapon_strength = k_wdata[weapon_id].strength;
         p->weapon_smp      = k_wdata[weapon_id].smp;
+        p->shot_amount     = k_wdata[weapon_id].shot_amount;
     }
-    p->weapon_rate_counter = 0;
+    p->weapon_rate_counter  = 0;
+    p->shot_amount_counter  = 0;
 }
 
 void player_set_starting_positions(void)
@@ -147,7 +157,9 @@ static int try_move(Player *p, int dx, int dy)
 
     int has_key = (p->keys > 0);
 
-    /* Horizontal leading-edge check (right or left only) */
+    /* Horizontal leading-edge check (right or left only).
+     * 3 probes from the probe table (lbW007B22/lbW007B16) + fixed centre
+     * probe at (nx+10, ny+6) mirroring lbC007B98 main.asm#L5038-5054. */
     if (dx > 0) {
         int px = nx + PROBE_RIGHT_X;
         for (int i = 0; i < 3; i++)
@@ -158,7 +170,8 @@ static int try_move(Player *p, int dx, int dy)
             if (tile_blocks(px, ny + k_probe_hy[i], has_key)) return 0;
     }
 
-    /* Vertical leading-edge check (down or up only) */
+    /* Vertical leading-edge check (down or up only).
+     * 3 probes from the probe table (lbW007B3A/lbW007B2E). */
     if (dy > 0) {
         int py = ny + PROBE_DOWN_Y;
         for (int i = 0; i < 3; i++)
@@ -168,6 +181,11 @@ static int try_move(Player *p, int dx, int dy)
         for (int i = 0; i < 3; i++)
             if (tile_blocks(nx + k_probe_vx[i], py, has_key)) return 0;
     }
+
+    /* Fixed centre probe — always checked regardless of direction.
+     * Catches solid tiles at the player's exact centre (safety net for
+     * corner cases not covered by the three directional samples). */
+    if (tile_blocks(nx, ny, has_key)) return 0;
 
     p->pos_x = (WORD)nx;
     p->pos_y = (WORD)ny;
@@ -504,6 +522,25 @@ void player_update(Player *p, UWORD input_mask)
 {
     if (!p->alive) return;
 
+    /* Death animation: player is shown as an explosion and cannot act.
+     * Mirrors the 280(a0) countdown at lbC006E96 / lbC0077DC @ main.asm#L4044-L4779.
+     * The counter is started by player_take_damage when health reaches 0. */
+    if (p->death_counter > 0) {
+        p->death_counter--;
+        if (p->death_counter == 0) {
+            if (p->lives > 0) {
+                /* Respawn in place: restore health and grant invincibility.
+                 * Ref: lbC00788E @ main.asm#L4774-L4778. */
+                p->health = PLAYER_MAX_HEALTH;
+                p->anim_fire_counter = 0;
+                g_player_invincibility[p->port] = INVINCIBILITY_FRAMES;
+            } else {
+                p->alive = 0;
+            }
+        }
+        return;
+    }
+
     int dx = 0, dy = 0;
     int speed = 2;
 
@@ -546,8 +583,24 @@ void player_update(Player *p, UWORD input_mask)
         if (p->ammunitions > 0) {
             p->weapon_rate_counter = p->weapon_rate;
             p->shots++;
-            p->ammunitions--;
             audio_play_sample(p->weapon_smp);
+
+            /* Decrement ammo every shot_amount shots, mirroring ASM:
+             *   subq.w #1,PLAYER_SHOT_AMOUNT_COUNTER
+             *   bpl.b  lbC00E178          ; still shots left in this ammo unit
+             *   move.w PLAYER_SHOT_AMOUNT,PLAYER_SHOT_AMOUNT_COUNTER  ; reload counter
+             *   subq.w #1,PLAYER_AMMUNITIONS                          ; consume 1 ammo
+             * Ref: lbC00E14A @ main.asm#L9419. */
+            if (p->shot_amount_counter <= 0) {
+                p->shot_amount_counter = p->shot_amount - 1;
+                p->ammunitions--;
+                if (p->ammunitions <= 0 && p->ammopacks > 0) {
+                    p->ammopacks--;
+                    p->ammunitions = PLAYER_MAX_AMMO;
+                }
+            } else {
+                p->shot_amount_counter--;
+            }
 
             /* Compute projectile velocity from facing direction and weapon speed.
              * ASM: PLAYER_WEAPON_SPEED = 16 (much higher than movement speed). */
@@ -629,10 +682,15 @@ void player_update(Player *p, UWORD input_mask)
     int fire_held = (input_mask & INPUT_FIRE1) != 0;
     int invincible = (g_player_invincibility[p->port] > 0);
 
-    if (invincible) {
-        p->anim_state = dir_code + 27;
-    } else if (p->anim_fire_counter > 0) {
+    if (p->anim_fire_counter > 0) {
+        /* Hit aura has highest visual priority — the 5-frame aura animation
+         * plays immediately on impact, even while the per-hit invincibility
+         * timer is still running.  (ref: tst.w 292(a0) @ main.asm#L4083:
+         * the ASM checks the hit counter before the respawn/invincibility
+         * flag, so the aura always shows first.) */
         p->anim_state = dir_code + 18;
+    } else if (invincible) {
+        p->anim_state = dir_code + 27;
     } else if (fire_held) {
         p->anim_state = dir_code + 9;
     } else {
@@ -674,6 +732,7 @@ void player_take_damage(Player *p, int amount)
 {
     int idx = p->port;
     if (g_player_invincibility[idx] > 0) return;
+    if (p->death_counter > 0) return;  /* already in death animation */
 
     p->health -= (WORD)amount;
     audio_play_sample(SAMPLE_HURT_PLAYER);
@@ -684,12 +743,11 @@ void player_take_damage(Player *p, int amount)
         p->lives--;
         audio_play_sample(SAMPLE_DYING_PLAYER);
         audio_play_sample(VOICE_DEATH);
-        if (p->lives <= 0) {
-            p->alive = 0;
-        } else {
-            p->health = PLAYER_MAX_HEALTH;
-            g_player_invincibility[idx] = INVINCIBILITY_FRAMES;
-        }
+        /* Start death explosion animation; movement/shooting suspended until
+         * the counter expires.  Respawn (or alive=0 if out of lives) is handled
+         * in player_update when the counter reaches 0.
+         * Ref: move.w #200,lbW005D64 @ main.asm#L3938. */
+        p->death_counter = PLAYER_DEATH_FRAMES;
     } else {
         g_player_invincibility[idx] = INVINCIBILITY_FRAMES / 2;
     }

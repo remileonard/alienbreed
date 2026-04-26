@@ -37,7 +37,9 @@ extern WORD  g_global_aliens_extra_strength;
 /* Initialise alien array. */
 void alien_init_variables(void);
 
-/* Spawn aliens from hatch tiles in the current map. */
+/* Spawn aliens from spawn tiles (0x28/0x29) found in the current map.
+ * Scans the map at level load and registers deferred spawn points.
+ * Ref: lbC0049EA/lbC004A18/lbC004A28 → lbC00D22A → lbC00D236 @ main.asm. */
 void alien_spawn_from_map(void);
 
 /* Update all living aliens (movement + AI). */

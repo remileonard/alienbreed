@@ -32,7 +32,7 @@ static const SampleEntry k_sample_map[] = {
     { 24, "samples/ammo"               },
     { 27, "samples/descent_end"        },  /* 1UP jingle */
     { 30, "samples/first_aid_and_credits" },
-    { 33, "samples/reloading_weapon"   },
+    { 33, "samples/hurt_player"        },
     { 34, "samples/acid_pool"          },
     { 35, "samples/water_pool"         },
     { 36, "samples/hatching_alien"     },
@@ -40,7 +40,7 @@ static const SampleEntry k_sample_map[] = {
     { 41, "samples/descent"            },
     { 42, "samples/descent_end"        },
     { 48, "samples/intex_beep"         },  /* typewriter tick */
-    { 73, "samples/dying_alien"        },
+    { 73, "samples/dying_player"       },
     /* Voices */
     { 17, "voices/warning"             },
     { 18, "voices/destruction_imminent"},
