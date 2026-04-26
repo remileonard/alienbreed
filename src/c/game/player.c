@@ -682,10 +682,15 @@ void player_update(Player *p, UWORD input_mask)
     int fire_held = (input_mask & INPUT_FIRE1) != 0;
     int invincible = (g_player_invincibility[p->port] > 0);
 
-    if (invincible) {
-        p->anim_state = dir_code + 27;
-    } else if (p->anim_fire_counter > 0) {
+    if (p->anim_fire_counter > 0) {
+        /* Hit aura has highest visual priority — the 5-frame aura animation
+         * plays immediately on impact, even while the per-hit invincibility
+         * timer is still running.  (ref: tst.w 292(a0) @ main.asm#L4083:
+         * the ASM checks the hit counter before the respawn/invincibility
+         * flag, so the aura always shows first.) */
         p->anim_state = dir_code + 18;
+    } else if (invincible) {
+        p->anim_state = dir_code + 27;
     } else if (fire_held) {
         p->anim_state = dir_code + 9;
     } else {
