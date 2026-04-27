@@ -9,12 +9,14 @@
 #include "constants.h"
 #include "../engine/tilemap.h"
 #include "../engine/alien_gfx.h"
+#include "../engine/anim_gfx.h"
 #include "../engine/sprite.h"
 #include "../hal/video.h"
 #include "../hal/input.h"
 #include "../hal/timer.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 extern int g_camera_x, g_camera_y;
 
@@ -258,56 +260,220 @@ void debug_render_overlay(void)
 #define GFX_SECTION_H     10   /* section header height */
 #define GFX_SECTION_GAP    4   /* vertical gap between sections */
 
-/* Compute virtual content Y positions given the current tileset size.
- * All positions are in "virtual canvas" coordinates; screen_y = vy - scroll_y + GFX_HEADER_H. */
+/* Weapon layout: weapons_264x40.lo4 is actually 320×264 at 4 bitplanes.
+ * Six weapon images in a 2-column × 3-row grid, each image 160×88 px.
+ * Ref: intex.asm disp_weapon_pic / weapons_pic_table. */
+#define WEAPON_IMG_W     160
+#define WEAPON_IMG_H      88
+#define WEAPON_ATLAS_W   320
+#define WEAPON_ATLAS_H   264
+#define WEAPON_PLANES      4
+#define WEAPON_COUNT       6
+
+/* Weapon positions in the atlas (row, col_pixel).
+ * From weapons_pic_table offsets: (row*40) + col_bytes_in_plane0_stride. */
+static const int k_weapon_row[WEAPON_COUNT]  = { 176,  0,   0, 176,  88,  88 };
+static const int k_weapon_colpx[WEAPON_COUNT]= {   0,  0, 160, 160, 160,   0 };
+static const char *k_weapon_name[WEAPON_COUNT] = {
+    "MACHINEGUN", "TWINFIRE", "FLAMEARC", "PLASMAGUN", "FLAMETHROW", "SIDEWINDER"
+};
+
+/* Decoded weapon atlas (320×264, single indexed image).
+ * Loaded from assets/gfx/intex_weapons_320x264.raw when the viewer opens.
+ * NULL if the file is not available. */
+static UBYTE *s_weapon_atlas = NULL;
+
+/* Decoded INTEX background (320×256).
+ * Loaded from assets/gfx/intex_bkgnd_320x256.raw when the viewer opens. */
+static UBYTE *s_intex_bg = NULL;
+static int    s_intex_bg_w = 0;
+static int    s_intex_bg_h = 0;
+
+/* HUD images already held by hud.c are not accessible directly; we keep
+ * our own lightweight copies for the viewer. */
+typedef struct { UBYTE *pixels; int w, h; } DbgImg;
+
+static DbgImg s_dbg_p1_bar  = {NULL,0,0};
+static DbgImg s_dbg_p2_bar  = {NULL,0,0};
+static DbgImg s_dbg_paused  = {NULL,0,0};
+
+/* Font strip: assets/fonts/font_16x504.raw — 672px wide × 12px tall, 42 glyphs.
+ * Loaded when the viewer opens. */
+static DbgImg s_dbg_font = {NULL,0,0};
+
+/* ------------------------------------------------------------------
+ * Generic helpers
+ * ------------------------------------------------------------------ */
+
+/* Load a .raw image file (4-byte w, 4-byte h, then w*h indexed bytes). */
+static int dbg_img_load(DbgImg *img, const char *path)
+{
+    if (img->pixels) { free(img->pixels); img->pixels = NULL; }
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    if (fread(&img->w, 4, 1, f) != 1 || fread(&img->h, 4, 1, f) != 1) {
+        fclose(f); return -1;
+    }
+    img->pixels = (UBYTE *)malloc((size_t)(img->w * img->h));
+    if (!img->pixels) { fclose(f); return -1; }
+    fread(img->pixels, 1, (size_t)(img->w * img->h), f);
+    fclose(f);
+    return 0;
+}
+
+static void dbg_img_free(DbgImg *img)
+{
+    free(img->pixels);
+    img->pixels = NULL;
+    img->w = img->h = 0;
+}
+
+/* Load all viewer-specific assets that are not already resident. */
+static void gfx_viewer_load_assets(void)
+{
+    /* Weapon atlas */
+    if (!s_weapon_atlas) {
+        DbgImg tmp = {NULL,0,0};
+        if (dbg_img_load(&tmp, "assets/gfx/intex_weapons_320x264.raw") == 0
+            && tmp.w == WEAPON_ATLAS_W && tmp.h == WEAPON_ATLAS_H) {
+            s_weapon_atlas = tmp.pixels;
+        } else {
+            free(tmp.pixels);
+        }
+    }
+    /* INTEX background */
+    if (!s_intex_bg) {
+        DbgImg tmp = {NULL,0,0};
+        if (dbg_img_load(&tmp, "assets/gfx/intex_bkgnd_320x256.raw") == 0) {
+            s_intex_bg   = tmp.pixels;
+            s_intex_bg_w = tmp.w;
+            s_intex_bg_h = tmp.h;
+        } else {
+            free(tmp.pixels);
+        }
+    }
+    /* HUD graphics */
+    if (!s_dbg_p1_bar.pixels)
+        dbg_img_load(&s_dbg_p1_bar, "assets/gfx/main_player_1_status_304x8.raw");
+    if (!s_dbg_p2_bar.pixels)
+        dbg_img_load(&s_dbg_p2_bar, "assets/gfx/main_player_2_status_304x8.raw");
+    if (!s_dbg_paused.pixels)
+        dbg_img_load(&s_dbg_paused, "assets/gfx/main_game_paused_96x7.raw");
+    /* Font strip */
+    if (!s_dbg_font.pixels)
+        dbg_img_load(&s_dbg_font, "assets/fonts/font_16x504.raw");
+}
+
+static void gfx_viewer_free_assets(void)
+{
+    free(s_weapon_atlas); s_weapon_atlas = NULL;
+    free(s_intex_bg);     s_intex_bg = NULL;
+    s_intex_bg_w = s_intex_bg_h = 0;
+    dbg_img_free(&s_dbg_p1_bar);
+    dbg_img_free(&s_dbg_p2_bar);
+    dbg_img_free(&s_dbg_paused);
+    dbg_img_free(&s_dbg_font);
+}
+
+/* ------------------------------------------------------------------
+ * Layout structure
+ * ------------------------------------------------------------------ */
 typedef struct {
-    int vy_tiles_hdr;
-    int vy_tiles_content;
-    int vy_walk_hdr;
-    int vy_walk_content;
-    int vy_death_hdr;
-    int vy_death_content;
-    int vy_spr_hdr;
-    int vy_spr_content;
+    /* All positions are virtual Y (canvas coords). */
+    int vy_tiles_hdr,      vy_tiles_content;
+    int vy_anim_hdr,       vy_anim_content;
+    int vy_walk_hdr,       vy_walk_content;
+    int vy_death_hdr,      vy_death_content;
+    int vy_weapons_hdr,    vy_weapons_content;
+    int vy_intex_hdr,      vy_intex_content;
+    int vy_hud_hdr,        vy_hud_content;
+    int vy_font_hdr,       vy_font_content;
+    int vy_spr_hdr,        vy_spr_content;
     int total_vh;
     int max_scroll;
 } GfxLayout;
 
+/* Height of ONE weapon image cell: image + 2px gap + 7px label + 4px pad */
+#define GFX_WEAPON_CELL_H (WEAPON_IMG_H + 2 + 7 + 4)
+/* Width of one weapon cell: image + small margin */
+#define GFX_WEAPON_CELL_W (WEAPON_IMG_W + 4)
+/* Two weapons per display row (2 × 164 = 328, fits 320 with clipping) */
+#define GFX_WEAPONS_PER_ROW 2
+
+/* Anim tile cell (same pixel size as regular tiles) */
+#define GFX_ANIM_TILE_W  ANIM_TILE_W
+#define GFX_ANIM_TILE_H  ANIM_TILE_H
+/* Cell with label — identical to regular tile cell */
+#define GFX_ANIM_CELL_W  GFX_TILE_CELL_W
+#define GFX_ANIM_CELL_H  GFX_TILE_CELL_H
+#define GFX_ANIM_PER_ROW GFX_TILES_PER_ROW
+
 static GfxLayout gfx_compute_layout(void)
 {
     GfxLayout L;
-    int tc         = g_tileset.tile_count;
-    int n_tile_rows = tc > 0 ? (tc + GFX_TILES_PER_ROW - 1) / GFX_TILES_PER_ROW : 0;
-    int n_walk_rows = (ALIEN_DIR_COUNT * ALIEN_WALK_FRAMES + GFX_BOBS_PER_ROW - 1) / GFX_BOBS_PER_ROW;
-    int n_death_rows= (ALIEN_DEATH_FRAMES + GFX_BOBS_PER_ROW - 1) / GFX_BOBS_PER_ROW;
-    int n_spr_rows  = (PLAYER_SPRITE_TOTAL + GFX_SPRS_PER_ROW - 1) / GFX_SPRS_PER_ROW;
 
-    L.vy_tiles_hdr     = 0;
-    L.vy_tiles_content = L.vy_tiles_hdr + GFX_SECTION_H;
-    int vy_tiles_end   = L.vy_tiles_content + n_tile_rows * GFX_TILE_CELL_H;
+    /* Tileset */
+    int tc           = g_tileset.tile_count;
+    int n_tile_rows  = tc > 0 ? (tc + GFX_TILES_PER_ROW - 1) / GFX_TILES_PER_ROW : 0;
 
-    L.vy_walk_hdr      = vy_tiles_end + GFX_SECTION_GAP;
-    L.vy_walk_content  = L.vy_walk_hdr + GFX_SECTION_H;
-    int vy_walk_end    = L.vy_walk_content + n_walk_rows * GFX_BOB_CELL_H;
+    /* Animated tiles */
+    int ac           = anim_gfx_get_atlas() ? ANIM_TILE_COUNT : 0;
+    int n_anim_rows  = ac > 0 ? (ac + GFX_ANIM_PER_ROW - 1) / GFX_ANIM_PER_ROW : 0;
 
-    L.vy_death_hdr     = vy_walk_end + GFX_SECTION_GAP;
-    L.vy_death_content = L.vy_death_hdr + GFX_SECTION_H;
-    int vy_death_end   = L.vy_death_content + n_death_rows * GFX_BOB_CELL_H;
+    /* Alien BOBs */
+    int n_walk_rows  = (ALIEN_DIR_COUNT * ALIEN_WALK_FRAMES + GFX_BOBS_PER_ROW - 1) / GFX_BOBS_PER_ROW;
+    int n_death_rows = (ALIEN_DEATH_FRAMES + GFX_BOBS_PER_ROW - 1) / GFX_BOBS_PER_ROW;
 
-    L.vy_spr_hdr       = vy_death_end + GFX_SECTION_GAP;
-    L.vy_spr_content   = L.vy_spr_hdr + GFX_SECTION_H;
-    int vy_spr_end     = L.vy_spr_content + n_spr_rows * GFX_SPR_CELL_H;
+    /* Weapons */
+    int wc           = s_weapon_atlas ? WEAPON_COUNT : 0;
+    int n_weap_rows  = wc > 0 ? (wc + GFX_WEAPONS_PER_ROW - 1) / GFX_WEAPONS_PER_ROW : 0;
 
-    L.total_vh  = vy_spr_end;
+    /* INTEX bg: one full-width image + label */
+    int intex_h      = s_intex_bg ? (s_intex_bg_h + 9) : 0;
+
+    /* HUD: three images stacked, each with a 2px gap + 7px label */
+    int hud_h        = 0;
+    if (s_dbg_p1_bar.pixels)  hud_h += s_dbg_p1_bar.h  + 9;
+    if (s_dbg_p2_bar.pixels)  hud_h += s_dbg_p2_bar.h  + 9;
+    if (s_dbg_paused.pixels)  hud_h += s_dbg_paused.h  + 9;
+
+    /* Font */
+    int font_h       = s_dbg_font.pixels ? (s_dbg_font.h + 9) : 0;
+
+    /* Player sprites */
+    int n_spr_rows   = (PLAYER_SPRITE_TOTAL + GFX_SPRS_PER_ROW - 1) / GFX_SPRS_PER_ROW;
+
+    /* Build virtual layout */
+    int vy = 0;
+
+#define NEXT_SECTION(hdr_f, content_f, content_h) \
+    (hdr_f) = vy;  vy += GFX_SECTION_H; \
+    (content_f) = vy; vy += (content_h) + GFX_SECTION_GAP;
+
+    NEXT_SECTION(L.vy_tiles_hdr,   L.vy_tiles_content,   n_tile_rows  * GFX_TILE_CELL_H)
+    NEXT_SECTION(L.vy_anim_hdr,    L.vy_anim_content,    n_anim_rows  * GFX_ANIM_CELL_H)
+    NEXT_SECTION(L.vy_walk_hdr,    L.vy_walk_content,    n_walk_rows  * GFX_BOB_CELL_H)
+    NEXT_SECTION(L.vy_death_hdr,   L.vy_death_content,   n_death_rows * GFX_BOB_CELL_H)
+    NEXT_SECTION(L.vy_weapons_hdr, L.vy_weapons_content, n_weap_rows  * GFX_WEAPON_CELL_H)
+    NEXT_SECTION(L.vy_intex_hdr,   L.vy_intex_content,   intex_h)
+    NEXT_SECTION(L.vy_hud_hdr,     L.vy_hud_content,     hud_h)
+    NEXT_SECTION(L.vy_font_hdr,    L.vy_font_content,    font_h)
+    NEXT_SECTION(L.vy_spr_hdr,     L.vy_spr_content,     n_spr_rows   * GFX_SPR_CELL_H)
+
+#undef NEXT_SECTION
+
+    L.total_vh  = vy;
     int viewport_h = 256 - GFX_HEADER_H;
-    L.max_scroll = L.total_vh > viewport_h ? L.total_vh - viewport_h : 0;
+    L.max_scroll   = L.total_vh > viewport_h ? L.total_vh - viewport_h : 0;
     return L;
 }
 
 /* Convert virtual Y to screen Y */
 #define VY_TO_SY(vy, scroll) ((vy) - (scroll) + GFX_HEADER_H)
 
-/* Render one frame of the gfx viewer.  Returns max_scroll for the caller. */
+/* ------------------------------------------------------------------
+ * Render one frame of the GFX viewer.  Returns max_scroll.
+ * ------------------------------------------------------------------ */
 static int gfx_viewer_render(int scroll_y)
 {
     GfxLayout L = gfx_compute_layout();
@@ -315,7 +481,11 @@ static int gfx_viewer_render(int scroll_y)
     /* ---- Clear framebuffer ---- */
     video_clear();
 
-    /* ---- Blit tiles into framebuffer ---- */
+    /* ================================================================
+     * FRAMEBUFFER BLITTING PASS
+     * ================================================================ */
+
+    /* ---- TILESET ---- */
     if (g_tileset.pixels && g_tileset.tile_count > 0) {
         int tc = g_tileset.tile_count;
         for (int ti = 0; ti < tc; ti++) {
@@ -329,45 +499,115 @@ static int gfx_viewer_render(int scroll_y)
         }
     }
 
-    /* ---- Blit alien walk sprites ---- */
-    const UBYTE *atlas = alien_gfx_get_atlas();
-    if (atlas) {
-        int total_walk = ALIEN_DIR_COUNT * ALIEN_WALK_FRAMES;
-        for (int i = 0; i < total_walk; i++) {
-            int dir   = i / ALIEN_WALK_FRAMES;
-            int frame = i % ALIEN_WALK_FRAMES;
-            int row   = i / GFX_BOBS_PER_ROW;
-            int col   = i % GFX_BOBS_PER_ROW;
-            int sx    = col * GFX_BOB_CELL_W + 2;
-            int sy    = VY_TO_SY(L.vy_walk_content + row * GFX_BOB_CELL_H, scroll_y) + 2;
-            if (sy + GFX_BOB_CELL_H < GFX_HEADER_H || sy >= 256) continue;
-            int atlas_x = dir   * ALIEN_SPRITE_W;
-            int atlas_y = frame * ALIEN_WALK_FRAME_STRIDE;
-            const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
-            video_blit(src, ALIEN_ATLAS_W, sx, sy, ALIEN_SPRITE_W, ALIEN_SPRITE_H, 0);
-        }
-
-        /* ---- Blit alien death sprites ---- */
-        for (int i = 0; i < ALIEN_DEATH_FRAMES; i++) {
-            int row = i / GFX_BOBS_PER_ROW;
-            int col = i % GFX_BOBS_PER_ROW;
-            int sx  = col * GFX_BOB_CELL_W + 2;
-            int sy  = VY_TO_SY(L.vy_death_content + row * GFX_BOB_CELL_H, scroll_y) + 2;
-            if (sy + GFX_BOB_CELL_H < GFX_HEADER_H || sy >= 256) continue;
-            int atlas_x, atlas_y;
-            if (i < ALIEN_DEATH_ROW1_COUNT) {
-                atlas_x = i * ALIEN_DEATH_W;
-                atlas_y = ALIEN_DEATH_ROW1_Y;
-            } else {
-                atlas_x = (i - ALIEN_DEATH_ROW1_COUNT) * ALIEN_DEATH_W;
-                atlas_y = ALIEN_DEATH_ROW2_Y;
+    /* ---- ANIMATED TILES ---- */
+    {
+        const UBYTE *aa = anim_gfx_get_atlas();
+        if (aa) {
+            for (int ti = 0; ti < ANIM_TILE_COUNT; ti++) {
+                int row = ti / GFX_ANIM_PER_ROW;
+                int col = ti % GFX_ANIM_PER_ROW;
+                int sx  = col * GFX_ANIM_CELL_W + 2;
+                int sy  = VY_TO_SY(L.vy_anim_content + row * GFX_ANIM_CELL_H, scroll_y) + 2;
+                if (sy + GFX_ANIM_CELL_H < GFX_HEADER_H || sy >= 256) continue;
+                int atlas_col = ti % ANIM_TILES_PER_ROW;
+                int atlas_row = ti / ANIM_TILES_PER_ROW;
+                int ax = atlas_col * ANIM_TILE_W;
+                int ay = atlas_row * ANIM_TILE_H;
+                const UBYTE *src = aa + (size_t)(ay * ANIM_ATLAS_W + ax);
+                video_blit(src, ANIM_ATLAS_W, sx, sy, ANIM_TILE_W, ANIM_TILE_H, -1);
             }
-            const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
-            video_blit(src, ALIEN_ATLAS_W, sx, sy, ALIEN_DEATH_W, ALIEN_DEATH_H, 0);
         }
     }
 
-    /* ---- Blit player sprites ---- */
+    /* ---- ALIEN WALK & DEATH ---- */
+    {
+        const UBYTE *alien = alien_gfx_get_atlas();
+        if (alien) {
+            int total_walk = ALIEN_DIR_COUNT * ALIEN_WALK_FRAMES;
+            for (int i = 0; i < total_walk; i++) {
+                int dir   = i / ALIEN_WALK_FRAMES;
+                int frame = i % ALIEN_WALK_FRAMES;
+                int row   = i / GFX_BOBS_PER_ROW;
+                int col   = i % GFX_BOBS_PER_ROW;
+                int sx    = col * GFX_BOB_CELL_W + 2;
+                int sy    = VY_TO_SY(L.vy_walk_content + row * GFX_BOB_CELL_H, scroll_y) + 2;
+                if (sy + GFX_BOB_CELL_H < GFX_HEADER_H || sy >= 256) continue;
+                int atlas_x = dir   * ALIEN_SPRITE_W;
+                int atlas_y = frame * ALIEN_WALK_FRAME_STRIDE;
+                const UBYTE *src = alien + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
+                video_blit(src, ALIEN_ATLAS_W, sx, sy, ALIEN_SPRITE_W, ALIEN_SPRITE_H, 0);
+            }
+            for (int i = 0; i < ALIEN_DEATH_FRAMES; i++) {
+                int row = i / GFX_BOBS_PER_ROW;
+                int col = i % GFX_BOBS_PER_ROW;
+                int sx  = col * GFX_BOB_CELL_W + 2;
+                int sy  = VY_TO_SY(L.vy_death_content + row * GFX_BOB_CELL_H, scroll_y) + 2;
+                if (sy + GFX_BOB_CELL_H < GFX_HEADER_H || sy >= 256) continue;
+                int atlas_x, atlas_y;
+                if (i < ALIEN_DEATH_ROW1_COUNT) {
+                    atlas_x = i * ALIEN_DEATH_W;
+                    atlas_y = ALIEN_DEATH_ROW1_Y;
+                } else {
+                    atlas_x = (i - ALIEN_DEATH_ROW1_COUNT) * ALIEN_DEATH_W;
+                    atlas_y = ALIEN_DEATH_ROW2_Y;
+                }
+                const UBYTE *src = alien + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
+                video_blit(src, ALIEN_ATLAS_W, sx, sy, ALIEN_DEATH_W, ALIEN_DEATH_H, 0);
+            }
+        }
+    }
+
+    /* ---- WEAPONS ---- */
+    if (s_weapon_atlas) {
+        for (int w = 0; w < WEAPON_COUNT; w++) {
+            int row  = w / GFX_WEAPONS_PER_ROW;
+            int col  = w % GFX_WEAPONS_PER_ROW;
+            int sx   = col * GFX_WEAPON_CELL_W + 2;
+            int sy   = VY_TO_SY(L.vy_weapons_content + row * GFX_WEAPON_CELL_H, scroll_y) + 2;
+            if (sy + GFX_WEAPON_CELL_H < GFX_HEADER_H || sy >= 256) continue;
+            int src_x = k_weapon_colpx[w];
+            int src_y = k_weapon_row[w];
+            const UBYTE *src = s_weapon_atlas
+                               + (size_t)(src_y * WEAPON_ATLAS_W + src_x);
+            /* Clip draw width to screen boundary */
+            int dw = WEAPON_IMG_W;
+            if (sx + dw > 320) dw = 320 - sx;
+            if (dw > 0)
+                video_blit(src, WEAPON_ATLAS_W, sx, sy, dw, WEAPON_IMG_H, -1);
+        }
+    }
+
+    /* ---- INTEX BACKGROUND ---- */
+    if (s_intex_bg && s_intex_bg_w > 0) {
+        int sy = VY_TO_SY(L.vy_intex_content, scroll_y) + 2;
+        if (sy + s_intex_bg_h >= GFX_HEADER_H && sy < 256)
+            video_blit(s_intex_bg, s_intex_bg_w, 0, sy, s_intex_bg_w, s_intex_bg_h, -1);
+    }
+
+    /* ---- HUD GRAPHICS ---- */
+    {
+        int vy_cur = L.vy_hud_content;
+        DbgImg *hud_imgs[] = { &s_dbg_p1_bar, &s_dbg_p2_bar, &s_dbg_paused };
+        for (int i = 0; i < 3; i++) {
+            DbgImg *img = hud_imgs[i];
+            if (!img->pixels) continue;
+            int sy = VY_TO_SY(vy_cur, scroll_y) + 2;
+            if (sy + img->h >= GFX_HEADER_H && sy < 256)
+                video_blit(img->pixels, img->w, 0, sy, img->w, img->h, -1);
+            vy_cur += img->h + 9;
+        }
+    }
+
+    /* ---- FONT STRIP ---- */
+    if (s_dbg_font.pixels && s_dbg_font.w > 0) {
+        int sy = VY_TO_SY(L.vy_font_content, scroll_y) + 2;
+        /* Blit the font strip (width may exceed 320px — blit only visible part). */
+        int dw = s_dbg_font.w < 320 ? s_dbg_font.w : 320;
+        if (sy + s_dbg_font.h >= GFX_HEADER_H && sy < 256)
+            video_blit(s_dbg_font.pixels, s_dbg_font.w, 0, sy, dw, s_dbg_font.h, -1);
+    }
+
+    /* ---- PLAYER SPRITES ---- */
     for (int i = 0; i < PLAYER_SPRITE_TOTAL; i++) {
         int row = i / GFX_SPRS_PER_ROW;
         int col = i % GFX_SPRS_PER_ROW;
@@ -377,8 +617,7 @@ static int gfx_viewer_render(int scroll_y)
         const UBYTE *pix;
         int pw, ph;
         if (sprite_get_player_raw(i, &pix, &pw, &ph) == 0) {
-            /* Centre the sprite horizontally in the cell */
-            int ox = sx + (GFX_TILE_CELL_W - 2 - pw) / 2;
+            int ox = sx + (GFX_SPR_CELL_W - 2 - pw) / 2;
             if (ox < sx) ox = sx;
             video_blit(pix, pw, ox, sy, pw, ph, 0);
         }
@@ -387,34 +626,37 @@ static int gfx_viewer_render(int scroll_y)
     /* ---- Upload framebuffer before drawing overlays ---- */
     video_upload_framebuffer();
 
-    /* ---- Sticky header bar (drawn last so it covers anything blitted there) ---- */
+    /* ================================================================
+     * OVERLAY / LABEL PASS (SDL renderer — not affected by palette)
+     * ================================================================ */
+
+    /* Sticky header bar */
     video_overlay_fill_rect(0, 0, 320, GFX_HEADER_H, 0, 0, 0, 255);
-    draw_string(2, 1,
-        "GFX VIEWER   F-CLOSE   ARROWS-SCROLL",
-        255, 220, 0);
+    draw_string(2, 1, "GFX VIEWER   F-CLOSE   ARROWS-SCROLL", 255, 220, 0);
 
-    /* ---- Section headers ---- */
-    {
-        /* Helper macro: draw a section header at virtual vy */
-#define DRAW_SECTION_HDR(vy_hdr, r, g, b, label) \
-        do { \
-            int _sy = VY_TO_SY((vy_hdr), scroll_y); \
-            if (_sy >= GFX_HEADER_H && _sy < 256) { \
-                video_overlay_fill_rect(0, _sy, 320, GFX_SECTION_H, (r), (g), (b), 230); \
-                draw_string(4, _sy + 1, (label), 255, 255, 255); \
-            } \
-        } while (0)
+/* Helper macro: draw a section header */
+#define DRAW_HDR(vy_hdr, r, g, b, label) \
+    do { \
+        int _sy = VY_TO_SY((vy_hdr), scroll_y); \
+        if (_sy >= GFX_HEADER_H && _sy < 256) { \
+            video_overlay_fill_rect(0, _sy, 320, GFX_SECTION_H, (r), (g), (b), 230); \
+            draw_string(4, _sy + 1, (label), 255, 255, 255); \
+        } \
+    } while (0)
 
-        DRAW_SECTION_HDR(L.vy_tiles_hdr,  30,  30,  90, "TILES");
-        DRAW_SECTION_HDR(L.vy_walk_hdr,   20,  80,  20, "ALIEN WALK");
-        DRAW_SECTION_HDR(L.vy_death_hdr,  90,  20,  20, "ALIEN DEATH");
-        DRAW_SECTION_HDR(L.vy_spr_hdr,    70,  20,  90, "PLAYER SPRITES");
-#undef DRAW_SECTION_HDR
-    }
+    DRAW_HDR(L.vy_tiles_hdr,    30,  30,  90, "TILES");
+    DRAW_HDR(L.vy_anim_hdr,     30,  70,  90, "ANIMATED TILES");
+    DRAW_HDR(L.vy_walk_hdr,     20,  80,  20, "ALIEN WALK");
+    DRAW_HDR(L.vy_death_hdr,    90,  20,  20, "ALIEN DEATH");
+    DRAW_HDR(L.vy_weapons_hdr,  80,  60,  20, "WEAPONS");
+    DRAW_HDR(L.vy_intex_hdr,    30,  70,  40, "INTEX BACKGROUND");
+    DRAW_HDR(L.vy_hud_hdr,      50,  50,  50, "HUD GRAPHICS");
+    DRAW_HDR(L.vy_font_hdr,     50,  30,  70, "FONT");
+    DRAW_HDR(L.vy_spr_hdr,      70,  20,  90, "PLAYER SPRITES");
 
-    /* ---- Item labels ---- */
+#undef DRAW_HDR
 
-    /* Tile labels */
+    /* ---- Tileset labels ---- */
     if (g_tileset.tile_count > 0) {
         char buf[12];
         int tc = g_tileset.tile_count;
@@ -423,45 +665,103 @@ static int gfx_viewer_render(int scroll_y)
             int col = ti % GFX_TILES_PER_ROW;
             int lx  = col * GFX_TILE_CELL_W + 2;
             int ly  = VY_TO_SY(L.vy_tiles_content + row * GFX_TILE_CELL_H, scroll_y)
-                      + 2 + MAP_TILE_H + 1;           /* just below tile */
+                      + 2 + MAP_TILE_H + 1;
             if (ly < GFX_HEADER_H || ly >= 256) continue;
             snprintf(buf, sizeof(buf), "%d", ti);
             draw_string(lx, ly, buf, 180, 180, 180);
         }
     }
 
-    /* Alien walk labels */
-    if (atlas) {
+    /* ---- Animated tile labels ---- */
+    if (anim_gfx_get_atlas()) {
         char buf[12];
-        int total_walk = ALIEN_DIR_COUNT * ALIEN_WALK_FRAMES;
-        for (int i = 0; i < total_walk; i++) {
-            int dir   = i / ALIEN_WALK_FRAMES;
-            int frame = i % ALIEN_WALK_FRAMES;
-            int row   = i / GFX_BOBS_PER_ROW;
-            int col   = i % GFX_BOBS_PER_ROW;
-            int lx    = col * GFX_BOB_CELL_W + 2;
-            int ly    = VY_TO_SY(L.vy_walk_content + row * GFX_BOB_CELL_H, scroll_y)
-                        + 2 + ALIEN_SPRITE_H + 1;
+        for (int ti = 0; ti < ANIM_TILE_COUNT; ti++) {
+            int row = ti / GFX_ANIM_PER_ROW;
+            int col = ti % GFX_ANIM_PER_ROW;
+            int lx  = col * GFX_ANIM_CELL_W + 2;
+            int ly  = VY_TO_SY(L.vy_anim_content + row * GFX_ANIM_CELL_H, scroll_y)
+                      + 2 + GFX_ANIM_TILE_H + 1;
             if (ly < GFX_HEADER_H || ly >= 256) continue;
-            snprintf(buf, sizeof(buf), "D%dF%d", dir, frame);
-            draw_string(lx, ly, buf, 180, 220, 180);
-        }
-
-        /* Alien death labels */
-        for (int i = 0; i < ALIEN_DEATH_FRAMES; i++) {
-            int row = i / GFX_BOBS_PER_ROW;
-            int col = i % GFX_BOBS_PER_ROW;
-            int lx  = col * GFX_BOB_CELL_W + 2;
-            int ly  = VY_TO_SY(L.vy_death_content + row * GFX_BOB_CELL_H, scroll_y)
-                      + 2 + ALIEN_DEATH_H + 1;
-            if (ly < GFX_HEADER_H || ly >= 256) continue;
-            char buf[8];
-            snprintf(buf, sizeof(buf), "DT%d", i);
-            draw_string(lx, ly, buf, 220, 180, 180);
+            snprintf(buf, sizeof(buf), "A%d", ti);
+            draw_string(lx, ly, buf, 180, 220, 220);
         }
     }
 
-    /* Player sprite labels */
+    /* ---- Alien walk & death labels ---- */
+    {
+        const UBYTE *alien = alien_gfx_get_atlas();
+        if (alien) {
+            char buf[12];
+            int total_walk = ALIEN_DIR_COUNT * ALIEN_WALK_FRAMES;
+            for (int i = 0; i < total_walk; i++) {
+                int dir   = i / ALIEN_WALK_FRAMES;
+                int frame = i % ALIEN_WALK_FRAMES;
+                int row   = i / GFX_BOBS_PER_ROW;
+                int col   = i % GFX_BOBS_PER_ROW;
+                int lx    = col * GFX_BOB_CELL_W + 2;
+                int ly    = VY_TO_SY(L.vy_walk_content + row * GFX_BOB_CELL_H, scroll_y)
+                            + 2 + ALIEN_SPRITE_H + 1;
+                if (ly < GFX_HEADER_H || ly >= 256) continue;
+                snprintf(buf, sizeof(buf), "D%dF%d", dir, frame);
+                draw_string(lx, ly, buf, 180, 220, 180);
+            }
+            for (int i = 0; i < ALIEN_DEATH_FRAMES; i++) {
+                int row = i / GFX_BOBS_PER_ROW;
+                int col = i % GFX_BOBS_PER_ROW;
+                int lx  = col * GFX_BOB_CELL_W + 2;
+                int ly  = VY_TO_SY(L.vy_death_content + row * GFX_BOB_CELL_H, scroll_y)
+                          + 2 + ALIEN_DEATH_H + 1;
+                if (ly < GFX_HEADER_H || ly >= 256) continue;
+                char buf2[8];
+                snprintf(buf2, sizeof(buf2), "DT%d", i);
+                draw_string(lx, ly, buf2, 220, 180, 180);
+            }
+        }
+    }
+
+    /* ---- Weapon labels ---- */
+    if (s_weapon_atlas) {
+        for (int w = 0; w < WEAPON_COUNT; w++) {
+            int row  = w / GFX_WEAPONS_PER_ROW;
+            int col  = w % GFX_WEAPONS_PER_ROW;
+            int lx   = col * GFX_WEAPON_CELL_W + 2;
+            int ly   = VY_TO_SY(L.vy_weapons_content + row * GFX_WEAPON_CELL_H, scroll_y)
+                       + 2 + WEAPON_IMG_H + 2;
+            if (ly < GFX_HEADER_H || ly >= 256) continue;
+            draw_string(lx, ly, k_weapon_name[w], 255, 200, 100);
+        }
+    }
+
+    /* ---- INTEX background label ---- */
+    if (s_intex_bg) {
+        int ly = VY_TO_SY(L.vy_intex_content, scroll_y) + 2 + s_intex_bg_h + 2;
+        if (ly >= GFX_HEADER_H && ly < 256)
+            draw_string(2, ly, "INTEX TERMINAL BG", 180, 230, 180);
+    }
+
+    /* ---- HUD labels ---- */
+    {
+        int vy_cur = L.vy_hud_content;
+        const char *hud_names[] = { "P1 STATUS BAR", "P2 STATUS BAR", "GAME PAUSED" };
+        DbgImg *hud_imgs[]      = { &s_dbg_p1_bar, &s_dbg_p2_bar, &s_dbg_paused };
+        for (int i = 0; i < 3; i++) {
+            DbgImg *img = hud_imgs[i];
+            if (!img->pixels) { vy_cur += 0; continue; }
+            int ly = VY_TO_SY(vy_cur, scroll_y) + 2 + img->h + 2;
+            if (ly >= GFX_HEADER_H && ly < 256)
+                draw_string(2, ly, hud_names[i], 200, 200, 200);
+            vy_cur += img->h + 9;
+        }
+    }
+
+    /* ---- Font label ---- */
+    if (s_dbg_font.pixels) {
+        int ly = VY_TO_SY(L.vy_font_content, scroll_y) + 2 + s_dbg_font.h + 2;
+        if (ly >= GFX_HEADER_H && ly < 256)
+            draw_string(2, ly, "IN-GAME FONT (672X12 - 42 GLYPHS)", 200, 180, 230);
+    }
+
+    /* ---- Player sprite labels ---- */
     {
         char buf[8];
         for (int i = 0; i < PLAYER_SPRITE_TOTAL; i++) {
@@ -469,9 +769,9 @@ static int gfx_viewer_render(int scroll_y)
             int col = i % GFX_SPRS_PER_ROW;
             int lx  = col * GFX_SPR_CELL_W + 2;
             int ly  = VY_TO_SY(L.vy_spr_content + row * GFX_SPR_CELL_H, scroll_y)
-                      + 2 + 28 + 1;                  /* 28px reserved for sprite */
+                      + 2 + 28 + 1;
             if (ly < GFX_HEADER_H || ly >= 256) continue;
-            snprintf(buf, sizeof(buf), "%d", i + 1); /* 1-based sprite number */
+            snprintf(buf, sizeof(buf), "%d", i + 1);
             draw_string(lx, ly, buf, 180, 180, 220);
         }
     }
@@ -490,27 +790,26 @@ static int gfx_viewer_render(int scroll_y)
 
 void debug_gfx_viewer_run(void)
 {
-    /* Drain the KEY_F event that triggered entry so the viewer loop
-     * starts with a clean key state. */
+    /* Drain the KEY_F event that triggered entry */
     input_poll();
 
-    int scroll_y  = 0;
+    gfx_viewer_load_assets();
+
+    int scroll_y   = 0;
     int max_scroll = 0;
 
     while (!g_quit_requested) {
         timer_begin_frame();
         input_poll();
 
-        /* Exit on F or ESC */
         if (g_key_pressed == KEY_F || g_key_pressed == KEY_ESC)
             break;
 
-        /* Smooth scroll via held arrow keys (SDL keyboard state) */
         const Uint8 *ks = SDL_GetKeyboardState(NULL);
         if (ks[SDL_SCANCODE_UP])    scroll_y -= 3;
         if (ks[SDL_SCANCODE_DOWN])  scroll_y += 3;
-        if (ks[SDL_SCANCODE_LEFT])  scroll_y -= 48;  /* fast page-up   */
-        if (ks[SDL_SCANCODE_RIGHT]) scroll_y += 48;  /* fast page-down */
+        if (ks[SDL_SCANCODE_LEFT])  scroll_y -= 48;
+        if (ks[SDL_SCANCODE_RIGHT]) scroll_y += 48;
 
         if (scroll_y < 0)           scroll_y = 0;
         if (scroll_y > max_scroll)  scroll_y = max_scroll;
@@ -518,4 +817,6 @@ void debug_gfx_viewer_run(void)
         max_scroll = gfx_viewer_render(scroll_y);
         video_flip();
     }
+
+    gfx_viewer_free_assets();
 }
