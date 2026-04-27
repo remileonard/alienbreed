@@ -297,7 +297,8 @@ static DbgImg s_dbg_p1_bar  = {NULL,0,0};
 static DbgImg s_dbg_p2_bar  = {NULL,0,0};
 static DbgImg s_dbg_paused  = {NULL,0,0};
 
-/* Font strip: assets/fonts/font_16x504.raw — 672px wide × 12px tall, 42 glyphs.
+/* Font strip: assets/fonts/font_16x504.raw
+ * Filename encodes letter_w=16 and nominal_h=504; actual strip = 672×12 px (42 glyphs × 16px each).
  * Loaded when the viewer opens. */
 static DbgImg s_dbg_font = {NULL,0,0};
 
@@ -746,7 +747,7 @@ static int gfx_viewer_render(int scroll_y)
         DbgImg *hud_imgs[]      = { &s_dbg_p1_bar, &s_dbg_p2_bar, &s_dbg_paused };
         for (int i = 0; i < 3; i++) {
             DbgImg *img = hud_imgs[i];
-            if (!img->pixels) { vy_cur += 0; continue; }
+            if (!img->pixels) continue;
             int ly = VY_TO_SY(vy_cur, scroll_y) + 2 + img->h + 2;
             if (ly >= GFX_HEADER_H && ly < 256)
                 draw_string(2, ly, hud_names[i], 200, 200, 200);
@@ -758,7 +759,7 @@ static int gfx_viewer_render(int scroll_y)
     if (s_dbg_font.pixels) {
         int ly = VY_TO_SY(L.vy_font_content, scroll_y) + 2 + s_dbg_font.h + 2;
         if (ly >= GFX_HEADER_H && ly < 256)
-            draw_string(2, ly, "IN-GAME FONT (672X12 - 42 GLYPHS)", 200, 180, 230);
+            draw_string(2, ly, "IN-GAME FONT (672x12 - 42 GLYPHS)", 200, 180, 230);
     }
 
     /* ---- Player sprite labels ---- */
