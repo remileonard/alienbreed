@@ -260,29 +260,6 @@ void debug_render_overlay(void)
 #define GFX_SECTION_H     10   /* section header height */
 #define GFX_SECTION_GAP    4   /* vertical gap between sections */
 
-/* Weapon layout: weapons_264x40.lo4 is actually 320×264 at 4 bitplanes.
- * Six weapon images in a 2-column × 3-row grid, each image 160×88 px.
- * Ref: intex.asm disp_weapon_pic / weapons_pic_table. */
-#define WEAPON_IMG_W     160
-#define WEAPON_IMG_H      88
-#define WEAPON_ATLAS_W   320
-#define WEAPON_ATLAS_H   264
-#define WEAPON_PLANES      4
-#define WEAPON_COUNT       6
-
-/* Weapon positions in the atlas (row, col_pixel).
- * From weapons_pic_table offsets: (row*40) + col_bytes_in_plane0_stride. */
-static const int k_weapon_row[WEAPON_COUNT]  = { 176,  0,   0, 176,  88,  88 };
-static const int k_weapon_colpx[WEAPON_COUNT]= {   0,  0, 160, 160, 160,   0 };
-static const char *k_weapon_name[WEAPON_COUNT] = {
-    "MACHINEGUN", "TWINFIRE", "FLAMEARC", "PLASMAGUN", "FLAMETHROW", "SIDEWINDER"
-};
-
-/* Decoded weapon atlas (320×264, single indexed image).
- * Loaded from assets/gfx/intex_weapons_320x264.raw when the viewer opens.
- * NULL if the file is not available. */
-static UBYTE *s_weapon_atlas = NULL;
-
 /* Decoded INTEX background (320×256).
  * Loaded from assets/gfx/intex_bkgnd_320x256.raw when the viewer opens. */
 static UBYTE *s_intex_bg = NULL;
@@ -332,16 +309,6 @@ static void dbg_img_free(DbgImg *img)
 /* Load all viewer-specific assets that are not already resident. */
 static void gfx_viewer_load_assets(void)
 {
-    /* Weapon atlas */
-    if (!s_weapon_atlas) {
-        DbgImg tmp = {NULL,0,0};
-        if (dbg_img_load(&tmp, "assets/gfx/intex_weapons_320x264.raw") == 0
-            && tmp.w == WEAPON_ATLAS_W && tmp.h == WEAPON_ATLAS_H) {
-            s_weapon_atlas = tmp.pixels;
-        } else {
-            free(tmp.pixels);
-        }
-    }
     /* INTEX background */
     if (!s_intex_bg) {
         DbgImg tmp = {NULL,0,0};
@@ -367,7 +334,6 @@ static void gfx_viewer_load_assets(void)
 
 static void gfx_viewer_free_assets(void)
 {
-    free(s_weapon_atlas); s_weapon_atlas = NULL;
     free(s_intex_bg);     s_intex_bg = NULL;
     s_intex_bg_w = s_intex_bg_h = 0;
     dbg_img_free(&s_dbg_p1_bar);
@@ -383,9 +349,7 @@ typedef struct {
     /* All positions are virtual Y (canvas coords). */
     int vy_tiles_hdr,      vy_tiles_content;
     int vy_anim_hdr,       vy_anim_content;
-    int vy_walk_hdr,       vy_walk_content;
-    int vy_death_hdr,      vy_death_content;
-    int vy_weapons_hdr,    vy_weapons_content;
+    int vy_bo_hdr,         vy_bo_content;    /* Full BO atlas (320×384) */
     int vy_intex_hdr,      vy_intex_content;
     int vy_hud_hdr,        vy_hud_content;
     int vy_font_hdr,       vy_font_content;
@@ -393,13 +357,6 @@ typedef struct {
     int total_vh;
     int max_scroll;
 } GfxLayout;
-
-/* Height of ONE weapon image cell: image + 2px gap + 7px label + 4px pad */
-#define GFX_WEAPON_CELL_H (WEAPON_IMG_H + 2 + 7 + 4)
-/* Width of one weapon cell: image + small margin */
-#define GFX_WEAPON_CELL_W (WEAPON_IMG_W + 4)
-/* Two weapons per display row (2 × 164 = 328, fits 320 with clipping) */
-#define GFX_WEAPONS_PER_ROW 2
 
 /* Anim tile cell (same pixel size as regular tiles) */
 #define GFX_ANIM_TILE_W  ANIM_TILE_W
@@ -421,13 +378,11 @@ static GfxLayout gfx_compute_layout(void)
     int ac           = anim_gfx_get_atlas() ? ANIM_TILE_COUNT : 0;
     int n_anim_rows  = ac > 0 ? (ac + GFX_ANIM_PER_ROW - 1) / GFX_ANIM_PER_ROW : 0;
 
-    /* Alien BOBs */
-    int n_walk_rows  = (ALIEN_DIR_COUNT * ALIEN_WALK_FRAMES + GFX_BOBS_PER_ROW - 1) / GFX_BOBS_PER_ROW;
-    int n_death_rows = (ALIEN_DEATH_FRAMES + GFX_BOBS_PER_ROW - 1) / GFX_BOBS_PER_ROW;
-
-    /* Weapons */
-    int wc           = s_weapon_atlas ? WEAPON_COUNT : 0;
-    int n_weap_rows  = wc > 0 ? (wc + GFX_WEAPONS_PER_ROW - 1) / GFX_WEAPONS_PER_ROW : 0;
+    /* Full BO atlas: 320×384 raw image, one full-width image.
+     * Ref: lbW019A8E/lbW01945E/lbW0188CE in main.asm — the complete atlas contains
+     * alien walk/alt frames (y=0-159), bullet/projectile sprites (x=256+, y=0-155),
+     * death/explosion frames (y=160-255), and large weapon-effect sprites (y=256-383). */
+    int bo_h         = alien_gfx_get_atlas() ? (ALIEN_ATLAS_H + 9) : 0;
 
     /* INTEX bg: one full-width image + label */
     int intex_h      = s_intex_bg ? (s_intex_bg_h + 9) : 0;
@@ -453,9 +408,7 @@ static GfxLayout gfx_compute_layout(void)
 
     NEXT_SECTION(L.vy_tiles_hdr,   L.vy_tiles_content,   n_tile_rows  * GFX_TILE_CELL_H)
     NEXT_SECTION(L.vy_anim_hdr,    L.vy_anim_content,    n_anim_rows  * GFX_ANIM_CELL_H)
-    NEXT_SECTION(L.vy_walk_hdr,    L.vy_walk_content,    n_walk_rows  * GFX_BOB_CELL_H)
-    NEXT_SECTION(L.vy_death_hdr,   L.vy_death_content,   n_death_rows * GFX_BOB_CELL_H)
-    NEXT_SECTION(L.vy_weapons_hdr, L.vy_weapons_content, n_weap_rows  * GFX_WEAPON_CELL_H)
+    NEXT_SECTION(L.vy_bo_hdr,      L.vy_bo_content,      bo_h)
     NEXT_SECTION(L.vy_intex_hdr,   L.vy_intex_content,   intex_h)
     NEXT_SECTION(L.vy_hud_hdr,     L.vy_hud_content,     hud_h)
     NEXT_SECTION(L.vy_font_hdr,    L.vy_font_content,    font_h)
@@ -520,61 +473,26 @@ static int gfx_viewer_render(int scroll_y)
         }
     }
 
-    /* ---- ALIEN WALK & DEATH ---- */
+    /* ---- FULL BO ATLAS (320×384) ---- */
+    /* Displays the complete L?BO file atlas at 1:1 scale.
+     * Layout from lbW019A8E/lbW01945E/lbW0188CE (main.asm):
+     *   y=  0- 95  Alien walk cycle: 8 compass dirs × 3 frames, 32×30 px each
+     *   y= 96-159  Secondary walk/alt alien sprites, 32×30 px
+     *   x=256-319  Projectile & bullet sprites (16×16 and 16×14)
+     *   y=160-191  Bullet/shot animations, 16×14 px
+     *   y=192-253  Death/explosion: 16 frames of 32×30 px
+     *   y=256-383  Large weapon-effect sprites (96×128) + misc (32×32) */
     {
         const UBYTE *alien = alien_gfx_get_atlas();
         if (alien) {
-            int total_walk = ALIEN_DIR_COUNT * ALIEN_WALK_FRAMES;
-            for (int i = 0; i < total_walk; i++) {
-                int dir   = i / ALIEN_WALK_FRAMES;
-                int frame = i % ALIEN_WALK_FRAMES;
-                int row   = i / GFX_BOBS_PER_ROW;
-                int col   = i % GFX_BOBS_PER_ROW;
-                int sx    = col * GFX_BOB_CELL_W + 2;
-                int sy    = VY_TO_SY(L.vy_walk_content + row * GFX_BOB_CELL_H, scroll_y) + 2;
-                if (sy + GFX_BOB_CELL_H < GFX_HEADER_H || sy >= 256) continue;
-                int atlas_x = dir   * ALIEN_SPRITE_W;
-                int atlas_y = frame * ALIEN_WALK_FRAME_STRIDE;
-                const UBYTE *src = alien + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
-                video_blit(src, ALIEN_ATLAS_W, sx, sy, ALIEN_SPRITE_W, ALIEN_SPRITE_H, 0);
+            int sy = VY_TO_SY(L.vy_bo_content, scroll_y) + 2;
+            /* Blit the full atlas row by row — only visible rows */
+            for (int row = 0; row < ALIEN_ATLAS_H; row++) {
+                int dst_y = sy + row;
+                if (dst_y < GFX_HEADER_H || dst_y >= 256) continue;
+                const UBYTE *src = alien + (size_t)(row * ALIEN_ATLAS_W);
+                video_blit(src, ALIEN_ATLAS_W, 0, dst_y, ALIEN_ATLAS_W, 1, -1);
             }
-            for (int i = 0; i < ALIEN_DEATH_FRAMES; i++) {
-                int row = i / GFX_BOBS_PER_ROW;
-                int col = i % GFX_BOBS_PER_ROW;
-                int sx  = col * GFX_BOB_CELL_W + 2;
-                int sy  = VY_TO_SY(L.vy_death_content + row * GFX_BOB_CELL_H, scroll_y) + 2;
-                if (sy + GFX_BOB_CELL_H < GFX_HEADER_H || sy >= 256) continue;
-                int atlas_x, atlas_y;
-                if (i < ALIEN_DEATH_ROW1_COUNT) {
-                    atlas_x = i * ALIEN_DEATH_W;
-                    atlas_y = ALIEN_DEATH_ROW1_Y;
-                } else {
-                    atlas_x = (i - ALIEN_DEATH_ROW1_COUNT) * ALIEN_DEATH_W;
-                    atlas_y = ALIEN_DEATH_ROW2_Y;
-                }
-                const UBYTE *src = alien + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
-                video_blit(src, ALIEN_ATLAS_W, sx, sy, ALIEN_DEATH_W, ALIEN_DEATH_H, 0);
-            }
-        }
-    }
-
-    /* ---- WEAPONS ---- */
-    if (s_weapon_atlas) {
-        for (int w = 0; w < WEAPON_COUNT; w++) {
-            int row  = w / GFX_WEAPONS_PER_ROW;
-            int col  = w % GFX_WEAPONS_PER_ROW;
-            int sx   = col * GFX_WEAPON_CELL_W + 2;
-            int sy   = VY_TO_SY(L.vy_weapons_content + row * GFX_WEAPON_CELL_H, scroll_y) + 2;
-            if (sy + GFX_WEAPON_CELL_H < GFX_HEADER_H || sy >= 256) continue;
-            int src_x = k_weapon_colpx[w];
-            int src_y = k_weapon_row[w];
-            const UBYTE *src = s_weapon_atlas
-                               + (size_t)(src_y * WEAPON_ATLAS_W + src_x);
-            /* Clip draw width to screen boundary */
-            int dw = WEAPON_IMG_W;
-            if (sx + dw > 320) dw = 320 - sx;
-            if (dw > 0)
-                video_blit(src, WEAPON_ATLAS_W, sx, sy, dw, WEAPON_IMG_H, -1);
         }
     }
 
@@ -646,10 +564,8 @@ static int gfx_viewer_render(int scroll_y)
     } while (0)
 
     DRAW_HDR(L.vy_tiles_hdr,    30,  30,  90, "TILES");
-    DRAW_HDR(L.vy_anim_hdr,     30,  70,  90, "ANIMATED TILES");
-    DRAW_HDR(L.vy_walk_hdr,     20,  80,  20, "ALIEN WALK");
-    DRAW_HDR(L.vy_death_hdr,    90,  20,  20, "ALIEN DEATH");
-    DRAW_HDR(L.vy_weapons_hdr,  80,  60,  20, "WEAPONS");
+    DRAW_HDR(L.vy_anim_hdr,     30,  70,  90, "ANIMATED TILES (L?AN)");
+    DRAW_HDR(L.vy_bo_hdr,       20,  80,  20, "BO ATLAS FULL (L?BO) - 320x384 - ALL BOBs");
     DRAW_HDR(L.vy_intex_hdr,    30,  70,  40, "INTEX BACKGROUND");
     DRAW_HDR(L.vy_hud_hdr,      50,  50,  50, "HUD GRAPHICS");
     DRAW_HDR(L.vy_font_hdr,     50,  30,  70, "FONT");
@@ -688,48 +604,27 @@ static int gfx_viewer_render(int scroll_y)
         }
     }
 
-    /* ---- Alien walk & death labels ---- */
-    {
-        const UBYTE *alien = alien_gfx_get_atlas();
-        if (alien) {
-            char buf[12];
-            int total_walk = ALIEN_DIR_COUNT * ALIEN_WALK_FRAMES;
-            for (int i = 0; i < total_walk; i++) {
-                int dir   = i / ALIEN_WALK_FRAMES;
-                int frame = i % ALIEN_WALK_FRAMES;
-                int row   = i / GFX_BOBS_PER_ROW;
-                int col   = i % GFX_BOBS_PER_ROW;
-                int lx    = col * GFX_BOB_CELL_W + 2;
-                int ly    = VY_TO_SY(L.vy_walk_content + row * GFX_BOB_CELL_H, scroll_y)
-                            + 2 + ALIEN_SPRITE_H + 1;
-                if (ly < GFX_HEADER_H || ly >= 256) continue;
-                snprintf(buf, sizeof(buf), "D%dF%d", dir, frame);
-                draw_string(lx, ly, buf, 180, 220, 180);
-            }
-            for (int i = 0; i < ALIEN_DEATH_FRAMES; i++) {
-                int row = i / GFX_BOBS_PER_ROW;
-                int col = i % GFX_BOBS_PER_ROW;
-                int lx  = col * GFX_BOB_CELL_W + 2;
-                int ly  = VY_TO_SY(L.vy_death_content + row * GFX_BOB_CELL_H, scroll_y)
-                          + 2 + ALIEN_DEATH_H + 1;
-                if (ly < GFX_HEADER_H || ly >= 256) continue;
-                char buf2[8];
-                snprintf(buf2, sizeof(buf2), "DT%d", i);
-                draw_string(lx, ly, buf2, 220, 180, 180);
-            }
-        }
-    }
-
-    /* ---- Weapon labels ---- */
-    if (s_weapon_atlas) {
-        for (int w = 0; w < WEAPON_COUNT; w++) {
-            int row  = w / GFX_WEAPONS_PER_ROW;
-            int col  = w % GFX_WEAPONS_PER_ROW;
-            int lx   = col * GFX_WEAPON_CELL_W + 2;
-            int ly   = VY_TO_SY(L.vy_weapons_content + row * GFX_WEAPON_CELL_H, scroll_y)
-                       + 2 + WEAPON_IMG_H + 2;
-            if (ly < GFX_HEADER_H || ly >= 256) continue;
-            draw_string(lx, ly, k_weapon_name[w], 255, 200, 100);
+    /* ---- BO atlas region annotations (overlaid on the atlas image) ----
+     * Based on lbW019A8E (COMPACT) and lbW0188CE BOB descriptor tables.
+     * Each annotation marks a horizontal band in the 320×384 atlas. */
+    if (alien_gfx_get_atlas()) {
+        /* Key Y boundaries within the atlas (ref: main.asm BOB tables) */
+        static const struct { int atlas_y; const char *label; } k_bo_bands[] = {
+            {   0, "y=0   WALK (8 dirs x3 frames, 32x30)" },
+            {  96, "y=96  ALT WALK / SECONDARY SPRITES (32x30)" },
+            { 160, "y=160 BULLETS/SHOTS (16x14)  x=256: PROJECTILES (16x16)" },
+            { 192, "y=192 DEATH/EXPLOSION frames 0-9 (32x30)" },
+            { 224, "y=224 DEATH frames 10-15 (32x30)  + MISC SHOTS (16x14)" },
+            { 256, "y=256 LARGE WEAPON EFFECTS (96x128)  x=288: MISC 32x32" },
+        };
+        int n_bands = (int)(sizeof(k_bo_bands) / sizeof(k_bo_bands[0]));
+        int atlas_top = VY_TO_SY(L.vy_bo_content, scroll_y) + 2;
+        for (int b = 0; b < n_bands; b++) {
+            int sy = atlas_top + k_bo_bands[b].atlas_y;
+            if (sy < GFX_HEADER_H || sy >= 256) continue;
+            /* Translucent dark bar + label */
+            video_overlay_fill_rect(0, sy, 320, 8, 0, 0, 0, 140);
+            draw_string(2, sy, k_bo_bands[b].label, 255, 220, 80);
         }
     }
 
