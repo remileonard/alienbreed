@@ -47,7 +47,8 @@ typedef struct {
     int         cursor_y;      /* current cursor Y */
     int         play_sound;    /* play typewriter sound every N chars */
     int         sound_counter;
-    int         color_offset; /* added to every drawn pixel index (for multi-palette layers) */
+    int         color_offset;    /* added to every drawn pixel index (for multi-palette layers) */
+    int         text_color;      /* when >= 0, use this palette index for every glyph pixel */
 } TextCtx;
 
 /* Initialise a text context. */

@@ -62,6 +62,7 @@ int  g_map_overview_on          = 0;
 int  g_game_running_flag        = 0;
 int  g_exit_unlocked            = 0;
 int  g_boss_active              = 0;
+int  g_holocode_jump_level      = -1; /* >= 0: jump to this level (enter_level_N_holocode in main.asm) */
 
 /* Internal: frames per second = 50, timer displayed in M:SS */
 #define TIMER_FRAMES_PER_SECOND 50
