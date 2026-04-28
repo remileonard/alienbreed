@@ -902,9 +902,23 @@ void intex_run(int player_idx)
     font_load(&font, "assets/fonts/font_16x504.raw", 7, 12, 0);
 
     /* Set INTEX palette (ref: set_bitplanes_and_palette in intex.asm) */
+    /*
+     * INTEX palette (ref: set_bitplanes_and_palette + copper raster, intex.asm).
+     *
+     * Colors 0-13: linear green ramp from background_pic palette ($000-$0D0).
+     * Color 14:    $FFF (bright highlight, from background_pic palette).
+     * Color 15:    TEXT color.  In the original the copper raster raises this
+     *              dynamically per scanline: $0D0 at y=0, $2F2 at y=48, $6F6
+     *              at y=72, $4F4 at y=94.  The main menu items appear between
+     *              y=68 and y=128 (bitplane coordinates) where COLOR15 is $2F2
+     *              to $6F6 — substantially brighter than the background maximum
+     *              of $0D0.  Use $3F3 as a static representative value that
+     *              matches the mid-range raster and makes text visibly glow.
+     * Colors 16-31: static green gradient from copper list (upper bitplane 4).
+     */
     static const UWORD k_intex_pal[] = {
         0x000, 0x010, 0x020, 0x030, 0x040, 0x050, 0x060, 0x070,
-        0x080, 0x090, 0x0A0, 0x0B0, 0x0C0, 0x0D0, 0xFFF, 0x0D0,
+        0x080, 0x090, 0x0A0, 0x0B0, 0x0C0, 0x0D0, 0xFFF, 0x3F3,
         0x555, 0x565, 0x575, 0x585, 0x595, 0x5A5, 0x5B5, 0x5C5,
         0x5D5, 0x5E5, 0x5F5, 0x4F4, 0x3F3, 0x2F2, 0x1F1, 0x0F0
     };
