@@ -292,9 +292,9 @@ static int dbg_img_load(DbgImg *img, const char *path)
     if (fread(&img->w, 4, 1, f) != 1 || fread(&img->h, 4, 1, f) != 1) {
         fclose(f); return -1;
     }
-    img->pixels = (UBYTE *)malloc((size_t)(img->w * img->h));
+    img->pixels = (UBYTE *)malloc((size_t)img->w * (size_t)img->h);
     if (!img->pixels) { fclose(f); return -1; }
-    fread(img->pixels, 1, (size_t)(img->w * img->h), f);
+    fread(img->pixels, 1, (size_t)img->w * (size_t)img->h, f);
     fclose(f);
     return 0;
 }
@@ -448,7 +448,7 @@ static int gfx_viewer_render(int scroll_y)
             int sx  = col * GFX_TILE_CELL_W + 2;
             int sy  = VY_TO_SY(L.vy_tiles_content + row * GFX_TILE_CELL_H, scroll_y) + 2;
             if (sy + GFX_TILE_CELL_H < GFX_HEADER_H || sy >= 256) continue;
-            const UBYTE *src = g_tileset.pixels + (size_t)(ti * MAP_TILE_W * MAP_TILE_H);
+            const UBYTE *src = g_tileset.pixels + (size_t)ti * (MAP_TILE_W * MAP_TILE_H);
             video_blit(src, MAP_TILE_W, sx, sy, MAP_TILE_W, MAP_TILE_H, -1);
         }
     }
@@ -467,7 +467,7 @@ static int gfx_viewer_render(int scroll_y)
                 int atlas_row = ti / ANIM_TILES_PER_ROW;
                 int ax = atlas_col * ANIM_TILE_W;
                 int ay = atlas_row * ANIM_TILE_H;
-                const UBYTE *src = aa + (size_t)(ay * ANIM_ATLAS_W + ax);
+                const UBYTE *src = aa + ((size_t)ay * ANIM_ATLAS_W + (size_t)ax);
                 video_blit(src, ANIM_ATLAS_W, sx, sy, ANIM_TILE_W, ANIM_TILE_H, -1);
             }
         }
@@ -490,7 +490,7 @@ static int gfx_viewer_render(int scroll_y)
             for (int row = 0; row < ALIEN_ATLAS_H; row++) {
                 int dst_y = sy + row;
                 if (dst_y < GFX_HEADER_H || dst_y >= 256) continue;
-                const UBYTE *src = alien + (size_t)(row * ALIEN_ATLAS_W);
+                const UBYTE *src = alien + ((size_t)row * ALIEN_ATLAS_W);
                 video_blit(src, ALIEN_ATLAS_W, 0, dst_y, ALIEN_ATLAS_W, 1, -1);
             }
         }

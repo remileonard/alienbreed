@@ -65,7 +65,7 @@ static void draw_screen_weapons(int pidx, Font *font,
     if (wpic && cur_wpic_idx >= 0 && cur_wpic_idx < 6) {
         int src_x = k_wpic_col_px[cur_wpic_idx];
         int src_y = k_wpic_row_px[cur_wpic_idx];
-        const UBYTE *src = wpic + (size_t)(src_y * INTEX_WEAPON_ATLAS_W + src_x);
+        const UBYTE *src = wpic + ((size_t)src_y * INTEX_WEAPON_ATLAS_W + (size_t)src_x);
         video_blit(src, INTEX_WEAPON_ATLAS_W, 8, 30, INTEX_WEAPON_IMG_W, INTEX_WEAPON_IMG_H, 0);
     }
 
@@ -131,8 +131,8 @@ void intex_run(int player_idx)
     if (fw) {
         fread(&wpic.w, 4, 1, fw); fread(&wpic.h, 4, 1, fw);
         if (wpic.w == INTEX_WEAPON_ATLAS_W && wpic.h == INTEX_WEAPON_ATLAS_H) {
-            wpic.pixels = (UBYTE *)malloc((size_t)(wpic.w * wpic.h));
-            if (wpic.pixels) fread(wpic.pixels, 1, (size_t)(wpic.w * wpic.h), fw);
+            wpic.pixels = (UBYTE *)malloc((size_t)wpic.w * (size_t)wpic.h);
+            if (wpic.pixels) fread(wpic.pixels, 1, (size_t)wpic.w * (size_t)wpic.h, fw);
         }
         fclose(fw);
     }
