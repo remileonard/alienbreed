@@ -995,6 +995,17 @@ void intex_run(int player_idx)
 
     intex_startup_seq(&bg, &font);
 
+    /* Play "Welcome to INTEX System" voice pair.
+     * Ref: welcome_sample_struct in intex.asm (right after display_intex_startup_seq):
+     *   dc.w 1,VOICE_WELCOME_TO,3  → play VOICE_WELCOME_TO immediately
+     *   dc.l welcome_sample_struct_2
+     *   dc.w 18,VOICE_INTEX_SYSTEM,3 → play VOICE_INTEX_SYSTEM after 18 VBLs (~360 ms)
+     *   dc.l 0
+     * The 18-frame gap is replicated here with intex_wait_frames. */
+    audio_play_sample(VOICE_WELCOME_TO);
+    for (int i = 0; i < 18; i++) { timer_begin_frame(); }
+    audio_play_sample(VOICE_INTEX_SYSTEM);
+
     /* ------------------------------------------------------------------
      * Main menu loop
      * Ref: main_loop, text_main_menu (dc.w 0,32) @ intex.asm
