@@ -908,13 +908,12 @@ void intex_run(int player_idx)
      * Colors 0-13: linear green ramp from background_pic palette ($000-$0D0).
      * Color 14:    $FFF (bright highlight, from background_pic palette).
      * Color 15:    TEXT color.  In the original the copper raster raises this
-     *              dynamically per scanline: $0D0 at y=0, $2F2 at y=48, $6F6
-     *              at y=72, $4F4 at y=94.  The main menu items appear between
-     *              y=68 and y=128 (bitplane coordinates) where COLOR15 is $2F2
-     *              to $6F6 — substantially brighter than the background maximum
-     *              of $0D0.  Use $3F3 as a static representative value that
-     *              matches the mid-range raster and makes text visibly glow.
-     * Colors 16-31: static green gradient from copper list (upper bitplane 4).
+     *              dynamically per scanline: $0D0 at y=44, $2F2 at y=92, $6F6
+     *              at y=116, $4F4 at y=138 (copper raster in intex.asm).
+     *              The C port uses static $3F3 (bright green, clearly visible
+     *              against the $0D0 background maximum) for all menu rows.
+     * Color 31:    reserved for the pulsing caret block (updated each frame).
+     * Colors 16-30: static green gradient from copper list (upper bitplane 4).
      */
     static const UWORD k_intex_pal[] = {
         0x000, 0x010, 0x020, 0x030, 0x040, 0x050, 0x060, 0x070,
@@ -958,32 +957,55 @@ void intex_run(int player_idx)
         NULL
     };
 
+    /*
+     * Pulsing caret colour table — matches caret_color_table in intex.asm:
+     *   $040→$0F0→$040, advances every 2 VBL (slowdown_caret_flash=2).
+     * Palette entry 31 is dedicated to the caret and updated each frame.
+     */
+    static const UWORD k_caret_colors[] = {
+        0x040, 0x050, 0x060, 0x070, 0x080, 0x090, 0x0A0, 0x0B0,
+        0x0C0, 0x0D0, 0x0E0, 0x0F0, 0x0E0, 0x0D0, 0x0C0, 0x0B0,
+        0x0A0, 0x090, 0x080, 0x070, 0x060, 0x050, 0x040
+    };
+    enum { CARET_N_COLORS = 23, CARET_PAL_IDX = 31 };
+
     int menu_choice = 0;
     int debounce    = 0;
     int running     = 1;
+    int caret_slow  = 0;
+    int caret_idx   = 0;
 
     while (running) {
         timer_begin_frame();
         input_poll();
         if (g_quit_requested) break;
 
+        /* Advance pulsing caret colour every 2 frames (ref: slowdown_caret_flash=2) */
+        if (++caret_slow >= 2) {
+            caret_slow = 0;
+            caret_idx  = (caret_idx + 1) % CARET_N_COLORS;
+        }
+        video_set_palette_entry(CARET_PAL_IDX, k_caret_colors[caret_idx]);
+
         video_clear();
         if (bg.pixels)
             video_blit(bg.pixels, bg.w, 0, 0, bg.w, bg.h, -1);
 
-        /* Draw all non-selected lines first */
+        /* Draw ALL menu lines with the same text colour (no per-line highlight).
+         * Ref: display_text in intex.asm — every line uses the same blitter op;
+         * the cursor position is set separately by disp_caret_in_menu. */
         for (int i = 0; k_menu_text[i]; i++) {
-            if (i != 3 + menu_choice) {
-                TextCtx ctx;
-                intex_init_ctx(&ctx, &font,
-                                    0, 32 + i * MENU_LINE_H);
-                typewriter_display(&ctx, k_menu_text[i]);
-            }
+            TextCtx ctx;
+            intex_init_ctx(&ctx, &font, 0, 32 + i * MENU_LINE_H);
+            typewriter_display(&ctx, k_menu_text[i]);
         }
-        /* Highlight selected line */
+
+        /* Draw pulsing caret block at selected item.
+         * Ref: disp_caret_in_menu: x=48, y=68+choice*12;
+         *      caret_pic: %1111111100000000 × 11 rows → 8 px wide, 11 px tall. */
         {
             int cy = MENU_CARET_Y0 + menu_choice * MENU_LINE_H;
-            intex_highlight_line(&font, 0, cy, k_menu_text[3 + menu_choice], 8);
+            video_fill_rect(48, cy, 8, 11, CARET_PAL_IDX);
         }
 
         video_present();

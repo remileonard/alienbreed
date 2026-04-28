@@ -1,1 +1,0 @@
-/usr/bin/cc -Wl,--dependency-file=CMakeFiles/convert_audio.dir/link.d CMakeFiles/convert_audio.dir/tools/convert_audio.c.o -o convert_audio
