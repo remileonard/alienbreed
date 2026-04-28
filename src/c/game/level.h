@@ -50,6 +50,8 @@ extern int  g_map_overview_on;
 extern int  g_game_running_flag;
 extern int  g_exit_unlocked;         /* 1 = exit tile is passable (Ref: main.asm#L5189) */
 extern int  g_boss_active;           /* 1 while a boss encounter is in progress */
+/* When >= 0, jump to this level index at next level transition (enter_level_N_holocode in main.asm). */
+extern int  g_holocode_jump_level;
 
 /* Initialise level-specific variables (destruction timer, flags). */
 void level_init_variables(void);

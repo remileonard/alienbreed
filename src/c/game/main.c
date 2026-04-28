@@ -123,6 +123,14 @@ static void game_run(int num_players, int share_credits)
             break;
         }
 
+        /* Holocode jump: jump to a specific level (enter_level_N_holocode in main.asm).
+         * Credits are already set in intex_run() when the code was accepted. */
+        if (g_holocode_jump_level >= 0) {
+            level_idx = g_holocode_jump_level;
+            g_holocode_jump_level = -1;
+            continue;
+        }
+
         level_idx++;
     }
 

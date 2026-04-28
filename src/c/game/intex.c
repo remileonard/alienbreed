@@ -837,30 +837,235 @@ static void run_screen_radar(int pidx, Font *font, const IntexImg *bg)
  * Sub-screen: MISSION OBJECTIVE
  * Ref: scr_briefing @ intex.asm#L627-L634 —
  *   copy_bkgnd_pic; display briefing_text; wait_joy_button; rts.
- * briefing_text is a pointer set from main game (level briefing string).
- * In C port: k_level_defs[g_cur_level].briefing_text.
+ * briefing_text (a3) is the text_briefing_level_N block from main.asm#L16227.
+ * Each block: dc.w 8,40 (x=8,y=40) then lines terminated by dc.b -1.
  * ----------------------------------------------------------------------- */
+
+/* Verbatim from text_briefing_level_N in main.asm */
+static const char * const k_brief_lv1[] = {
+    "SHUTTLE BAY TWO, DECK ONE.      ",
+    " ",
+    "UPON LEAVING YOUR CRAFT, PERFORM",
+    "A RECCE OF THE IMMEDIATE AREA.  ",
+    "                                ",
+    "LOCATE DECK LIFT THAT LEADS TO  ",
+    "POWER SUB SYSTEM AND PROCEED    ",
+    "FURTHER INTO THE HEART OF THE   ",
+    "STATION. RADAR REPORTS LITTLE   ",
+    "MOVEMENT, BUT SOME NEAR VENTS.  ",
+    "                                ",
+    "CONTROL ADVISES MAXIMUM USE OF  ",
+    "ANY AVAILABLE RESOURCES LEFT BY ",
+    "THE STATIONS PREVIOUS OCCUPANTS.",
+    NULL
+};
+static const char * const k_brief_lv2[] = {
+    "POWER SUBSYSTEM, DECK TWO.      ",
+    " ",
+    "INITIAL PRIORITY IS TO NEGATE   ",
+    "POSSIBILITIES OF FURTHER ATTACK ",
+    "BY BLOWING THE TOP TWO DECKS.   ",
+    "                                ",
+    "TAKE OUT THE FOUR POWER DOMES   ",
+    "AND GET OUT OF THERE BEFORE THE ",
+    "BLAST HITS. ONCE UNSTABLE, YOU  ",
+    "HAVE SIXTY SECONDS TO FLEE TO   ",
+    "THE NEXT LEVEL VIA THE DECK LIFT",
+    "                                ",
+    "RADAR INDICATES MOVEMENT        ",
+    "DIRECTLY BELOW CURRENT POSITION.",
+    " ",
+    "ENTER CODE 55955 TO RESTART HERE",
+    NULL
+};
+static const char * const k_brief_lv3[] = {
+    "SECURITY ZONE, DECK THREE.      ",
+    " ",
+    "UNFORTUNATELY THE BLAST FROM THE",
+    "POWER SYSTEM MELTDOWN HAS SPREAD",
+    "INTO THIS LEVEL AND IF IT IS NOT",
+    "STOPPED, THE WHOLE STATION COULD",
+    "BLOW. IMMEDIATE CLOSURE OF ALL  ",
+    "FIRE DOORS REMAINS A PRIORITY   ",
+    "                                ",
+    "ONCE ACHIEVED, RETURN TO THE DECK",
+    "LIFT AND AWAIT INSTRUCTIONS     ",
+    "                                ",
+    "RADAR MALFUNCTIONING.. ERRATIC  ",
+    "READINGS.. ADVISE CAUTION...    ",
+    NULL
+};
+static const char * const k_brief_lv4[] = {
+    "OVAL ZONE. DECK FOUR.           ",
+    " ",
+    "THE THREAT FROM FIRE AND BLAST  ",
+    "HAS RECEDED SOMEWHAT, GIVING YOU",
+    "CHANCE TO GATHER YOUR THOUGHTS..",
+    "                                ",
+    "INFORMATION SUGGESTS THAT THE   ",
+    "NEXT DECK HARBOURS A MASSIVE    ",
+    "ALIEN PRESENCE AND IT IS THERE  ",
+    "THAT YOUR NEXT MISSION AWAITS.. ",
+    "PROCEED WITH ALL SPEED TO THE   ",
+    "ENGINEERING DECK.               ",
+    " ",
+    "ENTER CODE 48361 TO RESTART HERE",
+    NULL
+};
+static const char * const k_brief_lv5[] = {
+    "ENGINEERING ZONE ONE. DECK FIVE.",
+    " ",
+    "AN EVIL SMELL FILLS THE AIR AS  ",
+    "YOU ARRIVE IN THE FIRST OF A    ",
+    "SERIES OF ENGINEERING DECKS WHICH",
+    "COMPRISE THE MAJOR SECTION OF THE",
+    "WHOLE STATION.                  ",
+    "                                ",
+    "HQ ARE PLEASED TO INFORM YOU THAT",
+    "THERES SOMETHING BIG IN THERE.. ",
+    "                                ",
+    "TERMINATE WHATEVER YOU FIND AND ",
+    "MAKE YOUR WAY DOWN TO DECK SIX..",
+    NULL
+};
+static const char * const k_brief_lv6[] = {
+    "ENGINEERING SUB SYSTEM. DECK SIX.",
+    " ",
+    "THE CREATURE YOU HAVE JUST SLAIN",
+    "IS NOW REPORTED TO BE JUST ONE  ",
+    "OF A NUMBER LOCATED IN THIS     ",
+    "STATION. CONTROL ASSUME THE QUEEN",
+    "ALIEN TO BE LURKING SOMEWHERE    ",
+    "QUIET AND WELL GUARDED, SOMEWHERE",
+    "DEEP IN THE HEART OF THE STATION.",
+    "                                 ",
+    "MAKE YOUR WAY TO DECK SEVEN,     ",
+    "THE ENGINEERING MAIN DECK... ",
+    " ",
+    "ENTER CODE 63556 TO RESTART HERE",
+    NULL
+};
+static const char * const k_brief_lv7[] = {
+    "ENGINEERING. DECK SEVEN.         ",
+    " ",
+    "ANOTHER LARGE PRESENCE SHOWS     ",
+    "ON SCANNING EQUIPMENT, IT MIGHT  ",
+    "BE THE QUEEN ALIEN.. IF IT IS,   ",
+    "THEN PROCEED WITH CAUTION..      ",
+    "                                 ",
+    "ISOLATE AND TERMINATE ANYTHING   ",
+    "YOU SEE MOVING.. SURVIVORS THIS  ",
+    "DEEP IN THE STATION ARE UNLIKELY.",
+    NULL
+};
+static const char * const k_brief_lv8[] = {
+    "POWERMECH SYSTEMS. DECK EIGHT.  ",
+    " ",
+    "THE DECK LIFT TO LOWER LEVELS HAS",
+    "BEEN DAMAGED AND TRAVEL WILL HAVE",
+    "TO BE RESTRICTED TO THE MAZE LIKE",
+    "CONFINES OF THE ENGINEERING DUCTS",
+    "                                ",
+    "FIND DUCT THREE AND QUICKLY MAKE",
+    "YOUR WAY DOWN TO THE CENTRAL CORE",
+    "                                ",
+    "REMOTE LOCATION SCANNER ",
+    "HIGHLY RECOMMENDED.. ",
+    " ",
+    "ENTER CODE 86723 TO RESTART HERE",
+    NULL
+};
+static const char * const k_brief_lv9[] = {
+    "ENGINEERING SYSTEM SHAFT WHICH",
+    "LINKS DECK EIGHT AND REACTOR CORE",
+    " ",
+    "QUICKLY LOCATE AND USE GRILL LIFT",
+    "THAT WILL TAKE YOU TO THE CENTRAL",
+    "REACTOR CORE. SECURITY SYSTEMS  ",
+    "HAVE BEEN TRIGGERED AND YOU ARE ",
+    "ADVISED TO MOVE QUICKLY.        ",
+    "                                ",
+    "FORTUNATELY THERE SEEMS TO BE NO",
+    "MOVEMENT IN THE SHAFT COMPLEX..",
+    "NOT THAT IT MAKES THE TASK ANY ",
+    "EASIER THOUGH..",
+    NULL
+};
+static const char * const k_brief_lv10[] = {
+    "REACTOR CORE. DECK TEN.",
+    " ",
+    "YOUR PRIORITY IS TO DEACTIVATE",
+    "THE CENTRAL CORE REACTOR IN ZONE",
+    "SIX. THIS WILL PREPARE THE WHOLE",
+    "STATION FOR MELTDOWN AND PROVIDE",
+    "AN ESCAPE IN THE SHUTTLE, A JUST",
+    "VICTORY AGAINST THE RENEGADE ALIEN",
+    "FORCE..",
+    "      ",
+    "MAKE FOR THE SHUTTLE CRAFT LIFT",
+    "WHEN CORE MELTDOWN INITIATED.",
+    " ",
+    "ENTER CODE 25194 TO RESTART HERE",
+    NULL
+};
+static const char * const k_brief_lv11[] = {
+    "LOCATION UNKNOWN.. ",
+    " ",
+    "A LIFT MALFUNCTION HAS LEFT YOU",
+    "IN NEAR DARKNESS.. BLUE EYES ARE",
+    "COMING AT YOU FROM ALL DIRECTIONS",
+    "AND YOUR ONLY HOPE IS TO MOVE",
+    "QUICKLY AND TRUST YOUR LAZER..",
+    " ",
+    "ESCAPE FROM THIS LIVING HELL IS",
+    "THE ONLY OPTION. IT LOOKS LIKE",
+    "THIS WAS SOME SORT OF SECURITY",
+    "ZONE, SO CAUTION IS ADVISED...",
+    NULL
+};
+static const char * const k_brief_lv12[] = {
+    "THE HATCHERY..",
+    " ",
+    "YOU ALMOST RETCH AS A FOUL STENCH",
+    "HITS THE BACK OF YOUR THROAT, ",
+    "YOU REALISE EXACTLY WHO IS DOWN",
+    "HERE.. ",
+    "                                ",
+    "THERE ARE EGGS EVERYWHERE AND",
+    "SLIME COVERS THE BIOFORM WALLS..",
+    " ",
+    "YOUR MISSION IS SIMPLE, KILL",
+    "THE QUEEN AND GET THE HELL OUT",
+    "BEFORE THE STATION GOES UP..",
+    NULL
+};
+
+static const char * const * const k_mission_texts[12] = {
+    k_brief_lv1,  k_brief_lv2,  k_brief_lv3,  k_brief_lv4,
+    k_brief_lv5,  k_brief_lv6,  k_brief_lv7,  k_brief_lv8,
+    k_brief_lv9,  k_brief_lv10, k_brief_lv11, k_brief_lv12,
+};
+
 static void run_screen_briefing(Font *font, const IntexImg *bg)
 {
-    const char *brief = (g_cur_level >= 0 && g_cur_level < NUM_LEVELS)
-                        ? k_level_defs[g_cur_level].briefing_text
-                        : "NO MISSION DATA AVAILABLE.";
-
+    static const char * const k_no_data[] = {
+        "NO MISSION DATA AVAILABLE.",
+        NULL
+    };
     static const char * const k_hdr[] = {
-        "            MISSION OBJECTIVE           ",
+        "           MISSION OBJECTIVE            ",
         "                                        ",
         NULL
     };
+    const char * const *lines = (g_cur_level >= 0 && g_cur_level < NUM_LEVELS)
+                                ? k_mission_texts[g_cur_level] : k_no_data;
 
     video_clear();
     if (bg->pixels)
         video_blit(bg->pixels, bg->w, 0, 0, bg->w, bg->h, -1);
-    intex_display_lines(font, 0, 60, k_hdr);
-    {
-        TextCtx ctx;
-        intex_init_ctx(&ctx, font, 0, 84);
-        typewriter_display(&ctx, brief);
-    }
+    /* Header at y=24, text body at x=8, y=40 — matching dc.w 8,40 in ASM */
+    intex_display_lines(font, 0, 24, k_hdr);
+    intex_display_lines(font, 8, 40, lines);
     video_present();
 
     int running = 1;
@@ -872,6 +1077,602 @@ static void run_screen_briefing(Font *font, const IntexImg *bg)
         UWORD old = g_player1_old_input;
         if (((inp & INPUT_FIRE1) && !(old & INPUT_FIRE1))
             || g_key_pressed == KEY_ESC) {
+            running = 0;
+        }
+    }
+}
+
+/* -----------------------------------------------------------------------
+ * Sub-screen: ENTER HOLOCODE
+ * Ref: enter_holocode @ intex.asm#L357-L413
+ *   5-digit code; UP/DOWN cycles digit; LEFT/RIGHT moves cursor; FIRE confirms.
+ *   Caret x = cur_pos*8 + 128, y = 132 (disp_caret_holocode in intex.asm#L421).
+ *   Codes from main.asm#L8299-L8303:
+ *     55955 → level 2 (idx 1),  500000 cr
+ *     48361 → level 4 (idx 3), 1000000 cr
+ *     63556 → level 6 (idx 5), 1500000 cr
+ *     86723 → level 8 (idx 7), 2000000 cr
+ *     25194 → level 10(idx 9), 2500000 cr
+ * ----------------------------------------------------------------------- */
+
+typedef struct { const char *code; int level_idx; long credits; } HoloEntry;
+static const HoloEntry k_holocodes[] = {
+    { "55955",  1,  500000L },
+    { "48361",  3, 1000000L },
+    { "63556",  5, 1500000L },
+    { "86723",  7, 2000000L },
+    { "25194",  9, 2500000L },
+    { NULL,    -1,       0L }
+};
+
+/* Persistent across INTEX sessions (cur_holocode dc.b '00000' in intex.asm) */
+static char s_holocode[6] = { '0','0','0','0','0','\0' };
+
+static void run_screen_enter_holocode(Font *font, const IntexImg *bg)
+{
+    int pos     = 0;   /* digit cursor (0-4) */
+    int running = 1;
+    int debounce = 8;
+    int caret_slow = 0;
+    int caret_idx  = 0;
+
+    while (running) {
+        timer_begin_frame();
+        input_poll();
+        if (g_quit_requested) return;
+
+        /* Advance pulsing caret */
+        if (++caret_slow >= 2) {
+            caret_slow = 0;
+            caret_idx  = (caret_idx + 1) % CARET_N_COLORS;
+        }
+        video_set_palette_entry(CARET_PAL_IDX, k_caret_colors[caret_idx]);
+
+        video_clear();
+        if (bg->pixels)
+            video_blit(bg->pixels, bg->w, 0, 0, bg->w, bg->h, -1);
+
+        /* Header: text_enter_holocode dc.w 0,96 in intex.asm#L1641 */
+        static const char * const k_hdr[] = {
+            "            ENTER HOLOCODE              ",
+            "                                        ",
+            NULL
+        };
+        intex_display_lines(font, 0, 96, k_hdr);
+
+        /* Current code display: row at y=120 ("                00000") */
+        {
+            char buf[41];
+            snprintf(buf, sizeof(buf), "                %.5s", s_holocode);
+            TextCtx ctx;
+            intex_init_ctx(&ctx, font, 0, 120);
+            typewriter_display(&ctx, buf);
+        }
+
+        /* Instructions below the code */
+        {
+            static const char * const k_instr[] = {
+                "                                        ",
+                "                                        ",
+                " UP AND DOWN INCREASES/DECREASES DIGIT  ",
+                "      LEFT AND RIGHT MOVES CURSOR       ",
+                "        PRESS BUTTON WHEN READY         ",
+                NULL
+            };
+            intex_display_lines(font, 0, 132, k_instr);
+        }
+
+        /* Pulsing digit caret: x = pos*8 + 128, y = 132 (disp_caret_holocode) */
+        video_fill_rect(pos * 8 + 128, 132, 8, 11, CARET_PAL_IDX);
+
+        video_present();
+
+        if (debounce > 0) { debounce--; continue; }
+
+        UWORD inp = g_player1_input;
+        UWORD old = g_player1_old_input;
+
+        /* UP: increment current digit (wrap 9→0). Ref: cmp.b #'9',d2 / bne .max_digit */
+        if ((inp & INPUT_UP) && !(old & INPUT_UP)) {
+            s_holocode[pos]++;
+            if (s_holocode[pos] > '9') s_holocode[pos] = '0';
+            audio_play_sample(SAMPLE_CARET_MOVE);
+            debounce = 8;
+        }
+        /* DOWN: decrement current digit (wrap 0→9). Ref: cmp.b #'0',d2 / bne .min_digit */
+        else if ((inp & INPUT_DOWN) && !(old & INPUT_DOWN)) {
+            s_holocode[pos]--;
+            if (s_holocode[pos] < '0') s_holocode[pos] = '9';
+            audio_play_sample(SAMPLE_CARET_MOVE);
+            debounce = 8;
+        }
+        /* LEFT: move cursor left (tst.w d1; beq .wait). Ref: cmp.w #$300,d0 */
+        else if ((inp & INPUT_LEFT) && !(old & INPUT_LEFT)) {
+            if (pos > 0) { pos--; audio_play_sample(SAMPLE_CARET_MOVE); }
+            debounce = 8;
+        }
+        /* RIGHT: move cursor right (cmp.w #4,d1; beq .wait). Ref: cmp.w #3,d0 */
+        else if ((inp & INPUT_RIGHT) && !(old & INPUT_RIGHT)) {
+            if (pos < 4) { pos++; audio_play_sample(SAMPLE_CARET_MOVE); }
+            debounce = 8;
+        }
+        /* FIRE: confirm code, check against holocode table, then exit to main menu */
+        else if (((inp & INPUT_FIRE1) && !(old & INPUT_FIRE1))
+                 || g_key_pressed == KEY_RETURN) {
+            audio_play_sample(SAMPLE_CARET_MOVE);
+            /* Check against known codes (input_table in main.asm#L8292) */
+            for (int i = 0; k_holocodes[i].code; i++) {
+                if (strncmp(s_holocode, k_holocodes[i].code, 5) == 0) {
+                    int tgt = k_holocodes[i].level_idx;
+                    if (tgt != g_cur_level) {
+                        /* Set level jump and credit award (enter_level_N_holocode) */
+                        g_holocode_jump_level = tgt;
+                        for (int p = 0; p < MAX_PLAYERS; p++)
+                            g_players[p].credits = (LONG)k_holocodes[i].credits;
+                        /* Trigger level exit so game_run() picks up the jump */
+                        g_flag_end_level = 1;
+                    }
+                    break;
+                }
+            }
+            running = 0;
+        }
+        else if (g_key_pressed == KEY_ESC) {
+            running = 0;
+        }
+    }
+}
+
+/* -----------------------------------------------------------------------
+ * Sub-screen: INFO BASE
+ * Ref: scr_infos @ intex.asm#L114-L165
+ *   19 pages of text. RIGHT → next page. LEFT → previous page. FIRE → exit.
+ *   Pages defined as text_infos_page_N in intex.asm#L1653-L2031.
+ *   All pages use dc.w 0,24 (x=0, y=24).
+ * ----------------------------------------------------------------------- */
+
+static const char * const k_info_p1[] = {
+    "      I N T E X  I N F O  B A S E       ",
+    "                                        ",
+    " ON LINE HELP AND INFORMATION DATABASE. ",
+    "                                        ",
+    "                                        ",
+    "    INTEX ARE PLEASED TO SUPPLY ALL     ",
+    "   STATION OFFICERS ACCESS TO CURRENT   ",
+    "         ARCHIVED INFORMATION           ",
+    "                                        ",
+    "                                        ",
+    "  CONTAINED DATA FILES DO NOT CONFLICT  ",
+    "  WITH CURRENT HQ SECURITY REGULATIONS  ",
+    "  ALL RECORDS CONSIDERED LOW PRIORITY.  ",
+    "                                        ",
+    " NEXT PAGE:      MOVE JOYSTICK RIGHT.   ",
+    " PREVIOUS PAGE:  FIRST PAGE...          ",
+    " MAIN MENU:      PRESS FIREBUTTON.      ",
+    NULL
+};
+static const char * const k_info_p2[] = {
+    " INTEX SPACE RESEARCH STATION ISRC 4.   ",
+    "                                        ",
+    " THIS STATION IS A BASE FOR PREPATORY   ",
+    " SCIENCE AND SECURITY EXPERIMENTS.      ",
+    "                                        ",
+    "                                        ",
+    " STATION MANNING LEVEL...      175      ",
+    " STATION DECKS...........        9      ",
+    " STATION SUB LEVELS......        2      ",
+    " STATION SECURITY........     HIGH      ",
+    " CURRENT STATUS..........  UNKNOWN      ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    " NEXT PAGE:      MOVE JOYSTICK RIGHT.   ",
+    " PREVIOUS PAGE:  MOVE JOYSTICK LEFT.    ",
+    " MAIN MENU:      PRESS FIREBUTTON.      ",
+    NULL
+};
+static const char * const k_info_p3[] = {
+    " INTEX TRANSPORTATION HOLO CODES..      ",
+    "                                        ",
+    " AT LEAST FIVE HOLO CODES EXIST THAT    ",
+    " WILL TRANSPORT A TEAM OF TWO OFFICERS  ",
+    " TO A SPECIFIC DECK OF THE STATION      ",
+    " WITHIN AN INSTANT. THESE WERE PART OF  ",
+    " THE HOLOGENICS PROGRAM BEING DEVELOPED ",
+    " BY RESEARCHERS ON THIS SPACE STATION.  ",
+    " ONCE YOU KNOW THE HOLO CODES, YOU      ",
+    " CAN ENTER THEM AT THE MAIN MENU OF     ",
+    " ANY INTEX TERMINAL AND THEN EXIT..     ",
+    " WHEREBY YOU WILL BE QUICKLY            ",
+    " TRANSPORTED TO YOUR DESTINATION.       ",
+    "                                        ",
+    " NEXT PAGE:      MOVE JOYSTICK RIGHT.   ",
+    " PREVIOUS PAGE:  MOVE JOYSTICK LEFT.    ",
+    " MAIN MENU:      PRESS FIREBUTTON.      ",
+    NULL
+};
+static const char * const k_info_p4[] = {
+    " STATION FACILITIES INVENTORY..         ",
+    "                                        ",
+    "                                        ",
+    " A SECTION NOW FOLLOWS EXPLAINING SOME  ",
+    " OF THE VARIOUS FACILITIES FOUND IN     ",
+    " THIS MODEL OF SPACE RESEARCH STATION.  ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    " NEXT PAGE:      MOVE JOYSTICK RIGHT.   ",
+    " PREVIOUS PAGE:  MOVE JOYSTICK LEFT.    ",
+    " MAIN MENU:      PRESS FIREBUTTON.      ",
+    NULL
+};
+static const char * const k_info_p5[] = {
+    " SLIDE DOOR.                            ",
+    "                                        ",
+    " SECURITY....... REQUIRES PASS KEY      ",
+    "                 CAN BE SHOT OPEN       ",
+    "                                        ",
+    " SLIDE DOORS LITTER THE ENTIRE STATION  ",
+    " AND A LONG LINE MAY GUARD THE ENTRANCE ",
+    " TO A HIGH SECURITY ZONE. ALTHOUGH THEY ",
+    " CAN BE BLASTED OPEN, USING A LARGE     ",
+    " AMOUNT OF AMMO, THEY ARE BEST OPENED   ",
+    " USING A PASS KEY, ESPECIALLY IF YOU    ",
+    " ARE IN A HURRY.                        ",
+    "                                        ",
+    "                                        ",
+    " NEXT PAGE:      MOVE JOYSTICK RIGHT.   ",
+    " PREVIOUS PAGE:  MOVE JOYSTICK LEFT.    ",
+    " MAIN MENU:      PRESS FIREBUTTON.      ",
+    NULL
+};
+static const char * const k_info_p6[] = {
+    " FIRE DOOR.                             ",
+    "                                        ",
+    " SECURITY....... ONCE SHUT, STAYS SHUT. ",
+    "                 SHOOT GREEN SWITCHES   ",
+    "                 TO CLOSE FIRE DOOR.    ",
+    "                                        ",
+    " FIRE DOORS BLOCK STATION TRAFFIC ON    ",
+    " A GIVEN DECK. FIRST DEVISED AS A       ",
+    " SAFETY AID, FIRE DOORS SOON BECAME     ",
+    " MORE OF A BURDEN DUE TO THEIR RATHER   ",
+    " AWKWARD OPERATION. MANY TEAMS OF       ",
+    " OFFICERS HAVE BECOME SEPERATED AT      ",
+    " FIRE DOORS AND INTEX ADVISE CAUTION.   ",
+    "                                        ",
+    " NEXT PAGE:      MOVE JOYSTICK RIGHT.   ",
+    " PREVIOUS PAGE:  MOVE JOYSTICK LEFT.    ",
+    " MAIN MENU:      PRESS FIREBUTTON.      ",
+    NULL
+};
+static const char * const k_info_p7[] = {
+    " LASER DOOR.                            ",
+    "                                        ",
+    " SECURITY....... ALLOWS PASSAGE IN ONE  ",
+    "                 DIRECTION ONLY.        ",
+    "                                        ",
+    " LASER DOORS ARE LOCATED IN AREAS WHERE ",
+    " SECURITY DICTATED THAT PASSAGE SHOULD  ",
+    " ONLY BE ALLOWED IN CERTAIN DIRECTIONS. ",
+    "                                        ",
+    " ATTEMPTING TO MOVE THROUGH THE DOOR    ",
+    " IN THE WRONG DIRECTION RESULTS IN A    ",
+    " LASER CHARGE TO YOUR SPINE. VERY NASTY ",
+    "                                        ",
+    "                                        ",
+    " NEXT PAGE:      MOVE JOYSTICK RIGHT.   ",
+    " PREVIOUS PAGE:  MOVE JOYSTICK LEFT.    ",
+    " MAIN MENU:      PRESS FIREBUTTON.      ",
+    NULL
+};
+static const char * const k_info_p8[] = {
+    " AIR SHAFTS, DUCTS AND VENTS.           ",
+    "                                        ",
+    " SECURITY....... VERY LOW               ",
+    "                                        ",
+    " THE STATION IS LITTERED WITH VARIOUS   ",
+    " DUCTS AND VENTS WHICH ARE USUALLY USED ",
+    " FOR THE DUMPING OF STATION WASTE INTO  ",
+    " DEEP SPACE. BECAUSE OF THIS, WE THINK  ",
+    " THAT THERE IS NO NEED TO WARN YOU THAT ",
+    " TRYING TO TRAVEL THROUGH ONE IS INDEED ",
+    " ILL ADVISED..                          ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    " NEXT PAGE:      MOVE JOYSTICK RIGHT.   ",
+    " PREVIOUS PAGE:  MOVE JOYSTICK LEFT.    ",
+    " MAIN MENU:      PRESS FIREBUTTON.      ",
+    NULL
+};
+static const char * const k_info_p9[] = {
+    " REFUGE IRIS.                           ",
+    "                                        ",
+    " SECURITY........ VERY LOW              ",
+    "                                        ",
+    " LIKE THE VENTS AND SHAFTS, THE REFUGE  ",
+    " IRIS IS ANOTHER PORTHOLE INTO DEEP     ",
+    " SPACE WHERE BYPRODUCTS AND WASTE IS    ",
+    " REGULARLY FED.                         ",
+    "                                        ",
+    " AVOID ENTERING ANY OPEN IRISES, UNLESS ",
+    " OF COURSE, YOU WANT A SHORT LIFE.      ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    " NEXT PAGE:      MOVE JOYSTICK RIGHT.   ",
+    " PREVIOUS PAGE:  MOVE JOYSTICK LEFT.    ",
+    " MAIN MENU:      PRESS FIREBUTTON.      ",
+    NULL
+};
+static const char * const k_info_p10[] = {
+    " ACID VAT.                              ",
+    "                                        ",
+    " SECURITY........ NOMINAL               ",
+    "                                        ",
+    " THE SUB FLOOR ACID VATS CONTAIN HIGH   ",
+    " POWER CYBERPHORIC ACID AND WILL DO     ",
+    " LARGE AMOUNTS OF DAMAGE TO STANDARD    ",
+    " ISSUE FEDERATION OUTFITS. AVOID.       ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    " NEXT PAGE:      MOVE JOYSTICK RIGHT.   ",
+    " PREVIOUS PAGE:  MOVE JOYSTICK LEFT.    ",
+    " MAIN MENU:      PRESS FIREBUTTON.      ",
+    NULL
+};
+static const char * const k_info_p11[] = {
+    " REMOTE LOCATION SCANNER.               ",
+    "                                        ",
+    " THIS HANDY TOOL CAN BE BOUGHT VIA THE  ",
+    " TOOLS OPTION AT INTEX TERMINAL AND     ",
+    " SENT VIA A MATTER TRANSLOCATOR UNIT.   ",
+    "                                        ",
+    " HIGHLY USEFUL, THIS HAND MAP GIVES AN  ",
+    " OVERVIEW OF THE CURRENT STATION LEVEL  ",
+    " PROVIDING IT LOCKS ONTO A NEARBY       ",
+    " INTEX CONSOLE.                         ",
+    " ALTHOUGH NEVER STANDARD ISSUE, IT IS   ",
+    " THE NORM FOR ALL OFFICERS ON THIS BASE ",
+    " TO CARRY SUCH A DEVICE.                ",
+    "                                        ",
+    " NEXT PAGE:      MOVE JOYSTICK RIGHT.   ",
+    " PREVIOUS PAGE:  MOVE JOYSTICK LEFT.    ",
+    " MAIN MENU:      PRESS FIREBUTTON.      ",
+    NULL
+};
+static const char * const k_info_p12[] = {
+    " ESCAPE SHUTTLE BAY.                    ",
+    "                                        ",
+    " LOCATION....... U N K N O W N          ",
+    "                                        ",
+    " AN ESCAPE SHUTTLE LIES IN WAIT FOR     ",
+    " UP TO TWO HIGH RANKING OFFICIALS. ITS  ",
+    " LOCATION HAS BEEN KEPT A CLOSE GUARDED ",
+    " SECRET AS MANY OF THE CREW HAVE TRIED  ",
+    " TO ESCAPE THE STATION IN RECENT YEARS, ",
+    " WHICH IS STRANGE CONSIDERING THAT THE  ",
+    " PLACE IS FAR FROM A PRISON OR SPECIAL  ",
+    " UNIT.                                  ",
+    "                                        ",
+    "                                        ",
+    " NEXT PAGE:      MOVE JOYSTICK RIGHT.   ",
+    " PREVIOUS PAGE:  MOVE JOYSTICK LEFT.    ",
+    " MAIN MENU:      PRESS FIREBUTTON.      ",
+    NULL
+};
+static const char * const k_info_p13[] = {
+    " CENTRAL CORE REACTOR.                  ",
+    "                                        ",
+    " THE KEY TO THE BURNING POWER OF THE    ",
+    " WHOLE CENTRE, THE CORE PROVIDES ALL    ",
+    " THE ENERGY REQUIRED FOR THE BASE TO    ",
+    " OPERATE. IT IS SURROUNDED BY HIGH      ",
+    " SECURITY AND LOCATED DEEP IN THE HEART ",
+    " OF THE STATION.                        ",
+    "                                        ",
+    " DESTRUCTION OF THE CENTRAL CORE WOULD  ",
+    " RESULT IN SOMEWHAT OF A MELTDOWN, ONE  ",
+    " MEAN EXPLOSION AND A RATHER LARGE BANG ",
+    "                                        ",
+    "                                        ",
+    " NEXT PAGE:      MOVE JOYSTICK RIGHT.   ",
+    " PREVIOUS PAGE:  MOVE JOYSTICK LEFT.    ",
+    " MAIN MENU:      PRESS FIREBUTTON.      ",
+    NULL
+};
+static const char * const k_info_p14[] = {
+    " CORE ENERGY REACTORS.                  ",
+    "                                        ",
+    " THE POWER DECK SUPPLIES AUXILLARY      ",
+    " POWER GENERATED BY FOUR SOLAR ENERGY   ",
+    " REACTORS LINKED TO EXTERNAL POWER      ",
+    " RADIATION EMINATING FROM THE NEARBY    ",
+    " GAS GIANT GIANOR.                      ",
+    "                                        ",
+    " THESE REACTORS PROVIDE THE BACK UP     ",
+    " POWER FOR STATION SUB SYSTEMS.         ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    " NEXT PAGE:      MOVE JOYSTICK RIGHT.   ",
+    " PREVIOUS PAGE:  MOVE JOYSTICK LEFT.    ",
+    " MAIN MENU:      PRESS FIREBUTTON.      ",
+    NULL
+};
+static const char * const k_info_p15[] = {
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "           D A T A   E N D S            ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    " NEXT PAGE:      MOVE JOYSTICK RIGHT.   ",
+    " PREVIOUS PAGE:  MOVE JOYSTICK LEFT.    ",
+    " MAIN MENU:      PRESS FIREBUTTON.      ",
+    NULL
+};
+static const char * const k_info_p16[] = {
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "       I N T E X  S O F T W A R E       ",
+    "                                        ",
+    "       SYSTEM SOFTWARE RELEASE 12       ",
+    "                                        ",
+    "                                        ",
+    "         SOFTWARE FOR SOFTHEADS         ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    " NEXT PAGE:      MOVE JOYSTICK RIGHT.   ",
+    " PREVIOUS PAGE:  MOVE JOYSTICK LEFT.    ",
+    " MAIN MENU:      PRESS FIREBUTTON.      ",
+    NULL
+};
+static const char * const k_info_p17[] = {
+    "         SYSTEM SOFTWARE CREDITS        ",
+    "                                        ",
+    " CODE........  ANDREAS TADIC            ",
+    "               PETER TULEBY             ",
+    "               STEFAN BOBERG            ",
+    " VISUALS.....  RICO HOLMES              ",
+    " AUDIO.......  ALLISTER BRIMBLE         ",
+    " VOCALS......  LYNETTE READE            ",
+    " MAPPING.....  RICO HOLMES, MARTYN BROWN",
+    " STORYBOARD..  MARTYN BROWN             ",
+    " PRODUCER....  MARTYN BROWN             ",
+    " TESTING.....  ANDY, CRAIG, MICK, KEITH ",
+    "               FRAZZE, KATRINA, TEAM17  ",
+    "                                        ",
+    " NEXT PAGE:      MOVE JOYSTICK RIGHT.   ",
+    " PREVIOUS PAGE:  MOVE JOYSTICK LEFT.    ",
+    " MAIN MENU:      PRESS FIREBUTTON.      ",
+    NULL
+};
+static const char * const k_info_p18[] = {
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "          D A T A  R E A L L Y          ",
+    "                                        ",
+    "             D O E S  E N D             ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    " NEXT PAGE:      MOVE JOYSTICK RIGHT.   ",
+    " PREVIOUS PAGE:  MOVE JOYSTICK LEFT.    ",
+    " MAIN MENU:      PRESS FIREBUTTON.      ",
+    NULL
+};
+static const char * const k_info_p19[] = {
+    "                                        ",
+    "                                        ",
+    "         C O M I N G   S O O N          ",
+    "                                        ",
+    "                                        ",
+    "    W I N D O W S  F O R  I N T E X     ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                        ",
+    "                                  32    ",
+    "     A L I E N  B R E E D  2   C D      ",
+    "                                        ",
+    "                                        ",
+    " NEXT PAGE:      LAST PAGE...           ",
+    " PREVIOUS PAGE:  MOVE JOYSTICK LEFT.    ",
+    " MAIN MENU:      PRESS FIREBUTTON.      ",
+    NULL
+};
+
+#define N_INFO_PAGES 19
+static const char * const * const k_info_pages[N_INFO_PAGES] = {
+    k_info_p1,  k_info_p2,  k_info_p3,  k_info_p4,  k_info_p5,
+    k_info_p6,  k_info_p7,  k_info_p8,  k_info_p9,  k_info_p10,
+    k_info_p11, k_info_p12, k_info_p13, k_info_p14, k_info_p15,
+    k_info_p16, k_info_p17, k_info_p18, k_info_p19,
+};
+
+static void run_screen_info_base(Font *font, const IntexImg *bg)
+{
+    /* ptr_text_info_table starts at text_info_table (index 0) in intex.asm#L125 */
+    int page    = 0;
+    int running = 1;
+    int debounce = 8;
+    int caret_slow = 0;
+    int caret_idx  = 0;
+
+    while (running) {
+        timer_begin_frame();
+        input_poll();
+        if (g_quit_requested) return;
+
+        /* Pulsing caret (used by the loop, but caret is hidden in scr_infos) */
+        if (++caret_slow >= 2) {
+            caret_slow = 0;
+            caret_idx  = (caret_idx + 1) % CARET_N_COLORS;
+        }
+        video_set_palette_entry(CARET_PAL_IDX, k_caret_colors[caret_idx]);
+
+        video_clear();
+        if (bg->pixels)
+            video_blit(bg->pixels, bg->w, 0, 0, bg->w, bg->h, -1);
+
+        /* display_text with text_infos_page_N (dc.w 0,24 → x=0, y=24) */
+        intex_display_lines(font, 0, 24, k_info_pages[page]);
+        video_present();
+
+        if (debounce > 0) { debounce--; continue; }
+
+        UWORD inp = g_player1_input;
+        UWORD old = g_player1_old_input;
+
+        /* RIGHT → next page (if not at last page). Ref: cmp.w #3,d0 in intex.asm#L149 */
+        if ((inp & INPUT_RIGHT) && !(old & INPUT_RIGHT)) {
+            if (page < N_INFO_PAGES - 1) {
+                page++;
+                audio_play_sample(SAMPLE_CARET_MOVE);
+            }
+            debounce = 8;
+        }
+        /* LEFT → previous page (if not at first page). Ref: cmp.w #$300,d0 in intex.asm#L155 */
+        else if ((inp & INPUT_LEFT) && !(old & INPUT_LEFT)) {
+            if (page > 0) {
+                page--;
+                audio_play_sample(SAMPLE_CARET_MOVE);
+            }
+            debounce = 8;
+        }
+        /* FIRE or ESC → exit. Ref: btst CIAB_GAMEPORT1 → beq exit_infos in intex.asm#L138 */
+        else if (((inp & INPUT_FIRE1) && !(old & INPUT_FIRE1))
+                 || g_key_pressed == KEY_ESC) {
             running = 0;
         }
     }
@@ -1122,6 +1923,11 @@ void intex_run(int player_idx)
                     debounce = 8;
                     break;
 
+                case MENU_ENTER_HOLOCODE:
+                    run_screen_enter_holocode(&font, &bg);
+                    debounce = 8;
+                    break;
+
                 case MENU_STATS: {
                     int sub = 1;
                     while (sub) {
@@ -1142,6 +1948,11 @@ void intex_run(int player_idx)
                     debounce = 8;
                     break;
                 }
+
+                case MENU_INFO_BASE:
+                    run_screen_info_base(&font, &bg);
+                    debounce = 8;
+                    break;
 
                 default:
                     debounce = 8;
