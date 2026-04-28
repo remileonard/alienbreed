@@ -274,6 +274,14 @@ static DbgImg s_dbg_p1_bar  = {NULL,0,0};
 static DbgImg s_dbg_p2_bar  = {NULL,0,0};
 static DbgImg s_dbg_paused  = {NULL,0,0};
 
+/* INTEX weapon atlas (320×264, 4-bitplane sequential).
+ * Loaded from assets/gfx/intex_weapons_320x264.raw when the viewer opens.
+ * Six weapon images in a 2-column × 3-row grid, each 160×88 px.
+ * Ref: intex.asm weapons_pic_table / disp_weapon_pic. */
+#define DBG_WEAPON_ATLAS_W  320
+#define DBG_WEAPON_ATLAS_H  264
+static DbgImg s_dbg_weapon_atlas = {NULL,0,0};
+
 /* Font strip: assets/fonts/font_16x504.raw
  * Filename encodes letter_w=16 and nominal_h=504; actual strip = 672×12 px (42 glyphs × 16px each).
  * Loaded when the viewer opens. */
@@ -320,6 +328,9 @@ static void gfx_viewer_load_assets(void)
             free(tmp.pixels);
         }
     }
+    /* INTEX weapon atlas */
+    if (!s_dbg_weapon_atlas.pixels)
+        dbg_img_load(&s_dbg_weapon_atlas, "assets/gfx/intex_weapons_320x264.raw");
     /* HUD graphics */
     if (!s_dbg_p1_bar.pixels)
         dbg_img_load(&s_dbg_p1_bar, "assets/gfx/main_player_1_status_304x8.raw");
@@ -336,6 +347,7 @@ static void gfx_viewer_free_assets(void)
 {
     free(s_intex_bg);     s_intex_bg = NULL;
     s_intex_bg_w = s_intex_bg_h = 0;
+    dbg_img_free(&s_dbg_weapon_atlas);
     dbg_img_free(&s_dbg_p1_bar);
     dbg_img_free(&s_dbg_p2_bar);
     dbg_img_free(&s_dbg_paused);
@@ -349,7 +361,8 @@ typedef struct {
     /* All positions are virtual Y (canvas coords). */
     int vy_tiles_hdr,      vy_tiles_content;
     int vy_anim_hdr,       vy_anim_content;
-    int vy_bo_hdr,         vy_bo_content;    /* Full BO atlas (320×384) */
+    int vy_bo_hdr,         vy_bo_content;      /* Full BO atlas (320×384) */
+    int vy_weapons_hdr,    vy_weapons_content; /* INTEX weapon atlas (320×264) */
     int vy_intex_hdr,      vy_intex_content;
     int vy_hud_hdr,        vy_hud_content;
     int vy_font_hdr,       vy_font_content;
@@ -384,6 +397,10 @@ static GfxLayout gfx_compute_layout(void)
      * death/explosion frames (y=160-255), and large weapon-effect sprites (y=256-383). */
     int bo_h         = alien_gfx_get_atlas() ? (ALIEN_ATLAS_H + 9) : 0;
 
+    /* INTEX weapon atlas: 320×264 raw image (6 weapon images 2-col×3-row, each 160×88).
+     * Ref: intex.asm weapons_pic / weapons_pic_table. */
+    int weapons_h    = s_dbg_weapon_atlas.pixels ? (DBG_WEAPON_ATLAS_H + 9) : 0;
+
     /* INTEX bg: one full-width image + label */
     int intex_h      = s_intex_bg ? (s_intex_bg_h + 9) : 0;
 
@@ -409,6 +426,7 @@ static GfxLayout gfx_compute_layout(void)
     NEXT_SECTION(L.vy_tiles_hdr,   L.vy_tiles_content,   n_tile_rows  * GFX_TILE_CELL_H)
     NEXT_SECTION(L.vy_anim_hdr,    L.vy_anim_content,    n_anim_rows  * GFX_ANIM_CELL_H)
     NEXT_SECTION(L.vy_bo_hdr,      L.vy_bo_content,      bo_h)
+    NEXT_SECTION(L.vy_weapons_hdr, L.vy_weapons_content, weapons_h)
     NEXT_SECTION(L.vy_intex_hdr,   L.vy_intex_content,   intex_h)
     NEXT_SECTION(L.vy_hud_hdr,     L.vy_hud_content,     hud_h)
     NEXT_SECTION(L.vy_font_hdr,    L.vy_font_content,    font_h)
@@ -496,6 +514,24 @@ static int gfx_viewer_render(int scroll_y)
         }
     }
 
+    /* ---- INTEX WEAPON ATLAS (320×264) ---- */
+    /* Displays the raw weapon sprite file at 1:1 scale.
+     * Layout from intex.asm weapons_pic_table (each image is 160×88 px):
+     *   Row 0 (y=  0): TWINFIRE (x=0)   | FLAMEARC (x=160)
+     *   Row 1 (y= 88): SIDEWINDERS (x=0)| FLAMETHROWER (x=160)
+     *   Row 2 (y=176): MACHINEGUN (x=0) | PLASMAGUN (x=160) */
+    if (s_dbg_weapon_atlas.pixels && s_dbg_weapon_atlas.w > 0) {
+        int sy = VY_TO_SY(L.vy_weapons_content, scroll_y) + 2;
+        for (int row = 0; row < DBG_WEAPON_ATLAS_H; row++) {
+            int dst_y = sy + row;
+            if (dst_y < GFX_HEADER_H || dst_y >= 256) continue;
+            const UBYTE *src = s_dbg_weapon_atlas.pixels
+                               + (size_t)row * (size_t)s_dbg_weapon_atlas.w;
+            video_blit(src, s_dbg_weapon_atlas.w, 0, dst_y,
+                       s_dbg_weapon_atlas.w, 1, -1);
+        }
+    }
+
     /* ---- INTEX BACKGROUND ---- */
     if (s_intex_bg && s_intex_bg_w > 0) {
         int sy = VY_TO_SY(L.vy_intex_content, scroll_y) + 2;
@@ -566,6 +602,7 @@ static int gfx_viewer_render(int scroll_y)
     DRAW_HDR(L.vy_tiles_hdr,    30,  30,  90, "TILES");
     DRAW_HDR(L.vy_anim_hdr,     30,  70,  90, "ANIMATED TILES (L?AN)");
     DRAW_HDR(L.vy_bo_hdr,       20,  80,  20, "BO ATLAS FULL (L?BO) - 320x384 - ALL BOBs");
+    DRAW_HDR(L.vy_weapons_hdr,  80,  60,  20, "INTEX WEAPONS ATLAS (weapons_264x40.lo4) - 320x264");
     DRAW_HDR(L.vy_intex_hdr,    30,  70,  40, "INTEX BACKGROUND");
     DRAW_HDR(L.vy_hud_hdr,      50,  50,  50, "HUD GRAPHICS");
     DRAW_HDR(L.vy_font_hdr,     50,  30,  70, "FONT");
@@ -625,6 +662,40 @@ static int gfx_viewer_render(int scroll_y)
             /* Translucent dark bar + label */
             video_overlay_fill_rect(0, sy, 320, 8, 0, 0, 0, 140);
             draw_string(2, sy, k_bo_bands[b].label, 255, 220, 80);
+        }
+    }
+
+    /* ---- Weapon atlas region annotations ----
+     * From intex.asm weapons_pic_table: each cell is 160×88 px.
+     * (Note: the debug viewer uses the level palette, not the INTEX green palette;
+     *  colours will differ from the INTEX menu but all sprite data is visible.) */
+    if (s_dbg_weapon_atlas.pixels) {
+        static const struct { int atlas_y; int atlas_x; const char *label; } k_wpic[] = {
+            {   0,   0, "y=0   x=0   TWINFIRE"     },
+            {   0, 160, "y=0   x=160 FLAMEARC"     },
+            {  88,   0, "y=88  x=0   SIDEWINDERS"  },
+            {  88, 160, "y=88  x=160 FLAMETHROWER" },
+            { 176,   0, "y=176 x=0   MACHINEGUN"   },
+            { 176, 160, "y=176 x=160 PLASMAGUN"    },
+        };
+        int n_wp = (int)(sizeof(k_wpic) / sizeof(k_wpic[0]));
+        int wpic_top = VY_TO_SY(L.vy_weapons_content, scroll_y) + 2;
+        for (int w = 0; w < n_wp; w++) {
+            int sy = wpic_top + k_wpic[w].atlas_y;
+            int sx = k_wpic[w].atlas_x;
+            if (sy < GFX_HEADER_H || sy >= 256) continue;
+            /* Draw a thin translucent bar across just the cell column */
+            video_overlay_fill_rect(sx, sy, 160, 8, 0, 0, 0, 140);
+            draw_string(sx + 2, sy, k_wpic[w].label, 255, 200, 80);
+        }
+        /* Vertical divider between left and right columns */
+        {
+            int top = VY_TO_SY(L.vy_weapons_content, scroll_y) + 2;
+            int bot = top + DBG_WEAPON_ATLAS_H;
+            if (bot > 256) bot = 256;
+            if (top < GFX_HEADER_H) top = GFX_HEADER_H;
+            if (top < bot)
+                video_overlay_fill_rect(160, top, 1, bot - top, 255, 200, 80, 120);
         }
     }
 
