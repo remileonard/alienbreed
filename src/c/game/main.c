@@ -172,6 +172,9 @@ void level_game_loop_external(void)
         if (g_key_pressed == KEY_D) {
             g_debug_overlay_on = !g_debug_overlay_on;
         }
+        if (g_key_pressed == KEY_F) {
+            debug_gfx_viewer_run();
+        }
 
         /* --- Update logic --------------------------------------------- */
         /* Player input/movement runs every frame, mirroring the Amiga VBL

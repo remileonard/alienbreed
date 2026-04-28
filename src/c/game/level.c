@@ -9,6 +9,7 @@
 #include "../engine/tilemap.h"
 #include "../engine/palette.h"
 #include "../engine/alien_gfx.h"
+#include "../engine/anim_gfx.h"
 #include "../hal/audio.h"
 #include "../hal/video.h"
 #include <stdio.h>
@@ -223,6 +224,16 @@ void level_run(int level_idx)
         char bo_path[256];
         snprintf(bo_path, sizeof(bo_path), "game/%s", def->map_bo);
         alien_gfx_load(bo_path, def->atlas_type);
+    }
+
+    /* Load animated background tile atlas from the level AN file.
+     * Ref: bkgnd_anim_block / lbL014AB6 (main.asm#L12604).
+     * The AN file is a raw 5-plane sequential bitmap (320×144, 28800 bytes)
+     * containing the animated tile frames for this level. */
+    if (def->map_an) {
+        char an_path[256];
+        snprintf(an_path, sizeof(an_path), "game/%s", def->map_an);
+        anim_gfx_load(an_path);
     }
 
     /* Set alien extra strength from level def (Ref: main.asm#L429-L465) */

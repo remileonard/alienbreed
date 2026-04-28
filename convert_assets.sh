@@ -50,7 +50,8 @@ done
 echo "=== Converting .loN graphics ==="
 for f in $(find src -name "*.lo1" -o -name "*.lo2" -o -name "*.lo3" \
                -o -name "*.lo4" -o -name "*.lo5" -o -name "*.lo6" \
-               | grep -v "/font_"); do
+               | grep -v "/font_" \
+               | grep -v "weapons_264x40"); do
     name=$(basename "$f")
     # extract bp count from extension: .lo4 -> 4
     ext="${f##*.lo}"
@@ -61,6 +62,13 @@ for f in $(find src -name "*.lo1" -o -name "*.lo2" -o -name "*.lo3" \
     printf "  %s (%sbp) -> " "$f" "$bp"
     $BUILD/convert_bitplanes "$f" "$bp" "$out" && echo "OK" || echo "FAIL"
 done
+
+# Weapons sprite sheet: the filename says 264x40 but the actual bitmap is
+# 320 pixels wide × 264 rows, 4 bitplanes (= 6 weapon images in a 2×3 grid,
+# each image 160×88 px).  Pass the real dimensions explicitly.
+printf "  src/intex/gfx/weapons_264x40.lo4 (4bp, actual 320x264) -> "
+$BUILD/convert_bitplanes src/intex/gfx/weapons_264x40.lo4 4 \
+    assets/gfx/intex_weapons_320x264.raw 320 264 && echo "OK" || echo "FAIL"
 
 printf "  game/mapbkgnd_320x256.lo4 -> "
 $BUILD/convert_bitplanes game/mapbkgnd_320x256.lo4 4 assets/tiles/mapbkgnd.raw && echo "OK" || echo "FAIL"

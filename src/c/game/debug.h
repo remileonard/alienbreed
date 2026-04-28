@@ -27,4 +27,16 @@ extern int g_debug_overlay_on;
  * video_upload_framebuffer() and video_flip(). */
 void debug_render_overlay(void);
 
+/*
+ * Full-screen scrollable graphics viewer.
+ * Pauses the game and shows all current-level graphics in four sections:
+ *   TILES    — every tile in the loaded tileset, labelled by tile index.
+ *   WALK     — alien walk sprites for all 8 directions × 3 frames.
+ *   DEATH    — alien death/explosion animation frames.
+ *   SPRITES  — all 80 player sprite images, labelled by 1-based sprite number.
+ * Arrow keys scroll the view; press F or ESC to return to the game.
+ * Triggered by pressing the F key during gameplay.
+ */
+void debug_gfx_viewer_run(void);
+
 #endif /* AB_DEBUG_H */
