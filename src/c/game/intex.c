@@ -200,6 +200,65 @@ static void intex_display_lines(Font *font, int x, int y_start,
 }
 
 /*
+ * Display text lines letter-by-letter, presenting one frame per character.
+ * Used exclusively in intex_startup_seq and intex_disconnecting to mimic the
+ * Amiga blitter's natural per-character cadence.
+ *
+ * Timing: 1 character per frame (TARGET_FPS = 50 Hz).
+ * Audio:  SAMPLE_TYPE_WRITER every 3 non-space characters, matching
+ *         slowdown_play_sample=3 in intex.asm display_text.
+ *
+ * char_slowdown: persistent counter shared across consecutive calls so the
+ *   3-char audio spacing is maintained across text group boundaries (mirrors
+ *   the ASM global slowdown_play_sample variable).
+ *
+ * Returns immediately without rendering if s_startup_interrupted is set.
+ * Sets s_startup_interrupted on fire-button press and returns early.
+ */
+static void intex_animated_lines(Font *font, int x, int y_start,
+                                  const char * const *lines,
+                                  int *char_slowdown)
+{
+    if (s_startup_interrupted) return;
+
+    TextCtx ctx;
+    intex_init_ctx(&ctx, font, x, y_start);
+
+    for (int li = 0; lines[li] != NULL; li++) {
+        const char *text = lines[li];
+        ctx.cursor_x = x;
+
+        for (const char *p = text; *p; p++) {
+            if (s_startup_interrupted) return;
+
+            typewriter_putchar(&ctx, *p);
+
+            /* Play SAMPLE_TYPE_WRITER every 3 non-space characters.
+             * Ref: slowdown_play_sample counter in intex.asm display_text
+             *   (addq #1,slowdown_play_sample; cmp #3; bne .skip; bsr play_sample_disp_char). */
+            if (*p != ' ') {
+                if (++(*char_slowdown) >= 3) {
+                    *char_slowdown = 0;
+                    audio_play_sample(SAMPLE_TYPE_WRITER);
+                }
+            }
+
+            /* Present the frame so the new character becomes visible,
+             * then pace to TARGET_FPS before polling input. */
+            video_present();
+            timer_begin_frame();
+            input_poll();
+            if (g_quit_requested) { s_startup_interrupted = 1; return; }
+            if (g_player1_input & (INPUT_FIRE1 | INPUT_FIRE2)) {
+                s_startup_interrupted = 1;
+                return;
+            }
+        }
+        ctx.cursor_y += font->letter_h;
+    }
+}
+
+/*
  * Show a short message at (x,y), wait 1 second, then return.
  * Used for "INSUFFUCIENT FUNDS", "ALREADY PURCHASED", etc.
  */
@@ -268,21 +327,16 @@ static void intex_startup_seq(const IntexImg *bg, Font *font)
     if (bg->pixels)
         video_blit(bg->pixels, bg->w, 0, 0, bg->w, bg->h, -1);
 
-    if (!s_startup_interrupted) {
-        intex_display_lines(font, 0, 48, k_connecting);
-        video_present();
-        intex_wait_frames(1);
-    }
-    if (!s_startup_interrupted) {
-        intex_display_lines(font, 0, 84, k_system_status);
-        video_present();
-        intex_wait_frames(2);
-    }
-    if (!s_startup_interrupted) {
-        intex_display_lines(font, 0, 168, k_downloading);
-        video_present();
-        intex_wait_frames(1);
-    }
+    /* Animate text letter-by-letter; present after each character.
+     * char_slowdown mirrors the ASM slowdown_play_sample counter and
+     * persists across groups so the 3-char audio spacing is maintained. */
+    int char_slowdown = 0;
+    intex_animated_lines(font, 0, 48, k_connecting, &char_slowdown);
+    intex_wait_frames(1);
+    intex_animated_lines(font, 0, 84, k_system_status, &char_slowdown);
+    intex_wait_frames(2);
+    intex_animated_lines(font, 0, 168, k_downloading, &char_slowdown);
+    intex_wait_frames(1);
 
     s_startup_interrupted = 0;
     video_clear();
@@ -313,8 +367,8 @@ static void intex_disconnecting(const IntexImg *bg, Font *font)
     video_clear();
     if (bg->pixels)
         video_blit(bg->pixels, bg->w, 0, 0, bg->w, bg->h, -1);
-    intex_display_lines(font, 0, 64, k_disconn);
-    video_present();
+    int char_slowdown = 0;
+    intex_animated_lines(font, 0, 64, k_disconn, &char_slowdown);
     intex_wait_frames(1);
     intex_mess_up(6, bg);
 }
