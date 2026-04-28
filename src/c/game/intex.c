@@ -134,6 +134,19 @@ static void intex_init_ctx(TextCtx *ctx, Font *font, int x, int y)
  * ----------------------------------------------------------------------- */
 static int s_startup_interrupted = 0;
 
+/*
+ * Pulsing caret colour table — matches caret_color_table in intex.asm:
+ *   $040→$0F0→$040, advances every 2 VBL (slowdown_caret_flash=2).
+ * Palette entry 31 is dedicated to the caret and updated each frame.
+ */
+static const UWORD k_caret_colors[] = {
+    0x040, 0x050, 0x060, 0x070, 0x080, 0x090, 0x0A0, 0x0B0,
+    0x0C0, 0x0D0, 0x0E0, 0x0F0, 0x0E0, 0x0D0, 0x0C0, 0x0B0,
+    0x0A0, 0x090, 0x080, 0x070, 0x060, 0x050, 0x040
+};
+#define CARET_N_COLORS 23
+#define CARET_PAL_IDX  31
+
 static void intex_mess_up(int n, const IntexImg *bg)
 {
     if (s_startup_interrupted) return;
@@ -184,20 +197,6 @@ static void intex_display_lines(Font *font, int x, int y_start,
         typewriter_display(&ctx, lines[i]);
         ctx.cursor_y += font->letter_h;
     }
-}
-
-/*
- * Highlight a selected row: fill background with color_bg then re-render
- * text so it appears brighter (font pixels OR'd over colored fill).
- * Ref: disp_caret_* in intex.asm positions caret sprite at selected row Y.
- */
-static void intex_highlight_line(Font *font, int x, int y,
-                                  const char *line, UBYTE color_bg)
-{
-    video_fill_rect(0, y, 320, font->letter_h, color_bg);
-    TextCtx ctx;
-    intex_init_ctx(&ctx, font, x, y);
-    typewriter_display(&ctx, line);
 }
 
 /*
@@ -302,6 +301,15 @@ static void intex_disconnecting(const IntexImg *bg, Font *font)
         "  DISCONNECTING..............",
         NULL
     };
+
+    /* Flush any fire button still held from the menu selection. */
+    s_startup_interrupted = 0;
+    for (int flush = 0; flush < 50; flush++) {
+        input_poll();
+        if (!(g_player1_input & (INPUT_FIRE1 | INPUT_FIRE2))) break;
+        timer_begin_frame();
+    }
+
     video_clear();
     if (bg->pixels)
         video_blit(bg->pixels, bg->w, 0, 0, bg->w, bg->h, -1);
@@ -401,12 +409,6 @@ static void draw_weapons_layout(Font *font, int pidx, int cur_weapon,
         ctx.cursor_x = 0; ctx.cursor_y = 240;
         typewriter_display(&ctx, "             NO                         ");
     }
-
-    /* Highlight selected YES or NO row */
-    if (yes_no == 1)
-        intex_highlight_line(font, 0, 228, "             YES                        ", 8);
-    else
-        intex_highlight_line(font, 0, 240, "             NO                         ", 8);
 }
 
 static void run_screen_weapons(int pidx, Font *font,
@@ -417,16 +419,31 @@ static void run_screen_weapons(int pidx, Font *font,
     int yes_no = 0;      /* 0 = NO (default per ASM), 1 = YES */
     int debounce = 8;
     int running  = 1;
+    int caret_slow = 0;
+    int caret_idx  = 0;
 
     while (running) {
         timer_begin_frame();
         input_poll();
         if (g_quit_requested) return;
 
+        /* Advance pulsing caret colour every 2 frames */
+        if (++caret_slow >= 2) {
+            caret_slow = 0;
+            caret_idx  = (caret_idx + 1) % CARET_N_COLORS;
+        }
+        video_set_palette_entry(CARET_PAL_IDX, k_caret_colors[caret_idx]);
+
         video_clear();
         if (bg->pixels)
             video_blit(bg->pixels, bg->w, 0, 0, bg->w, bg->h, -1);
         draw_weapons_layout(font, pidx, cur_wp, yes_no, wpic);
+
+        /* Pulsing caret block at selected YES/NO row (x=48, 8×11 px) */
+        {
+            int cy = (yes_no == 1) ? 228 : 240;
+            video_fill_rect(48, cy, 8, 11, CARET_PAL_IDX);
+        }
         video_present();
 
         if (debounce > 0) { debounce--; continue; }
@@ -552,7 +569,7 @@ static void render_item_line(Font *font, int item, int purchased, int y)
     }
 }
 
-static void draw_tool_layout(Font *font, int pidx, int caret_pos)
+static void draw_tool_layout(Font *font, int pidx)
 {
     Player *p = &g_players[pidx];
 
@@ -584,22 +601,6 @@ static void draw_tool_layout(Font *font, int pidx, int caret_pos)
         intex_init_ctx(&ctx, font, 0, 216);
         typewriter_display(&ctx, buf);
     }
-
-    /* Highlight selected row (caret y = caret_pos*24 + 72) */
-    {
-        int hy = caret_pos * 24 + 72;
-        if (caret_pos < 5) {
-            char buf[41];
-            memcpy(buf, k_item_lines[caret_pos], 40);
-            buf[40] = '\0';
-            if (p->purchased_supplies & (1 << caret_pos))
-                memcpy(buf + 29, " BOUGHT.", 8);
-            intex_highlight_line(font, 0, hy, buf, 8);
-        } else {
-            intex_highlight_line(font, 0, hy,
-                "                  EXIT                  ", 8);
-        }
-    }
 }
 
 static void run_screen_tool_supplies(int pidx, Font *font,
@@ -609,16 +610,32 @@ static void run_screen_tool_supplies(int pidx, Font *font,
     int caret    = 0;
     int debounce = 8;
     int running  = 1;
+    int caret_slow = 0;
+    int caret_idx  = 0;
 
     while (running) {
         timer_begin_frame();
         input_poll();
         if (g_quit_requested) return;
 
+        /* Advance pulsing caret colour every 2 frames */
+        if (++caret_slow >= 2) {
+            caret_slow = 0;
+            caret_idx  = (caret_idx + 1) % CARET_N_COLORS;
+        }
+        video_set_palette_entry(CARET_PAL_IDX, k_caret_colors[caret_idx]);
+
         video_clear();
         if (bg->pixels)
             video_blit(bg->pixels, bg->w, 0, 0, bg->w, bg->h, -1);
-        draw_tool_layout(font, pidx, caret);
+        draw_tool_layout(font, pidx);
+
+        /* Pulsing caret block at selected row (x=16, y=caret*24+72, 8×11 px).
+         * Ref: disp_caret_in_tool_supplies x=16 in intex.asm. */
+        {
+            int cy = caret * 24 + 72;
+            video_fill_rect(16, cy, 8, 11, CARET_PAL_IDX);
+        }
         video_present();
 
         if (debounce > 0) { debounce--; continue; }
@@ -955,18 +972,6 @@ void intex_run(int player_idx)
         "          ABORT INTEX NETWORK           ",
         NULL
     };
-
-    /*
-     * Pulsing caret colour table — matches caret_color_table in intex.asm:
-     *   $040→$0F0→$040, advances every 2 VBL (slowdown_caret_flash=2).
-     * Palette entry 31 is dedicated to the caret and updated each frame.
-     */
-    static const UWORD k_caret_colors[] = {
-        0x040, 0x050, 0x060, 0x070, 0x080, 0x090, 0x0A0, 0x0B0,
-        0x0C0, 0x0D0, 0x0E0, 0x0F0, 0x0E0, 0x0D0, 0x0C0, 0x0B0,
-        0x0A0, 0x090, 0x080, 0x070, 0x060, 0x050, 0x040
-    };
-    enum { CARET_N_COLORS = 23, CARET_PAL_IDX = 31 };
 
     int menu_choice = 0;
     int debounce    = 0;
