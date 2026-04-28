@@ -117,20 +117,30 @@ static const int k_tool_supply_flags[5] = {
 typedef struct { UBYTE *pixels; int w, h; } IntexImg;
 
 /*
- * INTEX text color: palette index 13 = 0x0D0 = bright green (#00DD00).
- * Used by all text rendering in the INTEX terminal.
- * Ref: INTEX palette (k_intex_pal index 13 = 0x0D0).
+ * Amiga blitter bitplane-OR simulation for INTEX text rendering.
+ * The display_text blitter (BLTCON0 LF=$E2, copy_text_to_screen in intex.asm)
+ * blits the font across 4 bitplanes. Where a font bitplane bit = 1 the output
+ * bit = 1; where = 0 the background bit is preserved. The 5th screen bitplane
+ * (bit4) is never touched by the font loop (only 4 bitplanes copied).
+ *
+ * Since the INTEX background is a 4-bitplane image (all pixel values 0-15,
+ * so bit4 = 0 everywhere) and font glyph pixels have value 0x0F (all 4 lower
+ * bitplanes = 1), the result is always palette index 15 (= COLOR15).
+ *
+ * COLOR15 is set to $0D0 by the copper at the first visible scanline
+ * ($2C01,$FF00,COLOR15,$0D0 in intex.asm), giving bright green (#00DD00).
+ *
+ * bitplane_planes=4 in TextCtx triggers this simulation in typewriter_putchar.
  */
-#define INTEX_TEXT_COLOR  13
+#define INTEX_FONT_BITPLANES  4
 
 /*
- * Initialise a TextCtx for INTEX text rendering: sets text_color to
- * INTEX_TEXT_COLOR so all font pixels are drawn in bright green.
+ * Initialise a TextCtx for INTEX text rendering using bitplane-OR blending.
  */
 static void intex_init_ctx(TextCtx *ctx, Font *font, int x, int y)
 {
     typewriter_init_ctx(ctx, font, g_framebuffer, 320, x, y);
-    ctx->text_color = INTEX_TEXT_COLOR;
+    ctx->bitplane_planes = INTEX_FONT_BITPLANES;
 }
 
 /* -----------------------------------------------------------------------
@@ -174,7 +184,8 @@ static void intex_wait_frames(int n_secs)
  * Render a NULL-terminated array of text lines at (x, y_start).
  * Y advances by font->letter_h (= 12) per line, matching intex.asm
  * display_text Y advance (add.l TEXT_LETTER_HEIGHT(a1),d1, TEXT_LETTER_HEIGHT=12).
- * Text is drawn in INTEX_TEXT_COLOR (bright green).
+ * Text is blitted using bitplane-OR (LF=$E2): font pixels (value 0x0F) become
+ * palette index 15 = COLOR15 = $0D0 = bright green.
  * Ref: display_text in intex.asm.
  */
 static void intex_display_lines(Font *font, int x, int y_start,
@@ -893,7 +904,7 @@ void intex_run(int player_idx)
     /* Set INTEX palette (ref: set_bitplanes_and_palette in intex.asm) */
     static const UWORD k_intex_pal[] = {
         0x000, 0x010, 0x020, 0x030, 0x040, 0x050, 0x060, 0x070,
-        0x080, 0x090, 0x0A0, 0x0B0, 0x0C0, 0x0D0, 0xFFF, 0xFFF,
+        0x080, 0x090, 0x0A0, 0x0B0, 0x0C0, 0x0D0, 0xFFF, 0x0D0,
         0x555, 0x565, 0x575, 0x585, 0x595, 0x5A5, 0x5B5, 0x5C5,
         0x5D5, 0x5E5, 0x5F5, 0x4F4, 0x3F3, 0x2F2, 0x1F1, 0x0F0
     };
