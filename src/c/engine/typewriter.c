@@ -67,7 +67,6 @@ void typewriter_init_ctx(TextCtx *ctx, Font *font,
     ctx->sound_counter = 0;
     ctx->color_offset     = 0;
     ctx->text_color       = -1;
-    ctx->bitplane_planes  = 0;
 }
 
 int typewriter_putchar(TextCtx *ctx, char c)
@@ -106,25 +105,7 @@ int typewriter_putchar(TextCtx *ctx, char c)
                 UBYTE px = src[col];
                 if (px != (UBYTE)font->transparent) {
                     UBYTE out;
-                    if (ctx->bitplane_planes > 0) {
-                        /*
-                         * Amiga blitter LF=$E2 simulation (display_text in intex.asm):
-                         *   D = 1  where font bit = 1  (set output bit regardless of bg)
-                         *   D = C  where font bit = 0  (keep background bit)
-                         * Only the lower bitplane_planes bits are contributed by the font;
-                         * any bits above that (e.g. bit4 for a 5-plane screen) are
-                         * preserved from the background unchanged.
-                         *
-                         * For the INTEX font (bitplane_planes=4, font pixels=0x0F, bg<16):
-                         *   result = (bg & 0xF0) | (0x0F | (bg & ~0x0F & 0x0F)) = 0x0F = 15
-                         * → always palette index 15 (COLOR15 = $0D0 = bright green).
-                         */
-                        UBYTE bg   = g_framebuffer[dy * 320 + dx];
-                        UBYTE mask = (UBYTE)((1 << ctx->bitplane_planes) - 1);
-                        UBYTE flo  = px & mask;
-                        UBYTE merged = flo | (bg & (UBYTE)(~flo) & mask);
-                        out = (bg & (UBYTE)(~mask)) | merged;
-                    } else if (ctx->text_color >= 0) {
+                    if (ctx->text_color >= 0) {
                         out = (UBYTE)ctx->text_color;
                     } else {
                         out = (UBYTE)(px + ctx->color_offset);

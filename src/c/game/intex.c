@@ -116,31 +116,17 @@ static const int k_tool_supply_flags[5] = {
 /* Shared image type */
 typedef struct { UBYTE *pixels; int w, h; } IntexImg;
 
-/*
- * Amiga blitter bitplane-OR simulation for INTEX text rendering.
- * The display_text blitter (BLTCON0 LF=$E2, copy_text_to_screen in intex.asm)
- * blits the font across 4 bitplanes. Where a font bitplane bit = 1 the output
- * bit = 1; where = 0 the background bit is preserved. The 5th screen bitplane
- * (bit4) is never touched by the font loop (only 4 bitplanes copied).
- *
- * Since the INTEX background is a 4-bitplane image (all pixel values 0-15,
- * so bit4 = 0 everywhere) and font glyph pixels have value 0x0F (all 4 lower
- * bitplanes = 1), the result is always palette index 15 (= COLOR15).
- *
- * COLOR15 is set to $0D0 by the copper at the first visible scanline
- * ($2C01,$FF00,COLOR15,$0D0 in intex.asm), giving bright green (#00DD00).
- *
- * bitplane_planes=4 in TextCtx triggers this simulation in typewriter_putchar.
- */
-#define INTEX_FONT_BITPLANES  4
+/* Palette index used for INTEX text (COLOR15 = $6F6 = bright green). */
+#define INTEX_TEXT_COLOR  15
 
 /*
- * Initialise a TextCtx for INTEX text rendering using bitplane-OR blending.
+ * Initialise a TextCtx for INTEX text rendering.
+ * All glyph pixels are drawn at palette index INTEX_TEXT_COLOR.
  */
 static void intex_init_ctx(TextCtx *ctx, Font *font, int x, int y)
 {
     typewriter_init_ctx(ctx, font, g_framebuffer, 320, x, y);
-    ctx->bitplane_planes = INTEX_FONT_BITPLANES;
+    ctx->text_color = INTEX_TEXT_COLOR;
 }
 
 /* -----------------------------------------------------------------------
@@ -910,14 +896,14 @@ void intex_run(int player_idx)
      * Color 15:    TEXT color.  In the original the copper raster raises this
      *              dynamically per scanline: $0D0 at y=44, $2F2 at y=92, $6F6
      *              at y=116, $4F4 at y=138 (copper raster in intex.asm).
-     *              The C port uses static $3F3 (bright green, clearly visible
-     *              against the $0D0 background maximum) for all menu rows.
+     *              The C port uses static $6F6 (bright green matching the Amiga
+     *              copper raster at the main menu scanlines y=116-138).
      * Color 31:    reserved for the pulsing caret block (updated each frame).
      * Colors 16-30: static green gradient from copper list (upper bitplane 4).
      */
     static const UWORD k_intex_pal[] = {
         0x000, 0x010, 0x020, 0x030, 0x040, 0x050, 0x060, 0x070,
-        0x080, 0x090, 0x0A0, 0x0B0, 0x0C0, 0x0D0, 0xFFF, 0x3F3,
+        0x080, 0x090, 0x0A0, 0x0B0, 0x0C0, 0x0D0, 0xFFF, 0x6F6,
         0x555, 0x565, 0x575, 0x585, 0x595, 0x5A5, 0x5B5, 0x5C5,
         0x5D5, 0x5E5, 0x5F5, 0x4F4, 0x3F3, 0x2F2, 0x1F1, 0x0F0
     };

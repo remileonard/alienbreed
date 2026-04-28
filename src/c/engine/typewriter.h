@@ -48,14 +48,7 @@ typedef struct {
     int         play_sound;    /* play typewriter sound every N chars */
     int         sound_counter;
     int         color_offset;    /* added to every drawn pixel index (for multi-palette layers) */
-    int         text_color;      /* when >= 0, use this palette index instead of (px + color_offset) */
-    int         bitplane_planes; /* when > 0: simulate Amiga blitter LF=$E2 bitplane-OR blit.
-                                  * Font contributes the lower bitplane_planes bits of the output
-                                  * index; bits above that are preserved from the background.
-                                  * Where a font bit = 1 → output bit = 1.
-                                  * Where a font bit = 0 → output bit = background bit.
-                                  * Used for INTEX (4 bitplanes: font → lower 4 bits, bg bit4 kept).
-                                  * Ref: display_text BLTCON0 LF=$E2, copy_text_to_screen in intex.asm */
+    int         text_color;      /* when >= 0, use this palette index for every glyph pixel */
 } TextCtx;
 
 /* Initialise a text context. */
