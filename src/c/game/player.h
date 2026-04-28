@@ -82,6 +82,11 @@ typedef struct {
     WORD  ammopacks;      /* PLAYER_MAX_AMMOPCKS */
     WORD  ammunitions;    /* current ammo count */
 
+    /* INTEX tool supply purchases (persists across terminal visits).
+     * Bit i = 1 means item i (0=scanner,1=ammo,2=energy,3=key,4=life) was bought.
+     * Ref: purchased_supplies dc.l 0 @ intex.asm#L547 */
+    int   purchased_supplies;
+
     /* Weapons */
     WORD  cur_weapon;     /* WEAPON_* */
     WORD  weapon_index;

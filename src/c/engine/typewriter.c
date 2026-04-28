@@ -103,7 +103,7 @@ int typewriter_putchar(TextCtx *ctx, char c)
                 if (dx < 0 || dx >= 320) continue;
                 UBYTE px = src[col];
                 if (px != (UBYTE)font->transparent)
-                    g_framebuffer[dy * 320 + dx] = (UBYTE)(px + ctx->color_offset);
+                    g_framebuffer[dy * 320 + dx] |= (UBYTE)(px + ctx->color_offset);
             }
             src += font->strip_w;
         }
