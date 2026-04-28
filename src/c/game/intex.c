@@ -116,6 +116,23 @@ static const int k_tool_supply_flags[5] = {
 /* Shared image type */
 typedef struct { UBYTE *pixels; int w, h; } IntexImg;
 
+/*
+ * INTEX text color: palette index 13 = 0x0D0 = bright green (#00DD00).
+ * Used by all text rendering in the INTEX terminal.
+ * Ref: INTEX palette (k_intex_pal index 13 = 0x0D0).
+ */
+#define INTEX_TEXT_COLOR  13
+
+/*
+ * Initialise a TextCtx for INTEX text rendering: sets text_color to
+ * INTEX_TEXT_COLOR so all font pixels are drawn in bright green.
+ */
+static void intex_init_ctx(TextCtx *ctx, Font *font, int x, int y)
+{
+    typewriter_init_ctx(ctx, font, g_framebuffer, 320, x, y);
+    ctx->text_color = INTEX_TEXT_COLOR;
+}
+
 /* -----------------------------------------------------------------------
  * Startup / helper utilities
  * ----------------------------------------------------------------------- */
@@ -157,14 +174,14 @@ static void intex_wait_frames(int n_secs)
  * Render a NULL-terminated array of text lines at (x, y_start).
  * Y advances by font->letter_h (= 12) per line, matching intex.asm
  * display_text Y advance (add.l TEXT_LETTER_HEIGHT(a1),d1, TEXT_LETTER_HEIGHT=12).
- * Text is OR-blended onto the framebuffer (transparent + slightly brighter).
- * Ref: display_text in intex.asm; BLTCON0 LF=$FE = D = A|B|C.
+ * Text is drawn in INTEX_TEXT_COLOR (bright green).
+ * Ref: display_text in intex.asm.
  */
 static void intex_display_lines(Font *font, int x, int y_start,
                                  const char * const *lines)
 {
     TextCtx ctx;
-    typewriter_init_ctx(&ctx, font, g_framebuffer, 320, x, y_start);
+    intex_init_ctx(&ctx, font, x, y_start);
     for (int i = 0; lines[i]; i++) {
         ctx.cursor_x = x;
         typewriter_display(&ctx, lines[i]);
@@ -182,7 +199,7 @@ static void intex_highlight_line(Font *font, int x, int y,
 {
     video_fill_rect(0, y, 320, font->letter_h, color_bg);
     TextCtx ctx;
-    typewriter_init_ctx(&ctx, font, g_framebuffer, 320, x, y);
+    intex_init_ctx(&ctx, font, x, y);
     typewriter_display(&ctx, line);
 }
 
@@ -197,7 +214,7 @@ static void intex_flash_message(Font *font, int x, int y, const char *msg,
     if (bg->pixels)
         video_blit(bg->pixels, bg->w, 0, 0, bg->w, bg->h, -1);
     TextCtx ctx;
-    typewriter_init_ctx(&ctx, font, g_framebuffer, 320, x, y);
+    intex_init_ctx(&ctx, font, x, y);
     typewriter_display(&ctx, msg);
     video_present();
     intex_wait_frames(1);
@@ -340,7 +357,7 @@ static void draw_weapons_layout(Font *font, int pidx, int cur_weapon,
     {
         char buf[64];
         snprintf(buf, sizeof(buf), "                        IS: %ld CR", (long)p->credits);
-        typewriter_init_ctx(&ctx, font, g_framebuffer, 320, 0, 228);
+        intex_init_ctx(&ctx, font, 0, 228);
         typewriter_display(&ctx, buf);
     }
 
@@ -357,7 +374,7 @@ static void draw_weapons_layout(Font *font, int pidx, int cur_weapon,
     /* Weapon-specific text block (text_weapon_N, starting at y=84) */
     if (cur_weapon >= 0 && cur_weapon < 6) {
         /* Row 0 y=84: name */
-        typewriter_init_ctx(&ctx, font, g_framebuffer, 320, 0, 84);
+        intex_init_ctx(&ctx, font, 0, 84);
         typewriter_display(&ctx, k_weapon_name[cur_weapon]);
         /* Row 1 y=96: type */
         ctx.cursor_x = 0; ctx.cursor_y += font->letter_h;
@@ -457,7 +474,7 @@ static void run_screen_weapons(int pidx, Font *font,
                     draw_weapons_layout(font, pidx, cur_wp, yes_no, wpic);
                     {
                         TextCtx ctx2;
-                        typewriter_init_ctx(&ctx2, font, g_framebuffer, 320, 0, 62);
+                        intex_init_ctx(&ctx2, font, 0, 62);
                         typewriter_display(&ctx2, "     CREDITS DEBITED.");
                     }
                     video_present();
@@ -512,7 +529,7 @@ static const char * const k_item_lines[5] = {
 static void render_item_line(Font *font, int item, int purchased, int y)
 {
     TextCtx ctx;
-    typewriter_init_ctx(&ctx, font, g_framebuffer, 320, 0, y);
+    intex_init_ctx(&ctx, font, 0, y);
     if (purchased & (1 << item)) {
         char buf[41];
         memcpy(buf, k_item_lines[item], 40);
@@ -545,7 +562,7 @@ static void draw_tool_layout(Font *font, int pidx, int caret_pos)
     /* EXIT at y=192 */
     {
         TextCtx ctx;
-        typewriter_init_ctx(&ctx, font, g_framebuffer, 320, 0, 192);
+        intex_init_ctx(&ctx, font, 0, 192);
         typewriter_display(&ctx, "                  EXIT                  ");
     }
 
@@ -554,7 +571,7 @@ static void draw_tool_layout(Font *font, int pidx, int caret_pos)
         char buf[64];
         snprintf(buf, sizeof(buf), "             CREDIT LIMIT: %ld CR", (long)p->credits);
         TextCtx ctx;
-        typewriter_init_ctx(&ctx, font, g_framebuffer, 320, 0, 216);
+        intex_init_ctx(&ctx, font, 0, 216);
         typewriter_display(&ctx, buf);
     }
 
@@ -673,7 +690,7 @@ static void draw_radar_screen(Font *font, int pidx)
     intex_display_lines(font, 0, 12, k_hdr);
     {
         TextCtx ctx;
-        typewriter_init_ctx(&ctx, font, g_framebuffer, 320, 0, 240);
+        intex_init_ctx(&ctx, font, 0, 240);
         typewriter_display(&ctx, "  YOU ARE LOCATED AT CURSORS POSITION!");
     }
 
@@ -760,7 +777,7 @@ static void run_screen_briefing(Font *font, const IntexImg *bg)
     intex_display_lines(font, 0, 60, k_hdr);
     {
         TextCtx ctx;
-        typewriter_init_ctx(&ctx, font, g_framebuffer, 320, 0, 84);
+        intex_init_ctx(&ctx, font, 0, 84);
         typewriter_display(&ctx, brief);
     }
     video_present();
@@ -796,7 +813,7 @@ static void draw_screen_stats(int pidx, Font *font)
     };
     intex_display_lines(font, 0, 24, k_hdr);
 
-    typewriter_init_ctx(&ctx, font, g_framebuffer, 320, 0, 48);
+    intex_init_ctx(&ctx, font, 0, 48);
     snprintf(buf, sizeof(buf), " SCORE:          %ld", (long)p->score);
     typewriter_display(&ctx, buf);
     ctx.cursor_x = 0; ctx.cursor_y += font->letter_h;
@@ -933,7 +950,7 @@ void intex_run(int player_idx)
         for (int i = 0; k_menu_text[i]; i++) {
             if (i != 3 + menu_choice) {
                 TextCtx ctx;
-                typewriter_init_ctx(&ctx, &font, g_framebuffer, 320,
+                intex_init_ctx(&ctx, &font,
                                     0, 32 + i * MENU_LINE_H);
                 typewriter_display(&ctx, k_menu_text[i]);
             }

@@ -66,6 +66,7 @@ void typewriter_init_ctx(TextCtx *ctx, Font *font,
     ctx->play_sound    = 9;  /* play typewriter SFX every 9 chars (matches asm) */
     ctx->sound_counter = 0;
     ctx->color_offset  = 0;
+    ctx->text_color    = -1;
 }
 
 int typewriter_putchar(TextCtx *ctx, char c)
@@ -102,8 +103,12 @@ int typewriter_putchar(TextCtx *ctx, char c)
                 int dx = ctx->cursor_x + col;
                 if (dx < 0 || dx >= 320) continue;
                 UBYTE px = src[col];
-                if (px != (UBYTE)font->transparent)
-                    g_framebuffer[dy * 320 + dx] |= (UBYTE)(px + ctx->color_offset);
+                if (px != (UBYTE)font->transparent) {
+                    UBYTE out = (ctx->text_color >= 0)
+                                ? (UBYTE)ctx->text_color
+                                : (UBYTE)(px + ctx->color_offset);
+                    g_framebuffer[dy * 320 + dx] = out;
+                }
             }
             src += font->strip_w;
         }
