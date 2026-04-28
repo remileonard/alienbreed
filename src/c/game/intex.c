@@ -98,13 +98,14 @@ static void intex_mess_up(int n, const IntexImg *bg)
 }
 
 /*
- * Wait n_secs × 50 frames, interruptible by either fire button.
- * Ref: wait_timed_frames / wait_timed_frames_startup in intex.asm.
+ * Wait n_secs × TARGET_FPS frames, interruptible by either fire button.
+ * Ref: wait_timed_frames / wait_timed_frames_startup in intex.asm
+ * (both use mulu #50 — PAL VBL = 50 Hz).
  */
 static void intex_wait_frames(int n_secs)
 {
     if (s_startup_interrupted) return;
-    int frames = n_secs * 50;
+    int frames = n_secs * TARGET_FPS;
     for (int i = 0; i < frames; i++) {
         input_poll();
         if (g_player1_input & (INPUT_FIRE1 | INPUT_FIRE2)) {
@@ -504,6 +505,8 @@ void intex_run(int player_idx)
      * Restore game palette so the level renders correctly after exit.
      * Ref: In the original ASM the caller (main.asm) restores hardware
      * registers; in the C port we own the palette state here.
+     * g_cur_map.valid is always true during gameplay (intex is only
+     * reachable while a level is loaded), but we guard defensively.
      * ------------------------------------------------------------------ */
     if (g_cur_map.valid)
         palette_set_immediate(g_cur_map.palette_a, 32);
