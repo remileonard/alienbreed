@@ -302,7 +302,11 @@ static int dbg_img_load(DbgImg *img, const char *path)
     }
     img->pixels = (UBYTE *)malloc((size_t)img->w * (size_t)img->h);
     if (!img->pixels) { fclose(f); return -1; }
-    fread(img->pixels, 1, (size_t)img->w * (size_t)img->h, f);
+    size_t expected = (size_t)img->w * (size_t)img->h;
+    if (fread(img->pixels, 1, expected, f) != expected) {
+        free(img->pixels); img->pixels = NULL;
+        fclose(f); return -1;
+    }
     fclose(f);
     return 0;
 }
