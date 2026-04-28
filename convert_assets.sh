@@ -35,8 +35,16 @@ done
 echo "=== Converting fonts ==="
 # Fonts are stored with all 42 glyphs side-by-side: actual width = 672px.
 # The filename encodes nominal_height = 42 * glyph_height; actual height = nominal/42.
+# The intex font is converted first under its own name so it is never overwritten
+# by fonts from other modules that share the same base filename.
+INTEX_FONT=src/intex/gfx/font_16x504.lo6
+if [ -f "$INTEX_FONT" ]; then
+    printf "  %s (6bp, actual 672x12) -> " "$INTEX_FONT"
+    $BUILD/convert_bitplanes "$INTEX_FONT" 6 assets/fonts/intex_font_16x504.raw 672 12 && echo "OK" || echo "FAIL"
+fi
 for f in $(find src \( -name "font_*.lo2" -o -name "font_*.lo3" -o -name "font_*.lo4" \
-               -o -name "font_*.lo5" -o -name "font_*.lo6" \)); do
+               -o -name "font_*.lo5" -o -name "font_*.lo6" \) \
+           | grep -v "src/intex/"); do
     name=$(basename "$f")
     ext="${f##*.lo}"
     bp=$(echo "$ext" | cut -c1)

@@ -246,6 +246,19 @@ static void intex_startup_seq(const IntexImg *bg, Font *font)
     };
 
     s_startup_interrupted = 0;
+
+    /* Flush any fire button that was held to open INTEX.
+     * SDL reports level-triggered key state: if the user pressed fire
+     * to navigate here, it may still be reported as held on the first
+     * input_poll(), which would immediately set s_startup_interrupted=1
+     * and skip the entire startup animation.  Wait up to 50 frames for
+     * the button to be released before arming the skip-on-fire logic. */
+    for (int flush = 0; flush < 50; flush++) {
+        input_poll();
+        if (!(g_player1_input & (INPUT_FIRE1 | INPUT_FIRE2))) break;
+        timer_begin_frame();
+    }
+
     intex_mess_up(10, bg);
     intex_wait_frames(1);
     intex_mess_up(25, bg);
@@ -885,7 +898,7 @@ void intex_run(int player_idx)
      * Ref: font_struct dc.l ...,8,12,... (TEXT_LETTER_WIDTH=8, HEIGHT=12).
      */
     Font font = {0};
-    font_load(&font, "assets/fonts/font_16x504.raw", 7, 12, 0);
+    font_load(&font, "assets/fonts/intex_font_16x504.raw", 7, 12, 0);
 
     /* Set INTEX palette (ref: set_bitplanes_and_palette in intex.asm) */
     /*
