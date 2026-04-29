@@ -24,6 +24,11 @@ typedef struct {
      * (Ref: lbB00A228 direction table @ main.asm#L7077) */
     int   direction;
     int   death_frame;   /* 0-15 during death explosion animation */
+    /* Hit flash: set to 1 by aliens_collisions_with_weapons when the alien
+     * takes damage; cleared by the render loop after drawing the ALT WALK
+     * sprite (y=96) for one frame.
+     * Mirrors ASM offset 50(a0) used in lbC009B80 @ main.asm#L6675. */
+    int   hit_flag;
     /* Pathfinding state */
     int   target_x, target_y;
 } Alien;

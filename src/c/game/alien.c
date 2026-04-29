@@ -830,6 +830,16 @@ void alien_update_all(void)
             s_projectiles[i].flight_anim_frame =
                 (s_projectiles[i].flight_anim_frame + 1) % FLAMEARC_ANIM_FRAMES;
 
+        /* MACHINEGUN: advance flight_anim_frame from 0 → 1 after the first
+         * tick so that the bullet sprite (muzzle flash) shows only at the
+         * cannon position for one frame, then becomes invisible.
+         * Mirrors ASM lbL00EAEE: dc.l BOB,0 / dc.l lbW01389C,32000,-1
+         * (delay=0 → show once, then blank for 32000 ticks).
+         * Ref: lbL00EAEE @ main.asm#L10019-L10034. */
+        if (s_projectiles[i].weapon_type == WEAPON_MACHINEGUN &&
+                s_projectiles[i].flight_anim_frame == 0)
+            s_projectiles[i].flight_anim_frame = 1;
+
         /* Flamethrower lifetime countdown — matches 8-frame lbL018D06 list
          * with delay=1 each @ main.asm#L13935. */
         if (s_projectiles[i].lifetime > 0) {
@@ -1140,6 +1150,9 @@ void aliens_collisions_with_weapons(void)
             if (ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1) {
                 /* Apply damage */
                 g_aliens[ai].strength -= s_projectiles[pi].strength;
+                /* Trigger ALT WALK hit-flash for one rendered frame.
+                 * Mirrors move.w #1,50(a0) @ main.asm#L7724. */
+                g_aliens[ai].hit_flag = 1;
                 if (g_aliens[ai].strength <= 0) {
                     alien_kill(ai);
                     /* Award score to the firing player */
@@ -1310,15 +1323,15 @@ void projectiles_render(void)
 
         case WEAPON_MACHINEGUN:
             /*
-             * MACHINEGUN: Direction-dependent 16×14 bullet BOB.
-             * BOB animation structs lbL017FCE-lbL01811E → lbL01790A entries 24-31.
-             * In the original ASM, the bullet sprite is shown for 1 frame (delay=0)
-             * then replaced by a blank (lbW01389C, delay=32000).  We render it for
-             * the full flight duration since this C port has no per-frame animation
-             * sequencer.
+             * MACHINEGUN: Direction-dependent 16×14 muzzle-flash BOB shown
+             * for ONE tick only (muzzle flash at the cannon position).
+             * ASM lbL00EAEE: dc.l BOB,0 (delay=0 = 1 tick) then
+             *                dc.l lbW01389C,32000,-1 (blank for the rest).
+             * flight_anim_frame==0: first tick → draw sprite.
+             * flight_anim_frame==1: all later ticks → bullet invisible.
              * Ref: lbL00EACA @ main.asm#L10010-L10034.
              */
-            {
+            if (s_projectiles[i].flight_anim_frame == 0) {
                 int dir = s_projectiles[i].direction;
                 if (dir < 0 || dir > 8) dir = 0;
                 draw_atlas_bob(sx - 8, sy - 7,

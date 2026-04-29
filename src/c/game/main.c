@@ -258,9 +258,17 @@ void level_game_loop_external(void)
                          * Ref: lbL018C2E @ main.asm#L13907; 16 frames at delay=0. */
                         sprite_draw_alien_death(g_aliens[i].death_frame, sx, sy);
                     } else {
-                        /* Walking: use compass direction as atlas column. */
+                        /* Walking: use compass direction as atlas column.
+                         * If the alien was just hit (hit_flag != 0), use
+                         * ALT WALK frame (ALIEN_WALK_FRAMES) for one rendered
+                         * frame so the bright orange hit-flash sprite is shown.
+                         * Ref: lbC009B80 @ main.asm#L6675 (50(a0) → ALT WALK). */
                         int anim_tick  = g_aliens[i].anim_counter % 4;
                         int anim_frame = k_walk_cycle[anim_tick];
+                        if (g_aliens[i].hit_flag) {
+                            anim_frame = ALIEN_WALK_FRAMES; /* ALT WALK: y=96 */
+                            g_aliens[i].hit_flag = 0;
+                        }
                         sprite_draw_alien(g_aliens[i].direction, anim_frame, sx, sy);
                     }
                 }
