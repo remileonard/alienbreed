@@ -76,9 +76,25 @@ void alien_spawn_tick(void);
 int  alien_living_count(void);
 
 /* Spawn a player projectile at world position (x,y) moving at (vx,vy).
- * player_idx identifies the shooter for score/collision purposes. */
+ * player_idx    : identifies the shooter for score/collision purposes.
+ * weapon_type   : WEAPON_* constant for behaviour selection and rendering.
+ * penetrating   : 1 = bullet passes through aliens (PLASMAGUN/FLAMETHROWER/LAZER).
+ * lifetime      : auto-expire after this many 25 Hz ticks (-1 = infinite).
+ * bounce_count  : remaining wall bounces (FLAMEARC=1, LAZER=5, others=0).
+ * direction     : firing direction 1-8 (PLAYER_FACE_*) for sprite selection.
+ * Ref: lbC00E178/lbC00E21E @ main.asm#L9431-L9511. */
 void alien_spawn_projectile(int player_idx, WORD x, WORD y,
-                            WORD vx, WORD vy, WORD strength);
+                            WORD vx, WORD vy, WORD strength,
+                            int weapon_type, int penetrating,
+                            int lifetime, int bounce_count, int direction);
+
+/*
+ * Flamethrower in-flight lifetime in 25 Hz ticks.
+ * Matches the 8-entry lbL018D06 animation list (delay=1 each) which gives
+ * 8 ticks × 8 px/tick = 64 pixels of range.
+ * Ref: lbL018D06 @ main.asm#L13935.
+ */
+#define FLAME_LIFETIME_TICKS 8
 
 /* Draw all active projectiles. */
 void projectiles_render(void);

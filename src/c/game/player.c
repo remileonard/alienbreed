@@ -17,6 +17,14 @@
 /* Update acid pool damage counter (persists across frames while on acid) */
 static int g_acid_damage_counter[MAX_PLAYERS] = {0, 0};
 
+/*
+ * Arc-pattern fire counter — shared between both players, matching the
+ * single lbL00EAA6 global in the original ASM.
+ * Cycles: 1=straight, 2=+spread, 3=-spread (then reset to 0).
+ * Ref: lbL00EAA6 / addq.w #1,(a1) @ main.asm#L9470-L9482.
+ */
+static int s_arc_counter = 0;
+
 Player g_players[MAX_PLAYERS];
 int    g_player_invincibility[MAX_PLAYERS];
 
@@ -603,14 +611,75 @@ void player_update(Player *p, UWORD input_mask)
             }
 
             /* Compute projectile velocity from facing direction and weapon speed.
-             * ASM: PLAYER_WEAPON_SPEED = 16 (much higher than movement speed). */
-            static const WORD k_vx[9] = { 0,  0,  6,  8,  6,  0, -6, -8, -6 };
-            static const WORD k_vy[9] = { 0, -8, -6,  0,  6,  8,  6,  0, -6 };
+             *
+             * Direction unit vectors from lbW00E9F6 @ main.asm#L9995:
+             *   dc.w 0,0, 0,-1, 1,-1, 1,0, 1,1, 0,1, -1,1, -1,0, -1,-1, 0,0
+             * Each pair (dx,dy) gives the raw unit vector for cur_sprite 0-8.
+             * After mulu with speed: vx = dx*speed, vy = dy*speed (stored as WORD,
+             * so -1*speed wraps correctly via MULU + MOVE.W lower 16 bits).
+             * Ref: move.w 0(a2,d2.w),d4 / mulu d1,d4 @ main.asm#L9450-L9461.
+             */
+            static const int k_dir_x[9] = { 0, 0, 1, 1, 1, 0,-1,-1,-1 };
+            static const int k_dir_y[9] = { 0,-1,-1, 0, 1, 1, 1, 0,-1 };
             int dir = (p->direction >= 1 && p->direction <= 8) ? p->direction : 5;
-            WORD vx = (WORD)((k_vx[dir] * p->weapon_speed) / 8);
-            WORD vy = (WORD)((k_vy[dir] * p->weapon_speed) / 8);
+            int dx = k_dir_x[dir];
+            int dy = k_dir_y[dir];
+            int spd = p->weapon_speed;
+            int vxi = dx * spd;
+            int vyi = dy * spd;
+
+            /*
+             * Arc spread for FLAMEARC / PLASMAGUN / SIDEWINDERS.
+             * Each consecutive fire alternates: straight → CW-offset → CCW-offset.
+             * The global counter cycles 1→2→3→0 (reset after 3).
+             * At counter=2: vx += raw_dy, vy -= raw_dx  (CW rotation offset)
+             * At counter=3: vx -= raw_dy, vy += raw_dx  (CCW rotation offset), reset
+             * Ref: lbL00EAA6 / cmp.w #3 / add.w d7,d4 / sub.w d6,d5
+             *      @ main.asm#L9470-L9482.
+             * Note: non-arc weapons double d6/d7 first but don't apply arc rotation.
+             *       Arc weapons skip the doubling and use raw unit vector offsets.
+             */
+            int wt = p->cur_weapon;
+            if (wt == WEAPON_FLAMEARC || wt == WEAPON_PLASMAGUN ||
+                wt == WEAPON_SIDEWINDERS) {
+                s_arc_counter++;
+                if (s_arc_counter == 1) {
+                    /* straight — no change */
+                } else if (s_arc_counter == 3) {
+                    vxi -= dy;   /* CCW offset */
+                    vyi += dx;
+                    s_arc_counter = 0;
+                } else {         /* counter == 2 */
+                    vxi += dy;   /* CW offset */
+                    vyi -= dx;
+                }
+            }
+
+            WORD vx = (WORD)vxi;
+            WORD vy = (WORD)vyi;
+
+            /*
+             * Weapon-specific parameters:
+             *   penetrating  : 1 for PLASMAGUN/FLAMETHROWER/LAZER (field4=01 in
+             *                    weapons_attr_table @ main.asm#L736-L742).
+             *                  Ref: tst.w 18(a1) @ main.asm#L7739.
+             *   lifetime     : FLAMETHROWER = 8 ticks (lbL018D06 8-frame list,
+             *                    delay=1 each @ main.asm#L13935); others = -1.
+             *   bounce_count : FLAMEARC=1 (cmp.w #2,24(a3) @ main.asm#L9712),
+             *                  LAZER=5 (cmp.w #6,24(a3) @ main.asm#L9716), others=0.
+             */
+            int penetrating  = (wt == WEAPON_PLASMAGUN ||
+                                 wt == WEAPON_FLAMETHROWER ||
+                                 wt == WEAPON_LAZER) ? 1 : 0;
+            int lifetime     = (wt == WEAPON_FLAMETHROWER) ? FLAME_LIFETIME_TICKS : -1;
+            int bounce_count = 0;
+            if (wt == WEAPON_FLAMEARC)  bounce_count = 1;
+            else if (wt == WEAPON_LAZER) bounce_count = 5;
+
             alien_spawn_projectile(p->port, p->pos_x, p->pos_y,
-                                   vx, vy, p->weapon_strength);
+                                   vx, vy, p->weapon_strength,
+                                   wt, penetrating, lifetime,
+                                   bounce_count, dir);
         }
     }
 
