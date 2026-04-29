@@ -847,7 +847,11 @@ void alien_update_all(void)
                 tilemap_replace_tile(&g_cur_map, col - 2, row);
                 tilemap_replace_tile(&g_cur_map, col - 4, row);
             }
-            /* Alarm variants: increment counter for a new tile */
+            /* Alarm variants: increment counter if this is not the last-hit button.
+             * Mirrors lbL00E756 / cmp.l / beq guard @ main.asm#L9827-L9832.
+             * NOTE: only consecutive re-hits of the same tile are skipped; if
+             * button A → button B → button A, all three increments will count.
+             * This exactly matches the ASM behavior. */
             if ((attr == 0x12 || attr == 0x13) &&
                     g_alarm_system_active &&
                     (col != g_alarm_last_col || row != g_alarm_last_row)) {
@@ -962,8 +966,10 @@ void alien_update_all(void)
                         vy = (int16_t)-vy;
                 } else {
                     /* Moving right (or zero): check tile to the LEFT.
-                     * Also play bounce sound — ASM plays it only in this branch
-                     * (lbC00E5C4, before the vx>=0 neighbor check).
+                     * Ricochet sound is only played in this branch (vx >= 0),
+                     * matching the ASM where sample 46 is emitted at lbC00E5C4
+                     * before the vx≥0 neighbor check and never for vx<0.
+                     * This asymmetry is intentional — faithful to original ASM.
                      * Ref: move.w #46,d0 / jsr trigger_sample_select_channel
                      *      @ main.asm#L9723-L9726. */
                     if (!g_in_destruction_sequence)
