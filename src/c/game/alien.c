@@ -1150,9 +1150,11 @@ void aliens_collisions_with_weapons(void)
             if (ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1) {
                 /* Apply damage */
                 g_aliens[ai].strength -= s_projectiles[pi].strength;
-                /* Trigger ALT WALK hit-flash for one rendered frame.
+                /* Trigger ALT WALK hit-flash for two rendered frames (≈40ms
+                 * at 50Hz = one 25Hz game-logic tick, same duration as the
+                 * original single-VBL flash).
                  * Mirrors move.w #1,50(a0) @ main.asm#L7724. */
-                g_aliens[ai].hit_flag = 1;
+                g_aliens[ai].hit_flag = 2;
                 if (g_aliens[ai].strength <= 0) {
                     alien_kill(ai);
                     /* Award score to the firing player */

@@ -704,7 +704,38 @@ void player_update(Player *p, UWORD input_mask)
             if (wt == WEAPON_FLAMEARC)  bounce_count = 1;
             else if (wt == WEAPON_LAZER) bounce_count = 5;
 
-            alien_spawn_projectile(p->port, p->pos_x, p->pos_y,
+            /*
+             * Muzzle position: add per-direction offset to the player's
+             * top-left sprite corner (pos_x - 16, pos_y - 16), matching
+             * the ASM lbC00E264 which does:
+             *   move.l -4(a4),d1      ; player top-left packed (x|y)
+             *   move.l 0(a2,dir*4),d2 ; muzzle offset (x_off|y_off)
+             *   spawn = top_left + offset
+             * lbW00EA3E + 0  → weapons with index >= 2 (TWINFIRE … LAZER)
+             * lbW00EA3E + 32 → MACHINEGUN (weapon index 1)
+             * Ref: lbC00E264 @ main.asm#L9496-L9511.
+             *
+             * Table values (x_off, y_off) indexed by direction 1-8;
+             * entry 0 is a dummy (unused — direction is always 1-8).
+             */
+            static const int k_muzzle_x[2][9] = {
+                /* index 0: weapons with PLAYER_WEAPON_INDEX >= 2 (lbW00EA3E) */
+                { 0,  8, 12, 16, 12,  8,  6,  4,  6 },
+                /* index 1: MACHINEGUN only (lbW00EA3E + 32)                  */
+                { 0, 10,  2,  8,  2,  6, 12, 10, 14 }
+            };
+            static const int k_muzzle_y[2][9] = {
+                /* index 0: weapons with PLAYER_WEAPON_INDEX >= 2 (lbW00EA3E) */
+                { 0,  0,  6, 12, 12, 14, 10,  8,  6 },
+                /* index 1: MACHINEGUN only (lbW00EA3E + 32)                  */
+                { 0,  8, 14, 10,  4,  7,  2,  6, 13 }
+            };
+            int tbl = (wt == WEAPON_MACHINEGUN) ? 1 : 0;
+            int safe_dir = (dir >= 1 && dir <= 8) ? dir : 5;
+            int spawn_x = p->pos_x - 16 + k_muzzle_x[tbl][safe_dir];
+            int spawn_y = p->pos_y - 16 + k_muzzle_y[tbl][safe_dir];
+
+            alien_spawn_projectile(p->port, (WORD)spawn_x, (WORD)spawn_y,
                                    vx, vy, p->weapon_strength,
                                    wt, penetrating, lifetime,
                                    bounce_count, dir);

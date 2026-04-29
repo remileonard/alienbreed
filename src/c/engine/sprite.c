@@ -272,12 +272,16 @@ void sprite_draw_alien(int direction, int anim_frame, int x, int y)
     if (direction  < 0) direction  = 0;
     if (direction  >= ALIEN_DIR_COUNT) direction = ALIEN_DIR_COUNT - 1;
     if (anim_frame < 0) anim_frame = 0;
-    if (anim_frame >= ALIEN_WALK_FRAMES) anim_frame = ALIEN_WALK_FRAMES - 1;
+    /* Allow anim_frame == ALIEN_WALK_FRAMES as the ALT WALK hit-flash signal.
+     * Values strictly above that are clamped to ALIEN_WALK_FRAMES.
+     * (Formerly the clamp was ">= ALIEN_WALK_FRAMES" which made the ALT WALK
+     *  branch below dead code — the flash was never rendered.) */
+    if (anim_frame > ALIEN_WALK_FRAMES) anim_frame = ALIEN_WALK_FRAMES;
 
     int atlas_x = direction * ALIEN_SPRITE_W;
 
     /* Walk frame Y = frame_idx * 32 for normal walk (ALL atlas types).
-     * When anim_frame >= ALIEN_WALK_FRAMES it is the ALT WALK "hit flash":
+     * When anim_frame == ALIEN_WALK_FRAMES it is the ALT WALK "hit flash":
      *   use y = ALIEN_ALT_WALK_Y (= 96) so the bright orange/red variants are
      *   drawn.  Both COMPACT (lbW019A8E entries 24-39) and LEGACY (lbW01945E
      *   entries 8-23) store these sprites at x = dir*32, y = 96.
