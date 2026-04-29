@@ -211,6 +211,41 @@ static const int k_sidewinders_atlas[9][4] = {
 #define MAX_PROJECTILES 32
 static Projectile s_projectiles[MAX_PROJECTILES];
 
+/*
+ * Fallback velocity used when a bounced projectile ends up with zero vx or vy.
+ * Mirrors lbW0004D6 (dc.w 8) @ main.asm#L197, which is negated on every bounce
+ * call (neg.w lbW0004D6 @ main.asm#L9759), alternating between +8 and -8.
+ */
+static int s_bounce_fallback = 8;
+
+/*
+ * Map a post-bounce LAZER velocity pair (vx,vy) to a direction index (1–8).
+ * Matches lbW00EA1E velocity table @ main.asm#L9996 and the direction-BOB
+ * lookup loop lbC00E68A-lbC00E698 @ main.asm#L9772-L9781.
+ *
+ * lbW00EA1E: (0,-8) (8,-8) (8,0) (8,8) (0,8) (-8,8) (-8,0) (-8,-8)
+ *             dir1   dir2   dir3  dir4   dir5  dir6   dir7   dir8
+ * Fallback when no entry matches: direction 8 (last entry = lbL00EE22).
+ */
+static int lazer_velocity_to_dir(int16_t vx, int16_t vy)
+{
+    static const int16_t k[8][2] = {
+        {  0, -8 }, /* dir 1: up         */
+        {  8, -8 }, /* dir 2: up-right   */
+        {  8,  0 }, /* dir 3: right      */
+        {  8,  8 }, /* dir 4: down-right */
+        {  0,  8 }, /* dir 5: down       */
+        { -8,  8 }, /* dir 6: down-left  */
+        { -8,  0 }, /* dir 7: left       */
+        { -8, -8 }, /* dir 8: up-left    */
+    };
+    for (int j = 0; j < 8; j++) {
+        if (vx == k[j][0] && vy == k[j][1])
+            return j + 1;
+    }
+    return 8; /* fallback: lbL00EE22, same as ASM when d1 reaches 8 without match */
+}
+
 /* Score awarded per alien kill */
 #define ALIEN_SCORE_VALUE 100
 
@@ -767,47 +802,106 @@ void alien_update_all(void)
             }
         }
 
-        /* Check if projectile hit a wall */
+        /* --- Impact dispatch (weapons_special_impact_table) ---
+         * Ref: calc_shot_impact → weapons_special_impact_table @ main.asm#L9513-L9599.
+         * tile_attr & 0x3F selects the dispatch entry (0x00–0x3F).
+         * Only tiles with non-impact_none entries stop the projectile.
+         */
         int px = (int)(WORD)s_projectiles[i].x;
         int py = (int)(WORD)s_projectiles[i].y;
         int col = tilemap_pixel_to_col(px);
         int row = tilemap_pixel_to_row(py);
-        if (tilemap_is_solid(&g_cur_map, col, row)) {
+        if (tilemap_is_projectile_blocking(&g_cur_map, col, row)) {
             /*
-             * Wall bounce for FLAMEARC (1 bounce) and LAZER (5 bounces).
-             * Ref: impact_on_wall @ main.asm#L9702-L9781:
-             *   FLAMEARC: cmp.l #lbL00EC36,8(a1) → allow max 1 bounce
-             *             (cmp.w #2,24(a3) / bpl lbC00E6A8)
-             *   LAZER:    range lbL00EDCE..lbL00EE22 → allow max 5 bounces
-             *             (cmp.w #6,24(a3) / bpl lbC00E6A8)
-             * Bounce logic: negate vx if moving horizontally into wall,
-             *               negate vy if moving vertically into wall.
+             * impact_on_wall tiles (0x01, 0x1d, 0x23) and reactor tiles
+             * (0x2a-0x2d, which always branch to impact_on_wall after
+             * patch_reactor_*): FLAMEARC bounces 1×, LAZER bounces 5×.
+             * All other weapons die here.
+             * Ref: impact_on_wall @ main.asm#L9702-L9788.
              */
-            int wtype = s_projectiles[i].weapon_type;
-            int max_bounces = 0;
-            if (wtype == WEAPON_FLAMEARC) max_bounces = 1;
-            else if (wtype == WEAPON_LAZER) max_bounces = 5;
-
-            if (s_projectiles[i].bounce_count > 0 && max_bounces > 0) {
+            if (tilemap_is_impact_wall(&g_cur_map, col, row) &&
+                    s_projectiles[i].bounce_count > 0) {
                 s_projectiles[i].bounce_count--;
-                /* Determine bounce axis by checking adjacent tiles */
-                int cx = tilemap_pixel_to_col(px - (int)(WORD)s_projectiles[i].vx);
-                int ry = tilemap_pixel_to_row(py - (int)(WORD)s_projectiles[i].vy);
-                int horiz_wall = tilemap_is_solid(&g_cur_map, col, ry);
-                int vert_wall  = tilemap_is_solid(&g_cur_map, cx,  row);
-                if (horiz_wall) s_projectiles[i].vx = (WORD)(-(int)(WORD)s_projectiles[i].vx);
-                if (vert_wall)  s_projectiles[i].vy = (WORD)(-(int)(WORD)s_projectiles[i].vy);
-                /* If neither axis resolved cleanly, negate both */
-                if (!horiz_wall && !vert_wall) {
-                    s_projectiles[i].vx = (WORD)(-(int)(WORD)s_projectiles[i].vx);
-                    s_projectiles[i].vy = (WORD)(-(int)(WORD)s_projectiles[i].vy);
+                /*
+                 * Bounce axis detection — exact ASM algorithm:
+                 *   vx >= 0 (moving right): check tile at (col-1, row).
+                 *     If tile type == 0x01 → negate vy.
+                 *   vx < 0  (moving left):  check tile at (col+1, row).
+                 *     If tile type == 0x01 → negate vy.
+                 *   vy >= 0 (moving down, using UPDATED vy from above):
+                 *     check tile at (col, row+1). If type == 0x01 → negate vx.
+                 *   vy < 0  (moving up, using UPDATED vy from above):
+                 *     check tile at (col, row-1). If type == 0x01 → negate vx.
+                 * Ref: lbC00E5C4-lbC00E64A @ main.asm#L9718-L9765.
+                 * Note: ASM checks neighbor attribute == 0x01 specifically
+                 *       (and.w #$3F,d4 / cmp.w #1,d4 @ main.asm#L9729-L9730).
+                 */
+                int16_t vx = (int16_t)s_projectiles[i].vx;
+                int16_t vy = (int16_t)s_projectiles[i].vy;
+
+                if (vx < 0) {
+                    /* Moving left: check tile to the RIGHT */
+                    if ((tilemap_attr(&g_cur_map, col + 1, row) & 0x3F) == 0x01)
+                        vy = (int16_t)-vy;
+                } else {
+                    /* Moving right (or zero): check tile to the LEFT.
+                     * Also play bounce sound — ASM plays it only in this branch
+                     * (lbC00E5C4, before the vx>=0 neighbor check).
+                     * Ref: move.w #46,d0 / jsr trigger_sample_select_channel
+                     *      @ main.asm#L9723-L9726. */
+                    if (!g_in_destruction_sequence)
+                        audio_play_sample(SAMPLE_RICOCHET);
+                    if ((tilemap_attr(&g_cur_map, col - 1, row) & 0x3F) == 0x01)
+                        vy = (int16_t)-vy;
                 }
-                /* Back the projectile out of the wall */
-                s_projectiles[i].x = (WORD)(px - (int)(WORD)s_projectiles[i].vx);
-                s_projectiles[i].y = (WORD)(py - (int)(WORD)s_projectiles[i].vy);
+
+                /* Vertical check uses the UPDATED vy from above */
+                if (vy < 0) {
+                    /* Moving up: check tile ABOVE */
+                    if ((tilemap_attr(&g_cur_map, col, row - 1) & 0x3F) == 0x01)
+                        vx = (int16_t)-vx;
+                } else {
+                    /* Moving down (or zero): check tile BELOW */
+                    if ((tilemap_attr(&g_cur_map, col, row + 1) & 0x3F) == 0x01)
+                        vx = (int16_t)-vx;
+                }
+
+                /*
+                 * Fallback: lbW0004D6 alternates ±8 every bounce call.
+                 * If vx or vy is still zero, assign the current fallback so
+                 * the projectile never gets stuck with zero velocity.
+                 * Ref: neg.w lbW0004D6 / tst.w 4(a3) / move.w … @ main.asm#L9759-L9765.
+                 */
+                s_bounce_fallback = -s_bounce_fallback;
+                if (vx == 0) vx = (int16_t)s_bounce_fallback;
+                if (vy == 0) vy = (int16_t)s_bounce_fallback;
+
+                s_projectiles[i].vx = (WORD)vx;
+                s_projectiles[i].vy = (WORD)vy;
+
+                /*
+                 * LAZER only: update direction sprite from new velocity.
+                 * FLAMEARC returns without this step (cmp.l #lbL00EC36 / beq return
+                 * @ main.asm#L9766-L9767).
+                 * Ref: lbC00E66C-lbC00E698 @ main.asm#L9766-L9781.
+                 */
+                if (s_projectiles[i].weapon_type == WEAPON_LAZER)
+                    s_projectiles[i].direction = lazer_velocity_to_dir(vx, vy);
+
             } else {
-                /* Standard wall hit: deactivate + trigger impact animation.
-                 * Ref: lbC00E6A8 @ main.asm#L9783-L9788. */
+                /* Standard wall hit (all other weapons, or bounces exhausted):
+                 * deactivate projectile and trigger impact flash animation.
+                 * Ref: lbC00E6A8 @ main.asm#L9783-L9788:
+                 *   clr.w 24(a3)           ; clear bounce counter
+                 *   move.w #32000,0(a3)    ; disable projectile (move off-screen)
+                 *   move.l #lbL018CBA,40(a4) ; set impact animation
+                 *
+                 * For door tiles (0x03) this is a stub — full impact_on_door
+                 * logic (300-damage threshold, force_door) is level infrastructure
+                 * not yet ported (Ref: impact_on_door @ main.asm#L9669-L9700).
+                 * For reactor tiles (0x2a-0x2d) the reactor-damage pass is a stub
+                 * (Ref: patch_reactor_* @ main.asm#L9603-L9658).
+                 */
                 s_projectiles[i].active       = 0;
                 s_projectiles[i].impact_active = 1;
                 s_projectiles[i].impact_x     = px;

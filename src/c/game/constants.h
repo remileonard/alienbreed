@@ -125,6 +125,7 @@
 #define SAMPLE_FIRE_GUN         37
 #define SAMPLE_DESCENT          41
 #define SAMPLE_DESCENT_END      42
+#define SAMPLE_RICOCHET         46  /* FLAMEARC/LAZER wall bounce @ main.asm#L9723 */
 #define SAMPLE_TYPE_WRITER      48
 #define SAMPLE_DYING_PLAYER     73
 #define SAMPLE_EMPTY            76
