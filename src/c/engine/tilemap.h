@@ -114,28 +114,39 @@ static inline int tilemap_is_alien_solid(const LevelMap *map, int col, int row)
 
 /*
  * Returns 1 if a projectile should be stopped by this tile.
- * Covers all non-impact_none entries of weapons_special_impact_table:
+ * Covers tiles that ultimately reach impact_on_wall / lbC00E6A8:
  *   0x01        = wall         → impact_on_wall
- *   0x03        = door         → impact_on_door
- *   0x08        = fire door left button  → patch_fire_door_left_btn
- *   0x09        = fire door right button → patch_fire_door_right_btn
- *   0x12        = alarm door left button → patch_fire_door_left_btn_alarm
- *   0x13        = alarm door right button → patch_fire_door_right_btn_alarm
- *   0x19-0x1c   = level-specific (lbC00E83E/E864/E88A/E8B0)
+ *   0x03        = door         → impact_on_door → impact_on_wall
  *   0x1d        = wall variant → impact_on_wall
  *   0x23        = hard-climb wall (alien-solid) → impact_on_wall
  *   0x2a-0x2d   = reactor walls → patch_reactor_* → impact_on_wall
+ * NOTE: 0x08/0x09/0x12/0x13 (fire door buttons) are NOT blocking: they only
+ *   trigger a visual patch and the projectile continues (they rts without
+ *   calling lbC00E6A8 / impact_on_wall).  Check with
+ *   tilemap_is_projectile_trigger() for those.
+ * NOTE: 0x19-0x1c are level-3 triggers that do NOT stop the projectile.
  * Ref: weapons_special_impact_table @ main.asm#L9535-L9599.
  */
 static inline int tilemap_is_projectile_blocking(const LevelMap *map, int col, int row)
 {
     UBYTE a = tilemap_attr(map, col, row);
     return (a == 0x01 || a == 0x03 ||
-            a == 0x08 || a == 0x09 ||
-            a == 0x12 || a == 0x13 ||
-            (a >= 0x19 && a <= 0x1d) ||
+            a == 0x1d ||
             a == 0x23 ||
             (a >= 0x2a && a <= 0x2d));
+}
+
+/*
+ * Returns 1 if the tile triggers a non-blocking side-effect when a projectile
+ * passes through it (fire door buttons, alarm buttons).
+ * The projectile is NOT stopped — the tile just triggers its effect and the
+ * projectile continues moving.
+ * Ref: patch_fire_door_left_btn / right_btn / alarm variants @ main.asm#L9790-L9866.
+ */
+static inline int tilemap_is_projectile_trigger(const LevelMap *map, int col, int row)
+{
+    UBYTE a = tilemap_attr(map, col, row);
+    return (a == 0x08 || a == 0x09 || a == 0x12 || a == 0x13);
 }
 
 /*

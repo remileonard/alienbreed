@@ -805,18 +805,135 @@ void alien_update_all(void)
         /* --- Impact dispatch (weapons_special_impact_table) ---
          * Ref: calc_shot_impact → weapons_special_impact_table @ main.asm#L9513-L9599.
          * tile_attr & 0x3F selects the dispatch entry (0x00–0x3F).
-         * Only tiles with non-impact_none entries stop the projectile.
+         *
+         * Two categories:
+         *  a) Non-blocking triggers (fire door buttons 0x08/0x09/0x12/0x13):
+         *     apply tile effect and let the projectile continue.
+         *  b) Blocking tiles (0x01/0x03/0x1d/0x23/0x2a-0x2d): stop or bounce.
          */
         int px = (int)(WORD)s_projectiles[i].x;
         int py = (int)(WORD)s_projectiles[i].y;
         int col = tilemap_pixel_to_col(px);
         int row = tilemap_pixel_to_row(py);
-        if (tilemap_is_projectile_blocking(&g_cur_map, col, row)) {
+        UBYTE attr = tilemap_attr(&g_cur_map, col, row) & 0x3F;
+
+        /* ── Non-blocking trigger tiles (fire door buttons) ─────────────
+         * patch_fire_door_left_btn (0x08) / right_btn (0x09):
+         *   Play door sound, floor-replace the button and 3 adjacent door
+         *   panel tiles.  Projectile is NOT stopped.
+         *   Tile column offsets:
+         *     left  button: +0, +3, +2, +4  (Ref: main.asm#L9790-L9804)
+         *     right button: +0, -1, -2, -4  (Ref: main.asm#L9806-L9820)
+         *
+         * patch_fire_door_left_btn_alarm  (0x12) / right_btn_alarm (0x13):
+         *   Same as above but also increment alarm counter (level 3 only).
+         *   When counter reaches 3 → self-destruct (checked in
+         *   level_check_destruction, Ref: lbC000E56 @ main.asm#L536).
+         *   Dedup: ignore re-hits of the same tile (lbL00E756 @ main.asm#L9822).
+         *   Ref: main.asm#L9824-L9866.
+         */
+        if (tilemap_is_projectile_trigger(&g_cur_map, col, row)) {
+            audio_play_sample(SAMPLE_OPENING_DOOR);
+            if (attr == 0x08 || attr == 0x12) {
+                /* Left button: col+0, col+3, col+2, col+4 */
+                tilemap_replace_tile(&g_cur_map, col,     row);
+                tilemap_replace_tile(&g_cur_map, col + 3, row);
+                tilemap_replace_tile(&g_cur_map, col + 2, row);
+                tilemap_replace_tile(&g_cur_map, col + 4, row);
+            } else {
+                /* Right button: col+0, col-1, col-2, col-4 */
+                tilemap_replace_tile(&g_cur_map, col,     row);
+                tilemap_replace_tile(&g_cur_map, col - 1, row);
+                tilemap_replace_tile(&g_cur_map, col - 2, row);
+                tilemap_replace_tile(&g_cur_map, col - 4, row);
+            }
+            /* Alarm variants: increment counter for a new tile */
+            if ((attr == 0x12 || attr == 0x13) &&
+                    g_alarm_system_active &&
+                    (col != g_alarm_last_col || row != g_alarm_last_row)) {
+                g_alarm_buttons_pressed++;
+                g_alarm_last_col = col;
+                g_alarm_last_row = row;
+            }
+            /* Projectile continues — do NOT deactivate */
+        } else if (tilemap_is_projectile_blocking(&g_cur_map, col, row)) {
             /*
-             * impact_on_wall tiles (0x01, 0x1d, 0x23) and reactor tiles
-             * (0x2a-0x2d, which always branch to impact_on_wall after
-             * patch_reactor_*): FLAMEARC bounces 1×, LAZER bounces 5×.
-             * All other weapons die here.
+             * ── impact_on_door (tile 0x03) ─────────────────────────────
+             * Ref: impact_on_door @ main.asm#L9669-L9700.
+             * Play sample 4 on every hit.  Track cumulative damage on
+             * the current door tile; reset the accumulator when the
+             * projectile hits a different tile (lbL00E4EC / clr door_impact).
+             * When accumulated strength >= 300, give the firing player a
+             * temporary key and call open_door (= force_door path in ASM).
+             * Always falls through to impact_on_wall (bounce/die) below.
+             */
+            if (attr == 0x03) {
+                audio_play_sample(SAMPLE_DOOR_HIT);
+                if (col != g_door_impact_col || row != g_door_impact_row) {
+                    g_door_impact_col   = col;
+                    g_door_impact_row   = row;
+                    g_door_impact_accum = 0;
+                }
+                g_door_impact_accum += (int)(WORD)s_projectiles[i].strength;
+                if (g_door_impact_accum >= 300) {
+                    g_door_impact_accum = 0;
+                    int pi = s_projectiles[i].player_idx;
+                    if (pi >= 0 && pi < MAX_PLAYERS) {
+                        Player *p = &g_players[pi];
+                        /* Temporarily grant one key so open_door can work
+                         * without requiring the player to carry a key.
+                         * Mirrors: addq.w #1,PLAYER_KEYS(a0) / bsr force_door
+                         * then the key is consumed by open_door itself.
+                         * Ref: lbC00E56C-lbC00E574 @ main.asm#L9697-L9699. */
+                        p->keys++;
+                        open_door(p);
+                    }
+                }
+                /* falls through to impact_on_wall below */
+            }
+
+            /*
+             * ── patch_reactor_* (tiles 0x2a-0x2d) ─────────────────────
+             * Ref: patch_reactor_up/left/down/right @ main.asm#L9603-L9658.
+             * Each reactor face needs exactly 6 projectile hits to blow out.
+             * Hits 1-5 and 7+: pure impact_on_wall (bounce or die).
+             * Hit 6: floor-replace the face tile, play sample 11, then also
+             *   check if all 4 faces are done (all counters non-zero) →
+             *   trigger self-destruct (check_reactors / lbC000E56 path).
+             * Falls through to impact_on_wall in all cases.
+             */
+            else if (attr >= 0x2a && attr <= 0x2d) {
+                int *hit_count;
+                switch (attr) {
+                case 0x2a: hit_count = &g_reactor_up_done;    break;
+                case 0x2b: hit_count = &g_reactor_left_done;  break;
+                case 0x2c: hit_count = &g_reactor_down_done;  break;
+                default:   hit_count = &g_reactor_right_done; break;
+                }
+                (*hit_count)++;
+                if (*hit_count == 6) {
+                    tilemap_replace_tile(&g_cur_map, col, row);
+                    audio_play_sample(SAMPLE_REACTOR_BLAST);
+                    /*
+                     * check_reactors: all 4 faces done (all counters != 0)?
+                     * Ref: check_reactors @ main.asm#L9640-L9649.
+                     * In ASM, beq.b patch_reactor means "if == 0 jump"
+                     * (i.e. NOT done yet); fall-through = all non-zero = all done.
+                     */
+                    if (g_reactor_up_done    != 0 &&
+                        g_reactor_left_done  != 0 &&
+                        g_reactor_down_done  != 0 &&
+                        g_reactor_right_done != 0) {
+                        level_start_destruction();
+                    }
+                }
+                /* falls through to impact_on_wall below */
+            }
+
+            /*
+             * ── impact_on_wall (tiles 0x01, 0x1d, 0x23, plus all above) ──
+             * FLAMEARC bounces 1×, LAZER bounces 5×.  All other weapons
+             * (or bounces exhausted) deactivate here.
              * Ref: impact_on_wall @ main.asm#L9702-L9788.
              */
             if (tilemap_is_impact_wall(&g_cur_map, col, row) &&
@@ -895,12 +1012,6 @@ void alien_update_all(void)
                  *   clr.w 24(a3)           ; clear bounce counter
                  *   move.w #32000,0(a3)    ; disable projectile (move off-screen)
                  *   move.l #lbL018CBA,40(a4) ; set impact animation
-                 *
-                 * For door tiles (0x03) this is a stub — full impact_on_door
-                 * logic (300-damage threshold, force_door) is level infrastructure
-                 * not yet ported (Ref: impact_on_door @ main.asm#L9669-L9700).
-                 * For reactor tiles (0x2a-0x2d) the reactor-damage pass is a stub
-                 * (Ref: patch_reactor_* @ main.asm#L9603-L9658).
                  */
                 s_projectiles[i].active       = 0;
                 s_projectiles[i].impact_active = 1;
