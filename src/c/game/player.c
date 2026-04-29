@@ -632,29 +632,34 @@ void player_update(Player *p, UWORD input_mask)
              * Arc spread for FLAMEARC / PLASMAGUN / SIDEWINDERS.
              * Each consecutive fire alternates: straight → CW-offset → CCW-offset.
              * The global counter cycles 1→2→3→0 (reset after 3).
-             * At counter=2: vx += raw_dy, vy -= raw_dx  (CW rotation offset)
-             * At counter=3: vx -= raw_dy, vy += raw_dx  (CCW rotation offset), reset
+             * At counter=2: vx += mult*raw_dy, vy -= mult*raw_dx  (CW rotation offset)
+             * At counter=3: vx -= mult*raw_dy, vy += mult*raw_dx  (CCW rotation offset), reset
              * Ref: lbL00EAA6 / cmp.w #3 / add.w d7,d4 / sub.w d6,d5
              *      @ main.asm#L9470-L9482.
-             * Note: non-arc weapons double d6/d7 first but don't apply arc rotation.
-             *       Arc weapons skip the doubling and use raw unit vector offsets.
+             *
+             * ASM uses raw unit-vector registers d6/d7 as spread offset.
+             * FLAMEARC (weapon 3) branches to arc code BEFORE the add.w d6,d6/d7 doubling,
+             *   so offset multiplier = 1 (d6=unit_x, d7=unit_y).
+             * PLASMAGUN (4) and SIDEWINDERS (6) branch AFTER the doubling,
+             *   so offset multiplier = 2 (d6=2*unit_x, d7=2*unit_y), giving wider spread.
+             * Ref: cmp.w #3,PLAYER_WEAPON_INDEX / add.w d6,d6 / add.w d7,d7
+             *      / cmp.w #4 / cmp.w #6 @ main.asm#L9462-L9468.
              */
             int wt = p->cur_weapon;
             if (wt == WEAPON_FLAMEARC || wt == WEAPON_PLASMAGUN ||
                 wt == WEAPON_SIDEWINDERS) {
+                int arc_mult = (wt == WEAPON_PLASMAGUN || wt == WEAPON_SIDEWINDERS) ? 2 : 1;
                 s_arc_counter++;
                 if (s_arc_counter == 1) {
                     /* straight — no change */
                 } else if (s_arc_counter == 2) {
-                    /* CW offset (counter == 2): add.w d7,d4 / sub.w d6,d5
-                     * Ref: lbC00E200 add.w d7,d4 @ main.asm#L9476. */
-                    vxi += dy;
-                    vyi -= dx;
+                    /* CW offset: add.w d7,d4 / sub.w d6,d5 @ main.asm#L9476. */
+                    vxi += arc_mult * dy;
+                    vyi -= arc_mult * dx;
                 } else {
-                    /* CCW offset (counter == 3): sub.w d7,d4 / add.w d6,d5 + reset.
-                     * Ref: lbC00E218 sub.w d7,d4 / clr.w (a1) @ main.asm#L9480-L9482. */
-                    vxi -= dy;
-                    vyi += dx;
+                    /* CCW offset: sub.w d7,d4 / add.w d6,d5 + reset @ main.asm#L9480-L9482. */
+                    vxi -= arc_mult * dy;
+                    vyi += arc_mult * dx;
                     s_arc_counter = 0;
                 }
             }

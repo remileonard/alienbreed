@@ -76,11 +76,12 @@ typedef struct {
     int   bounce_count;   /* remaining wall bounces */
     int   direction;      /* firing direction 1-8 (PLAYER_FACE_*) */
     /* Impact animation (played after projectile deactivates on wall/alien hit) */
-    int   impact_active;  /* 1=impact animation playing */
-    int   impact_x;       /* world x of impact */
-    int   impact_y;       /* world y of impact */
-    int   impact_frame;   /* 0-7 */
-    int   impact_timer;   /* ticks remaining on current impact frame */
+    int   impact_active;      /* 1=impact animation playing */
+    int   impact_x;           /* world x of impact */
+    int   impact_y;           /* world y of impact */
+    int   impact_frame;       /* 0-7 */
+    int   impact_timer;       /* ticks remaining on current impact frame */
+    int   flight_anim_frame;  /* cycling frame for animated in-flight BOBs (FLAMEARC: 0-7) */
 } Projectile;
 
 /*
@@ -125,6 +126,86 @@ static const int k_lazer_atlas[9][4] = {
     { 304,128, 16, 16 },  /* dir 6 dn-L  → BOB 71 */
     { 304, 96, 16, 16 },  /* dir 7 left  → BOB 70 */
     { 288,128, 16, 16 },  /* dir 8 up-L  → BOB 69 */
+};
+
+/*
+ * TWINFIRE in-flight BOB sprites: direction-dependent 32×30 static frame.
+ * BOBs 0-7 (lbL017B4E-lbL017C9E) from lbW018D4A entries 0-7.
+ * Mapping: lbL00EB8E/lbL00EBB2-lbL00EC06 @ main.asm#L10036-L10052.
+ *   dir 0,1 → BOB 0: atlas (0,  0)    dir 2 → BOB 1: (0, 32)
+ *   dir 3   → BOB 2: (0, 64)          dir 4 → BOB 3: (32, 0)
+ *   dir 5   → BOB 4: (32, 32)         dir 6 → BOB 5: (32, 64)
+ *   dir 7   → BOB 6: (64,  0)         dir 8 → BOB 7: (64, 32)
+ */
+static const int k_twinfire_atlas[9][4] = {
+    {  0,  0, 32, 30 },  /* dir 0       → BOB 0 */
+    {  0,  0, 32, 30 },  /* dir 1 up    → BOB 0 */
+    {  0, 32, 32, 30 },  /* dir 2 up-R  → BOB 1 */
+    {  0, 64, 32, 30 },  /* dir 3 right → BOB 2 */
+    { 32,  0, 32, 30 },  /* dir 4 dn-R  → BOB 3 */
+    { 32, 32, 32, 30 },  /* dir 5 down  → BOB 4 */
+    { 32, 64, 32, 30 },  /* dir 6 dn-L  → BOB 5 */
+    { 64,  0, 32, 30 },  /* dir 7 left  → BOB 6 */
+    { 64, 32, 32, 30 },  /* dir 8 up-L  → BOB 7 */
+};
+
+/*
+ * FLAMEARC in-flight BOB sprites: 8-frame animated 32×30 cycling sequence.
+ * BOBs 16-23 (lbL017E4E-lbL017F9E) from lbW018D4A entries 16-23, all delay=0.
+ * Ref: lbL00EC36 @ main.asm#L10063-L10070.
+ */
+static const int k_flamearc_atlas[8][4] = {
+    { 160, 32, 32, 30 },  /* BOB 16: lbL017E4E */
+    { 160, 64, 32, 30 },  /* BOB 17: lbL017E7E */
+    { 192,  0, 32, 30 },  /* BOB 18: lbL017EAE */
+    { 192, 32, 32, 30 },  /* BOB 19: lbL017EDE */
+    { 192, 64, 32, 30 },  /* BOB 20: lbL017F0E */
+    { 224,  0, 32, 30 },  /* BOB 21: lbL017F3E */
+    { 224, 32, 32, 30 },  /* BOB 22: lbL017F6E */
+    { 224, 64, 32, 30 },  /* BOB 23: lbL017F9E */
+};
+#define FLAMEARC_ANIM_FRAMES 8
+
+/*
+ * PLASMAGUN in-flight BOB sprites: direction-dependent 32×30 static frame.
+ * BOBs 32-39 (lbL01814E-lbL01829E) from lbW018D4A entries 32-39.
+ * Mapping: lbL00ECFE/lbL00ED22-lbL00ED76 @ main.asm#L10090-L10106.
+ *   dir 0,1 → BOB 32: atlas (128, 96)    dir 2 → BOB 33: (128,128)
+ *   dir 3   → BOB 34: (160, 96)          dir 4 → BOB 35: (160,128)
+ *   dir 5   → BOB 36: (192, 96)          dir 6 → BOB 37: (192,128)
+ *   dir 7   → BOB 38: (224, 96)          dir 8 → BOB 39: (224,128)
+ */
+static const int k_plasmagun_atlas[9][4] = {
+    { 128,  96, 32, 30 },  /* dir 0       → BOB 32 */
+    { 128,  96, 32, 30 },  /* dir 1 up    → BOB 32 */
+    { 128, 128, 32, 30 },  /* dir 2 up-R  → BOB 33 */
+    { 160,  96, 32, 30 },  /* dir 3 right → BOB 34 */
+    { 160, 128, 32, 30 },  /* dir 4 dn-R  → BOB 35 */
+    { 192,  96, 32, 30 },  /* dir 5 down  → BOB 36 */
+    { 192, 128, 32, 30 },  /* dir 6 dn-L  → BOB 37 */
+    { 224,  96, 32, 30 },  /* dir 7 left  → BOB 38 */
+    { 224, 128, 32, 30 },  /* dir 8 up-L  → BOB 39 */
+};
+
+/*
+ * SIDEWINDERS in-flight BOB sprites: direction-dependent 32×30 static frame.
+ * BOBs 8-15 (lbL017CCE-lbL017E1E) from lbW018D4A entries 8-15.
+ * Mapping: lbL00EC7A/lbL00EC9E-lbL00ECF2 @ main.asm#L10072-L10088.
+ *   dir 0,1 → BOB  8: atlas ( 64, 64)    dir 2 → BOB  9: ( 96,  0)
+ *   dir 3   → BOB 10: ( 96, 32)          dir 4 → BOB 11: ( 96, 64)
+ *   dir 5   → BOB 12: (128,  0)          dir 6 → BOB 13: (128, 32)
+ *   dir 7   → BOB 14: (128, 64)          dir 8 → BOB 15: (160,  0)
+ */
+static const int k_sidewinders_atlas[9][4] = {
+    {  64, 64, 32, 30 },  /* dir 0       → BOB  8 */
+    {  64, 64, 32, 30 },  /* dir 1 up    → BOB  8 */
+    {  96,  0, 32, 30 },  /* dir 2 up-R  → BOB  9 */
+    {  96, 32, 32, 30 },  /* dir 3 right → BOB 10 */
+    {  96, 64, 32, 30 },  /* dir 4 dn-R  → BOB 11 */
+    { 128,  0, 32, 30 },  /* dir 5 down  → BOB 12 */
+    { 128, 32, 32, 30 },  /* dir 6 dn-L  → BOB 13 */
+    { 128, 64, 32, 30 },  /* dir 7 left  → BOB 14 */
+    { 160,  0, 32, 30 },  /* dir 8 up-L  → BOB 15 */
 };
 
 #define MAX_PROJECTILES 32
@@ -668,6 +749,13 @@ void alien_update_all(void)
         s_projectiles[i].x += s_projectiles[i].vx;
         s_projectiles[i].y += s_projectiles[i].vy;
 
+        /* Advance FLAMEARC flight animation (8-frame looping sequence, delay=0
+         * per frame means one frame per tick.
+         * Ref: lbL00EC36 all delay=0 @ main.asm#L10063-L10070). */
+        if (s_projectiles[i].weapon_type == WEAPON_FLAMEARC)
+            s_projectiles[i].flight_anim_frame =
+                (s_projectiles[i].flight_anim_frame + 1) % FLAMEARC_ANIM_FRAMES;
+
         /* Flamethrower lifetime countdown — matches 8-frame lbL018D06 list
          * with delay=1 each @ main.asm#L13935. */
         if (s_projectiles[i].lifetime > 0) {
@@ -768,6 +856,7 @@ void alien_spawn_projectile(int player_idx, WORD x, WORD y,
             s_projectiles[i].impact_active = 0;
             s_projectiles[i].impact_frame  = 0;
             s_projectiles[i].impact_timer  = 0;
+            s_projectiles[i].flight_anim_frame = 0;
             return;
         }
     }
@@ -981,30 +1070,48 @@ void projectiles_render(void)
 
         case WEAPON_TWINFIRE:
             /*
-             * TWINFIRE: Small bright dot (single-frame BOB, lbL00EBB2).
-             * Render as 2×2 pixel rectangle using palette index 1.
+             * TWINFIRE: Direction-dependent single-frame 32×30 BOB.
+             * BOBs 0-7 (lbL017B4E-lbL017C9E, lbW018D4A entries 0-7).
+             * Ref: lbL00EB8E/lbL00EBB2-lbL00EC06 @ main.asm#L10036-L10052.
+             * Sprite centred on projectile position (blit at sx-16, sy-15).
              */
-            if (sx >= -2 && sx < 322 && sy >= -2 && sy < 258)
-                video_fill_rect(sx - 1, sy - 1, 2, 2, 1);
+            {
+                int dir = s_projectiles[i].direction;
+                if (dir < 0 || dir > 8) dir = 0;
+                draw_atlas_bob(sx - 16, sy - 15,
+                               k_twinfire_atlas[dir][0], k_twinfire_atlas[dir][1],
+                               k_twinfire_atlas[dir][2], k_twinfire_atlas[dir][3]);
+            }
             break;
 
         case WEAPON_FLAMEARC:
             /*
-             * FLAMEARC: Small arc-spread shot.
-             * Uses animated BOBs (8 frames per direction, lbL00EC36).
-             * Render as 3×3 pixel using color 2 (orange/red range in Amiga palette).
+             * FLAMEARC: 8-frame animated 32×30 BOB, same sequence for all directions.
+             * BOBs 16-23 (lbL017E4E-lbL017F9E), delay=0 → one frame per tick.
+             * Ref: lbL00EC12/lbL00EC36 @ main.asm#L10054-L10070.
              */
-            if (sx >= -3 && sx < 323 && sy >= -3 && sy < 259)
-                video_fill_rect(sx - 1, sy - 1, 3, 3, 2);
+            {
+                int f = s_projectiles[i].flight_anim_frame;
+                draw_atlas_bob(sx - 16, sy - 15,
+                               k_flamearc_atlas[f][0], k_flamearc_atlas[f][1],
+                               k_flamearc_atlas[f][2], k_flamearc_atlas[f][3]);
+            }
             break;
 
         case WEAPON_PLASMAGUN:
             /*
-             * PLASMAGUN: Arc-spread + penetrating plasma bolt.
-             * Slightly larger/brighter than FLAMEARC. Color 3 (further along palette).
+             * PLASMAGUN: Direction-dependent single-frame 32×30 BOB.
+             * BOBs 32-39 (lbL01814E-lbL01829E, lbW018D4A entries 32-39).
+             * Ref: lbL00ECFE/lbL00ED22-lbL00ED76 @ main.asm#L10090-L10106.
+             * Sprite centred on projectile position (blit at sx-16, sy-15).
              */
-            if (sx >= -3 && sx < 323 && sy >= -3 && sy < 259)
-                video_fill_rect(sx - 1, sy - 1, 3, 3, 3);
+            {
+                int dir = s_projectiles[i].direction;
+                if (dir < 0 || dir > 8) dir = 0;
+                draw_atlas_bob(sx - 16, sy - 15,
+                               k_plasmagun_atlas[dir][0], k_plasmagun_atlas[dir][1],
+                               k_plasmagun_atlas[dir][2], k_plasmagun_atlas[dir][3]);
+            }
             break;
 
         case WEAPON_FLAMETHROWER:
@@ -1033,11 +1140,22 @@ void projectiles_render(void)
 
         case WEAPON_SIDEWINDERS:
             /*
-             * SIDEWINDERS: Arc-spread shots, visually similar to TWINFIRE.
-             * Color 1, 2×2 dot.
+             * SIDEWINDERS: Direction-dependent single-frame 32×30 BOB.
+             * BOBs 8-15 (lbL017CCE-lbL017E1E, lbW018D4A entries 8-15).
+             * Ref: lbL00EC7A/lbL00EC9E-lbL00ECF2 @ main.asm#L10072-L10088.
+             * Fire pattern: arc-spread (3-shot alternating burst, same mechanism as
+             * FLAMEARC and PLASMAGUN — lbC00E200 @ main.asm#L9470), but with
+             * doubled direction-vector offsets (d6/d7 doubled before branching,
+             * giving a wider spread than FLAMEARC).
+             * Sprite centred on projectile position (blit at sx-16, sy-15).
              */
-            if (sx >= -2 && sx < 322 && sy >= -2 && sy < 258)
-                video_fill_rect(sx - 1, sy - 1, 2, 2, 1);
+            {
+                int dir = s_projectiles[i].direction;
+                if (dir < 0 || dir > 8) dir = 0;
+                draw_atlas_bob(sx - 16, sy - 15,
+                               k_sidewinders_atlas[dir][0], k_sidewinders_atlas[dir][1],
+                               k_sidewinders_atlas[dir][2], k_sidewinders_atlas[dir][3]);
+            }
             break;
 
         case WEAPON_LAZER:
