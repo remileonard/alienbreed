@@ -90,14 +90,14 @@ typedef struct {
  * Ref: lbW018D4A entries 56-63 @ main.asm#L14001-L14008.
  */
 static const int k_impact_frames[8][4] = {
-    { 272, 48, 16, 16 },   /* BOB 56: lbL0185CE */
-    { 272, 80, 16, 16 },   /* BOB 57: lbL0185FE */
-    { 288, 16, 16, 16 },   /* BOB 58: lbL01862E */
-    { 288, 48, 16, 16 },   /* BOB 59: lbL01865E */
-    { 288, 80, 16, 16 },   /* BOB 60: lbL01868E */
-    { 304, 16, 16, 16 },   /* BOB 61: lbL0186BE */
-    { 304, 48, 16, 16 },   /* BOB 62: lbL0186EE */
-    { 304, 80, 16, 16 },   /* BOB 63: lbL01871E */
+    { 192, 224, 16, 14 },   /* frame 0: lbL0185CE → lbW0188CE[56]: $C0,$E0,$10,$0E */
+    { 208, 224, 16, 14 },   /* frame 1: lbL0185FE → lbW0188CE[57]: $D0,$E0,$10,$0E */
+    { 224, 224, 16, 14 },   /* frame 2: lbL01862E → lbW0188CE[58]: $E0,$E0,$10,$0E */
+    { 240, 224, 16, 14 },   /* frame 3: lbL01865E → lbW0188CE[59]: $F0,$E0,$10,$0E */
+    { 192, 240, 16, 14 },   /* frame 4: lbL01868E → lbW0188CE[60]: $C0,$F0,$10,$0E */
+    { 208, 240, 16, 14 },   /* frame 5: lbL0186BE → lbW0188CE[61]: $D0,$F0,$10,$0E */
+    { 224, 240, 16, 14 },   /* frame 6: lbL0186EE → lbW0188CE[62]: $E0,$F0,$10,$0E */
+    { 240, 240, 16, 14 },   /* frame 7: lbL01871E → lbW0188CE[63]: $F0,$F0,$10,$0E */
 };
 #define IMPACT_ANIM_FRAMES   8
 #define IMPACT_FRAME_TICKS   1  /* 1 tick per impact frame (25 Hz cadence) */
@@ -109,103 +109,142 @@ static const int k_impact_frames[8][4] = {
  */
 
 /*
- * Lazer in-flight atlas coordinates (BOBs 68-71, per direction group):
- *   dirs 0,1,5 (idle/up/down)    → BOB 68: x=288,y=96
- *   dirs 2,6   (diag up/down-L)  → BOB 71: x=304,y=128
- *   dirs 3,7   (right/left)      → BOB 70: x=304,y=96
- *   dirs 4,8   (diag down/up-R)  → BOB 69: x=288,y=128
- * Ref: lbL00EDAA/lbL00EDCE-lbL00EE22 @ main.asm#L10119-L10135.
+ * Lazer in-flight atlas coordinates: 16×14 sprites from lbW0188CE entries 68-71.
+ * Mapping from lbL00EDAA/lbL00EDCE-lbL00EE22 @ main.asm#L10119-L10135:
+ *   dirs 0,1,5 → BOB entry 68: lbW0188CE $100,$F0,$10,$0E = (256,240,16,14)
+ *   dirs 2,6   → BOB entry 71: lbW0188CE $130,$F0,$10,$0E = (304,240,16,14)
+ *   dirs 3,7   → BOB entry 70: lbW0188CE $120,$F0,$10,$0E = (288,240,16,14)
+ *   dirs 4,8   → BOB entry 69: lbW0188CE $110,$F0,$10,$0E = (272,240,16,14)
  */
 static const int k_lazer_atlas[9][4] = {
-    { 288, 96, 16, 16 },  /* dir 0 idle  → BOB 68 */
-    { 288, 96, 16, 16 },  /* dir 1 up    → BOB 68 */
-    { 304,128, 16, 16 },  /* dir 2 up-R  → BOB 71 */
-    { 304, 96, 16, 16 },  /* dir 3 right → BOB 70 */
-    { 288,128, 16, 16 },  /* dir 4 dn-R  → BOB 69 */
-    { 288, 96, 16, 16 },  /* dir 5 down  → BOB 68 */
-    { 304,128, 16, 16 },  /* dir 6 dn-L  → BOB 71 */
-    { 304, 96, 16, 16 },  /* dir 7 left  → BOB 70 */
-    { 288,128, 16, 16 },  /* dir 8 up-L  → BOB 69 */
+    { 256, 240, 16, 14 },  /* dir 0 idle  → lbW0188CE[68] */
+    { 256, 240, 16, 14 },  /* dir 1 up    → lbW0188CE[68] */
+    { 304, 240, 16, 14 },  /* dir 2 up-R  → lbW0188CE[71] */
+    { 288, 240, 16, 14 },  /* dir 3 right → lbW0188CE[70] */
+    { 272, 240, 16, 14 },  /* dir 4 dn-R  → lbW0188CE[69] */
+    { 256, 240, 16, 14 },  /* dir 5 down  → lbW0188CE[68] */
+    { 304, 240, 16, 14 },  /* dir 6 dn-L  → lbW0188CE[71] */
+    { 288, 240, 16, 14 },  /* dir 7 left  → lbW0188CE[70] */
+    { 272, 240, 16, 14 },  /* dir 8 up-L  → lbW0188CE[69] */
 };
 
 /*
- * TWINFIRE in-flight BOB sprites: direction-dependent 32×30 static frame.
- * BOBs 0-7 (lbL017B4E-lbL017C9E) from lbW018D4A entries 0-7.
- * Mapping: lbL00EB8E/lbL00EBB2-lbL00EC06 @ main.asm#L10036-L10052.
- *   dir 0,1 → BOB 0: atlas (0,  0)    dir 2 → BOB 1: (0, 32)
- *   dir 3   → BOB 2: (0, 64)          dir 4 → BOB 3: (32, 0)
- *   dir 5   → BOB 4: (32, 32)         dir 6 → BOB 5: (32, 64)
- *   dir 7   → BOB 6: (64,  0)         dir 8 → BOB 7: (64, 32)
+ * MACHINEGUN in-flight BOB sprites: direction-dependent 16×14 sprite.
+ * BOB animation structs lbL017FCE-lbL01811E → lbL01790A entries 24-31.
+ * Each maps to one lbW0188CE descriptor (entries 24-31, all at y=176=0xB0):
+ *   dir 0,1 → entry 24: $40,$B0,$10,$0E = (64, 176,16,14)
+ *   dir 2   → entry 25: $50,$B0  dir 3 → entry 26: $60,$B0
+ *   dir 4   → entry 27: $70,$B0  dir 5 → entry 28: $80,$B0
+ *   dir 6   → entry 29: $90,$B0  dir 7 → entry 30: $A0,$B0
+ *   dir 8   → entry 31: $B0,$B0
+ * In the ASM the bullet shows for 1 frame then turns blank (delay 0 then
+ * 32000); we render it for the full flight as there is no animation-frame
+ * timer in this C port.
+ * Ref: lbL00EACA @ main.asm#L10010-L10034.
+ */
+static const int k_machinegun_atlas[9][4] = {
+    {  64, 176, 16, 14 },  /* dir 0       → lbW0188CE[24] */
+    {  64, 176, 16, 14 },  /* dir 1 up    → lbW0188CE[24] */
+    {  80, 176, 16, 14 },  /* dir 2 up-R  → lbW0188CE[25] */
+    {  96, 176, 16, 14 },  /* dir 3 right → lbW0188CE[26] */
+    { 112, 176, 16, 14 },  /* dir 4 dn-R  → lbW0188CE[27] */
+    { 128, 176, 16, 14 },  /* dir 5 down  → lbW0188CE[28] */
+    { 144, 176, 16, 14 },  /* dir 6 dn-L  → lbW0188CE[29] */
+    { 160, 176, 16, 14 },  /* dir 7 left  → lbW0188CE[30] */
+    { 176, 176, 16, 14 },  /* dir 8 up-L  → lbW0188CE[31] */
+};
+
+/*
+ * TWINFIRE in-flight BOB sprites: direction-dependent 16×14 static frame.
+ * BOB animation structs lbL017B4E-lbL017C9E → lbL01790A entries 0-7.
+ * Each maps to one lbW0188CE descriptor (entries 0-7, all at y=160=0xA0):
+ *   dir 0,1 → entry 0: $C0,$A0,$10,$0E = (192,160,16,14)
+ *   dir 2   → entry 1: $D0,$A0  dir 3 → entry 2: $E0,$A0
+ *   dir 4   → entry 3: $F0,$A0  dir 5 → entry 4: $100,$A0
+ *   dir 6   → entry 5: $110,$A0 dir 7 → entry 6: $120,$A0
+ *   dir 8   → entry 7: $130,$A0
+ * Ref: lbL00EB8E/lbL00EBB2-lbL00EC06 @ main.asm#L10036-L10052.
  */
 static const int k_twinfire_atlas[9][4] = {
-    {  0,  0, 32, 30 },  /* dir 0       → BOB 0 */
-    {  0,  0, 32, 30 },  /* dir 1 up    → BOB 0 */
-    {  0, 32, 32, 30 },  /* dir 2 up-R  → BOB 1 */
-    {  0, 64, 32, 30 },  /* dir 3 right → BOB 2 */
-    { 32,  0, 32, 30 },  /* dir 4 dn-R  → BOB 3 */
-    { 32, 32, 32, 30 },  /* dir 5 down  → BOB 4 */
-    { 32, 64, 32, 30 },  /* dir 6 dn-L  → BOB 5 */
-    { 64,  0, 32, 30 },  /* dir 7 left  → BOB 6 */
-    { 64, 32, 32, 30 },  /* dir 8 up-L  → BOB 7 */
+    { 192, 160, 16, 14 },  /* dir 0       → lbW0188CE[0] */
+    { 192, 160, 16, 14 },  /* dir 1 up    → lbW0188CE[0] */
+    { 208, 160, 16, 14 },  /* dir 2 up-R  → lbW0188CE[1] */
+    { 224, 160, 16, 14 },  /* dir 3 right → lbW0188CE[2] */
+    { 240, 160, 16, 14 },  /* dir 4 dn-R  → lbW0188CE[3] */
+    { 256, 160, 16, 14 },  /* dir 5 down  → lbW0188CE[4] */
+    { 272, 160, 16, 14 },  /* dir 6 dn-L  → lbW0188CE[5] */
+    { 288, 160, 16, 14 },  /* dir 7 left  → lbW0188CE[6] */
+    { 304, 160, 16, 14 },  /* dir 8 up-L  → lbW0188CE[7] */
 };
 
 /*
- * FLAMEARC in-flight BOB sprites: 8-frame animated 32×30 cycling sequence.
- * BOBs 16-23 (lbL017E4E-lbL017F9E) from lbW018D4A entries 16-23, all delay=0.
+ * FLAMEARC in-flight BOB sprites: 8-frame animated 16×14 cycling sequence.
+ * BOB animation structs lbL017E4E-lbL017F9E → lbL01790A entries 16-23.
+ * Each maps to one lbW0188CE descriptor (entries 16-23, all at y=160=0xA0):
+ *   frame 0 → entry 16: $40,$A0,$10,$0E = (64,160,16,14)
+ *   frame 1 → entry 17: $50,$A0  frame 2 → entry 18: $60,$A0
+ *   frame 3 → entry 19: $70,$A0  frame 4 → entry 20: $80,$A0
+ *   frame 5 → entry 21: $90,$A0  frame 6 → entry 22: $A0,$A0
+ *   frame 7 → entry 23: $B0,$A0
+ * All directions share the same 8-frame loop (delay=0 → one frame per tick).
  * Ref: lbL00EC36 @ main.asm#L10063-L10070.
  */
 static const int k_flamearc_atlas[8][4] = {
-    { 160, 32, 32, 30 },  /* BOB 16: lbL017E4E */
-    { 160, 64, 32, 30 },  /* BOB 17: lbL017E7E */
-    { 192,  0, 32, 30 },  /* BOB 18: lbL017EAE */
-    { 192, 32, 32, 30 },  /* BOB 19: lbL017EDE */
-    { 192, 64, 32, 30 },  /* BOB 20: lbL017F0E */
-    { 224,  0, 32, 30 },  /* BOB 21: lbL017F3E */
-    { 224, 32, 32, 30 },  /* BOB 22: lbL017F6E */
-    { 224, 64, 32, 30 },  /* BOB 23: lbL017F9E */
+    {  64, 160, 16, 14 },  /* frame 0: lbL017E4E → lbW0188CE[16] */
+    {  80, 160, 16, 14 },  /* frame 1: lbL017E7E → lbW0188CE[17] */
+    {  96, 160, 16, 14 },  /* frame 2: lbL017EAE → lbW0188CE[18] */
+    { 112, 160, 16, 14 },  /* frame 3: lbL017EDE → lbW0188CE[19] */
+    { 128, 160, 16, 14 },  /* frame 4: lbL017F0E → lbW0188CE[20] */
+    { 144, 160, 16, 14 },  /* frame 5: lbL017F3E → lbW0188CE[21] */
+    { 160, 160, 16, 14 },  /* frame 6: lbL017F6E → lbW0188CE[22] */
+    { 176, 160, 16, 14 },  /* frame 7: lbL017F9E → lbW0188CE[23] */
 };
 #define FLAMEARC_ANIM_FRAMES 8
 
 /*
- * PLASMAGUN in-flight BOB sprites: direction-dependent 32×30 static frame.
- * BOBs 32-39 (lbL01814E-lbL01829E) from lbW018D4A entries 32-39.
- * Mapping: lbL00ECFE/lbL00ED22-lbL00ED76 @ main.asm#L10090-L10106.
- *   dir 0,1 → BOB 32: atlas (128, 96)    dir 2 → BOB 33: (128,128)
- *   dir 3   → BOB 34: (160, 96)          dir 4 → BOB 35: (160,128)
- *   dir 5   → BOB 36: (192, 96)          dir 6 → BOB 37: (192,128)
- *   dir 7   → BOB 38: (224, 96)          dir 8 → BOB 39: (224,128)
+ * PLASMAGUN in-flight BOB sprites: direction-dependent 16×14 static frame.
+ * BOB animation structs lbL01814E-lbL01829E → lbL01790A entries 32-39.
+ * Each maps to one lbW0188CE descriptor (entries 32-39):
+ *   dir 0,1 → entry 32: $00,$A0,$10,$0E = (0, 160,16,14)
+ *   dir 2   → entry 33: $10,$A0  dir 3 → entry 34: $20,$A0
+ *   dir 4   → entry 35: $30,$A0  dir 5 → entry 36: $00,$B0
+ *   dir 6   → entry 37: $10,$B0  dir 7 → entry 38: $20,$B0
+ *   dir 8   → entry 39: $30,$B0
+ * Ref: lbL00ECFE/lbL00ED22-lbL00ED76 @ main.asm#L10090-L10106.
  */
 static const int k_plasmagun_atlas[9][4] = {
-    { 128,  96, 32, 30 },  /* dir 0       → BOB 32 */
-    { 128,  96, 32, 30 },  /* dir 1 up    → BOB 32 */
-    { 128, 128, 32, 30 },  /* dir 2 up-R  → BOB 33 */
-    { 160,  96, 32, 30 },  /* dir 3 right → BOB 34 */
-    { 160, 128, 32, 30 },  /* dir 4 dn-R  → BOB 35 */
-    { 192,  96, 32, 30 },  /* dir 5 down  → BOB 36 */
-    { 192, 128, 32, 30 },  /* dir 6 dn-L  → BOB 37 */
-    { 224,  96, 32, 30 },  /* dir 7 left  → BOB 38 */
-    { 224, 128, 32, 30 },  /* dir 8 up-L  → BOB 39 */
+    {  0, 160, 16, 14 },  /* dir 0       → lbW0188CE[32] */
+    {  0, 160, 16, 14 },  /* dir 1 up    → lbW0188CE[32] */
+    { 16, 160, 16, 14 },  /* dir 2 up-R  → lbW0188CE[33] */
+    { 32, 160, 16, 14 },  /* dir 3 right → lbW0188CE[34] */
+    { 48, 160, 16, 14 },  /* dir 4 dn-R  → lbW0188CE[35] */
+    {  0, 176, 16, 14 },  /* dir 5 down  → lbW0188CE[36] */
+    { 16, 176, 16, 14 },  /* dir 6 dn-L  → lbW0188CE[37] */
+    { 32, 176, 16, 14 },  /* dir 7 left  → lbW0188CE[38] */
+    { 48, 176, 16, 14 },  /* dir 8 up-L  → lbW0188CE[39] */
 };
 
 /*
- * SIDEWINDERS in-flight BOB sprites: direction-dependent 32×30 static frame.
- * BOBs 8-15 (lbL017CCE-lbL017E1E) from lbW018D4A entries 8-15.
- * Mapping: lbL00EC7A/lbL00EC9E-lbL00ECF2 @ main.asm#L10072-L10088.
- *   dir 0,1 → BOB  8: atlas ( 64, 64)    dir 2 → BOB  9: ( 96,  0)
- *   dir 3   → BOB 10: ( 96, 32)          dir 4 → BOB 11: ( 96, 64)
- *   dir 5   → BOB 12: (128,  0)          dir 6 → BOB 13: (128, 32)
- *   dir 7   → BOB 14: (128, 64)          dir 8 → BOB 15: (160,  0)
+ * SIDEWINDERS in-flight BOB sprites: direction-dependent 16×14 static frame.
+ * BOB animation structs lbL017CCE-lbL017E1E → lbL01790A entries 8-15.
+ * Each maps to one lbW0188CE descriptor (entries 8-15, all at y=176=0xB0):
+ *   dir 0,1 → entry 8:  $C0,$B0,$10,$0E = (192,176,16,14)
+ *   dir 2   → entry 9:  $D0,$B0  dir 3 → entry 10: $E0,$B0
+ *   dir 4   → entry 11: $F0,$B0  dir 5 → entry 12: $100,$B0
+ *   dir 6   → entry 13: $110,$B0 dir 7 → entry 14: $120,$B0
+ *   dir 8   → entry 15: $130,$B0
+ * Ref: lbL00EC7A/lbL00EC9E-lbL00ECF2 @ main.asm#L10072-L10088.
  */
 static const int k_sidewinders_atlas[9][4] = {
-    {  64, 64, 32, 30 },  /* dir 0       → BOB  8 */
-    {  64, 64, 32, 30 },  /* dir 1 up    → BOB  8 */
-    {  96,  0, 32, 30 },  /* dir 2 up-R  → BOB  9 */
-    {  96, 32, 32, 30 },  /* dir 3 right → BOB 10 */
-    {  96, 64, 32, 30 },  /* dir 4 dn-R  → BOB 11 */
-    { 128,  0, 32, 30 },  /* dir 5 down  → BOB 12 */
-    { 128, 32, 32, 30 },  /* dir 6 dn-L  → BOB 13 */
-    { 128, 64, 32, 30 },  /* dir 7 left  → BOB 14 */
-    { 160,  0, 32, 30 },  /* dir 8 up-L  → BOB 15 */
+    { 192, 176, 16, 14 },  /* dir 0       → lbW0188CE[8]  */
+    { 192, 176, 16, 14 },  /* dir 1 up    → lbW0188CE[8]  */
+    { 208, 176, 16, 14 },  /* dir 2 up-R  → lbW0188CE[9]  */
+    { 224, 176, 16, 14 },  /* dir 3 right → lbW0188CE[10] */
+    { 240, 176, 16, 14 },  /* dir 4 dn-R  → lbW0188CE[11] */
+    { 256, 176, 16, 14 },  /* dir 5 down  → lbW0188CE[12] */
+    { 272, 176, 16, 14 },  /* dir 6 dn-L  → lbW0188CE[13] */
+    { 288, 176, 16, 14 },  /* dir 7 left  → lbW0188CE[14] */
+    { 304, 176, 16, 14 },  /* dir 8 up-L  → lbW0188CE[15] */
 };
 
 #define MAX_PROJECTILES 32
@@ -890,7 +929,7 @@ void alien_update_all(void)
                          * then the key is consumed by open_door itself.
                          * Ref: lbC00E56C-lbC00E574 @ main.asm#L9697-L9699. */
                         p->keys++;
-                        open_door(p);
+                        open_door_at(p, col, row);
                     }
                 }
                 /* falls through to impact_on_wall below */
@@ -1254,7 +1293,7 @@ void projectiles_render(void)
             int f = s_projectiles[i].impact_frame;
             if (f < IMPACT_ANIM_FRAMES) {
                 int ix = s_projectiles[i].impact_x - g_camera_x - 8;
-                int iy = s_projectiles[i].impact_y - g_camera_y - 8;
+                int iy = s_projectiles[i].impact_y - g_camera_y - 7;
                 draw_atlas_bob(ix, iy,
                                k_impact_frames[f][0], k_impact_frames[f][1],
                                k_impact_frames[f][2], k_impact_frames[f][3]);
@@ -1271,25 +1310,35 @@ void projectiles_render(void)
 
         case WEAPON_MACHINEGUN:
             /*
-             * MACHINEGUN: No visible bullet during flight.
-             * The original shows a brief 1-frame BOB then uses a blank/invisible
-             * BOB for the remainder (lbL00EAEE: lbL017FCE,0 / lbW01389C,32000,-1).
-             * Only the impact flash is rendered (handled above).
-             * Ref: weapons_behaviour_table entry 1 @ main.asm#L10001-L10008.
-             */
-            break;
-
-        case WEAPON_TWINFIRE:
-            /*
-             * TWINFIRE: Direction-dependent single-frame 32×30 BOB.
-             * BOBs 0-7 (lbL017B4E-lbL017C9E, lbW018D4A entries 0-7).
-             * Ref: lbL00EB8E/lbL00EBB2-lbL00EC06 @ main.asm#L10036-L10052.
-             * Sprite centred on projectile position (blit at sx-16, sy-15).
+             * MACHINEGUN: Direction-dependent 16×14 bullet BOB.
+             * BOB animation structs lbL017FCE-lbL01811E → lbL01790A entries 24-31.
+             * In the original ASM, the bullet sprite is shown for 1 frame (delay=0)
+             * then replaced by a blank (lbW01389C, delay=32000).  We render it for
+             * the full flight duration since this C port has no per-frame animation
+             * sequencer.
+             * Ref: lbL00EACA @ main.asm#L10010-L10034.
              */
             {
                 int dir = s_projectiles[i].direction;
                 if (dir < 0 || dir > 8) dir = 0;
-                draw_atlas_bob(sx - 16, sy - 15,
+                draw_atlas_bob(sx - 8, sy - 7,
+                               k_machinegun_atlas[dir][0], k_machinegun_atlas[dir][1],
+                               k_machinegun_atlas[dir][2], k_machinegun_atlas[dir][3]);
+            }
+            break;
+
+        case WEAPON_TWINFIRE:
+            /*
+             * TWINFIRE: Direction-dependent single-frame 16×14 BOB.
+             * BOB animation structs lbL017B4E-lbL017C9E → lbL01790A entries 0-7.
+             * lbW0188CE descriptors at entries 0-7, all at y=160=0xA0.
+             * Ref: lbL00EB8E/lbL00EBB2-lbL00EC06 @ main.asm#L10036-L10052.
+             * Sprite centred on projectile position (blit at sx-8, sy-7).
+             */
+            {
+                int dir = s_projectiles[i].direction;
+                if (dir < 0 || dir > 8) dir = 0;
+                draw_atlas_bob(sx - 8, sy - 7,
                                k_twinfire_atlas[dir][0], k_twinfire_atlas[dir][1],
                                k_twinfire_atlas[dir][2], k_twinfire_atlas[dir][3]);
             }
@@ -1297,13 +1346,14 @@ void projectiles_render(void)
 
         case WEAPON_FLAMEARC:
             /*
-             * FLAMEARC: 8-frame animated 32×30 BOB, same sequence for all directions.
-             * BOBs 16-23 (lbL017E4E-lbL017F9E), delay=0 → one frame per tick.
-             * Ref: lbL00EC12/lbL00EC36 @ main.asm#L10054-L10070.
+             * FLAMEARC: 8-frame animated 16×14 BOB, same sequence for all directions.
+             * BOB animation structs lbL017E4E-lbL017F9E → lbL01790A entries 16-23.
+             * lbW0188CE descriptors at entries 16-23 (all at y=160=0xA0), delay=0.
+             * Ref: lbL00EC36 @ main.asm#L10063-L10070.
              */
             {
                 int f = s_projectiles[i].flight_anim_frame;
-                draw_atlas_bob(sx - 16, sy - 15,
+                draw_atlas_bob(sx - 8, sy - 7,
                                k_flamearc_atlas[f][0], k_flamearc_atlas[f][1],
                                k_flamearc_atlas[f][2], k_flamearc_atlas[f][3]);
             }
@@ -1311,15 +1361,16 @@ void projectiles_render(void)
 
         case WEAPON_PLASMAGUN:
             /*
-             * PLASMAGUN: Direction-dependent single-frame 32×30 BOB.
-             * BOBs 32-39 (lbL01814E-lbL01829E, lbW018D4A entries 32-39).
+             * PLASMAGUN: Direction-dependent single-frame 16×14 BOB.
+             * BOB animation structs lbL01814E-lbL01829E → lbL01790A entries 32-39.
+             * lbW0188CE descriptors at entries 32-39.
              * Ref: lbL00ECFE/lbL00ED22-lbL00ED76 @ main.asm#L10090-L10106.
-             * Sprite centred on projectile position (blit at sx-16, sy-15).
+             * Sprite centred on projectile position (blit at sx-8, sy-7).
              */
             {
                 int dir = s_projectiles[i].direction;
                 if (dir < 0 || dir > 8) dir = 0;
-                draw_atlas_bob(sx - 16, sy - 15,
+                draw_atlas_bob(sx - 8, sy - 7,
                                k_plasmagun_atlas[dir][0], k_plasmagun_atlas[dir][1],
                                k_plasmagun_atlas[dir][2], k_plasmagun_atlas[dir][3]);
             }
@@ -1327,12 +1378,13 @@ void projectiles_render(void)
 
         case WEAPON_FLAMETHROWER:
             /*
-             * FLAMETHROWER: Short-range flame BOB rendered from the alien atlas.
-             * lbL018D06 uses BOBs 56-63 (same 16×16 sprites as the impact flash,
-             * but with delay=1 each for an animated flame effect).
+             * FLAMETHROWER: Short-range flame BOB rendered from the atlas.
+             * lbL018D06 uses lbL01790A entries 56-63 (BOB structs lbL0185CE-lbL01871E)
+             * which share the same lbW0188CE descriptors as the impact flash (entries
+             * 56-63, 16×14 sprites at y=224/240).  delay=1 each → animated flame.
              * The 'lifetime' field counts down from FLAME_LIFETIME_TICKS=8 to 1;
              * we derive the current animation frame as (FLAME_LIFETIME_TICKS - lifetime).
-             * Ref: lbL018D06 @ main.asm#L13935; lbW018D4A entries 56-63.
+             * Ref: lbL018D06 @ main.asm#L13935; lbW0188CE entries 56-63.
              */
             {
                 int lt = s_projectiles[i].lifetime;
@@ -1341,7 +1393,7 @@ void projectiles_render(void)
                     if (f < 0) f = 0;
                     if (f >= IMPACT_ANIM_FRAMES) f = IMPACT_ANIM_FRAMES - 1;
                     int bx = sx - 8;
-                    int by = sy - 8;
+                    int by = sy - 7;
                     draw_atlas_bob(bx, by,
                                    k_impact_frames[f][0], k_impact_frames[f][1],
                                    k_impact_frames[f][2], k_impact_frames[f][3]);
@@ -1351,19 +1403,20 @@ void projectiles_render(void)
 
         case WEAPON_SIDEWINDERS:
             /*
-             * SIDEWINDERS: Direction-dependent single-frame 32×30 BOB.
-             * BOBs 8-15 (lbL017CCE-lbL017E1E, lbW018D4A entries 8-15).
+             * SIDEWINDERS: Direction-dependent single-frame 16×14 BOB.
+             * BOB animation structs lbL017CCE-lbL017E1E → lbL01790A entries 8-15.
+             * lbW0188CE descriptors at entries 8-15 (all at y=176=0xB0).
              * Ref: lbL00EC7A/lbL00EC9E-lbL00ECF2 @ main.asm#L10072-L10088.
              * Fire pattern: arc-spread (3-shot alternating burst, same mechanism as
              * FLAMEARC and PLASMAGUN — lbC00E200 @ main.asm#L9470), but with
              * doubled direction-vector offsets (d6/d7 doubled before branching,
              * giving a wider spread than FLAMEARC).
-             * Sprite centred on projectile position (blit at sx-16, sy-15).
+             * Sprite centred on projectile position (blit at sx-8, sy-7).
              */
             {
                 int dir = s_projectiles[i].direction;
                 if (dir < 0 || dir > 8) dir = 0;
-                draw_atlas_bob(sx - 16, sy - 15,
+                draw_atlas_bob(sx - 8, sy - 7,
                                k_sidewinders_atlas[dir][0], k_sidewinders_atlas[dir][1],
                                k_sidewinders_atlas[dir][2], k_sidewinders_atlas[dir][3]);
             }
@@ -1371,14 +1424,14 @@ void projectiles_render(void)
 
         case WEAPON_LAZER:
             /*
-             * LAZER: Penetrating beam — 16×16 BOB from atlas, direction-dependent.
-             * Ref: lbL00EDAA / lbL00EDCE-lbL00EE22 @ main.asm#L10119-L10135;
-             *      lbW018D4A entries 68-71 @ main.asm#L14009-L14016.
+             * LAZER: Penetrating beam — 16×14 BOB, direction-dependent.
+             * BOB animation structs → lbL01790A entries 68-71; lbW0188CE entries 68-71.
+             * Ref: lbL00EDAA / lbL00EDCE-lbL00EE22 @ main.asm#L10119-L10135.
              */
             {
                 int dir = s_projectiles[i].direction;
                 if (dir < 0 || dir > 8) dir = 0;
-                draw_atlas_bob(sx - 8, sy - 8,
+                draw_atlas_bob(sx - 8, sy - 7,
                                k_lazer_atlas[dir][0], k_lazer_atlas[dir][1],
                                k_lazer_atlas[dir][2], k_lazer_atlas[dir][3]);
             }

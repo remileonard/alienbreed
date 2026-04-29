@@ -237,6 +237,32 @@ void open_door(Player *p)
     audio_play_sample(SAMPLE_OPENING_DOOR);
 }
 
+/* Open the door tile at (col, row) and its paired neighbour, consuming one key.
+ * Mirrors the force_door path (lbC00E56C → open_door) used when a projectile
+ * accumulates >= 300 damage on a door tile.  The door position is already known
+ * (the hit tile's col/row) so we open it directly rather than re-deriving it
+ * from the player's walk position. */
+void open_door_at(Player *p, int col, int row)
+{
+    if (p->keys <= 0) return;
+
+    tilemap_replace_tile(&g_cur_map, col, row);
+
+    const int dirs[4][2] = { {0, -1}, {0, 1}, {-1, 0}, {1, 0} };
+    for (int i = 0; i < 4; i++) {
+        int adj_col = col + dirs[i][0];
+        int adj_row = row + dirs[i][1];
+        if (adj_col >= 0 && adj_col < MAP_COLS && adj_row >= 0 && adj_row < MAP_ROWS) {
+            if (tilemap_attr(&g_cur_map, adj_col, adj_row) == TILE_DOOR) {
+                tilemap_replace_tile(&g_cur_map, adj_col, adj_row);
+            }
+        }
+    }
+
+    p->keys--;
+    audio_play_sample(SAMPLE_OPENING_DOOR);
+}
+
 /* Check and handle tile interaction at player's current position.
  * Called from player_update() after each movement.
  * Mirrors logic from tiles_action_table @ main.asm#L5059.
