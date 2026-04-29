@@ -645,13 +645,17 @@ void player_update(Player *p, UWORD input_mask)
                 s_arc_counter++;
                 if (s_arc_counter == 1) {
                     /* straight — no change */
-                } else if (s_arc_counter == 3) {
-                    vxi -= dy;   /* CCW offset */
+                } else if (s_arc_counter == 2) {
+                    /* CW offset (counter == 2): add.w d7,d4 / sub.w d6,d5
+                     * Ref: lbC00E200 add.w d7,d4 @ main.asm#L9476. */
+                    vxi += dy;
+                    vyi -= dx;
+                } else {
+                    /* CCW offset (counter == 3): sub.w d7,d4 / add.w d6,d5 + reset.
+                     * Ref: lbC00E218 sub.w d7,d4 / clr.w (a1) @ main.asm#L9480-L9482. */
+                    vxi -= dy;
                     vyi += dx;
                     s_arc_counter = 0;
-                } else {         /* counter == 2 */
-                    vxi += dy;   /* CW offset */
-                    vyi -= dx;
                 }
             }
 

@@ -1033,7 +1033,7 @@ void projectiles_render(void)
 
         case WEAPON_SIDEWINDERS:
             /*
-             * SIDEWINDERS: Arc-spread shots, visual similar to TWINFIRE.
+             * SIDEWINDERS: Arc-spread shots, visually similar to TWINFIRE.
              * Color 1, 2×2 dot.
              */
             if (sx >= -2 && sx < 322 && sy >= -2 && sy < 258)
