@@ -715,27 +715,13 @@ void player_update(Player *p, UWORD input_mask)
              *   add.w  d2,d1 / swap / add.w / swap  → spawn = CENTER + offset
              * lbW00EA3E + 0  → weapons with PLAYER_WEAPON_INDEX >= 2 (TWINFIRE…LAZER)
              * lbW00EA3E + 32 → MACHINEGUN (weapon index 1)
-             * Ref: lbC00E264 @ main.asm#L9496-L9511, lbC006BE4 @ main.asm#L3896-L3899.
-             *
-             * Table values (x_off, y_off) indexed by direction 1-8;
-             * entry 0 is a dummy (unused — direction is always 1-8).
+             * Offsets indexed by direction 1-8; entry 0 is unused.
              */
-            static const int k_muzzle_x[2][9] = {
-                /* index 0: weapons with PLAYER_WEAPON_INDEX >= 2 (lbW00EA3E) */
-                { 0,  8, 12, 16, 12,  8,  6,  4,  6 },
-                /* index 1: MACHINEGUN only (lbW00EA3E + 32)                  */
-                { 0, 10,  2,  8,  2,  6, 12, 10, 14 }
-            };
-            static const int k_muzzle_y[2][9] = {
-                /* index 0: weapons with PLAYER_WEAPON_INDEX >= 2 (lbW00EA3E) */
-                { 0,  0,  6, 12, 12, 14, 10,  8,  6 },
-                /* index 1: MACHINEGUN only (lbW00EA3E + 32)                  */
-                { 0,  8, 14, 10,  4,  7,  2,  6, 13 }
-            };
-            int tbl = (wt == WEAPON_MACHINEGUN) ? 1 : 0;
+            static const int k_muzzle_x[9] = { 0,  2, 12, 16, 12,  0, -12, -16, -12 };
+            static const int k_muzzle_y[9] = { 0, -16, -12,  0, 12, 16,  12,  -2, -12 };
             int safe_dir = (dir >= 1 && dir <= 8) ? dir : 5;
-            int spawn_x = p->pos_x + k_muzzle_x[tbl][safe_dir];
-            int spawn_y = p->pos_y + k_muzzle_y[tbl][safe_dir];
+            int spawn_x = p->pos_x + k_muzzle_x[safe_dir];
+            int spawn_y = p->pos_y + k_muzzle_y[safe_dir];
 
             alien_spawn_projectile(p->port, (WORD)spawn_x, (WORD)spawn_y,
                                    vx, vy, p->weapon_strength,
