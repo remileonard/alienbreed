@@ -78,6 +78,15 @@
 #define ALIEN_ATLAS_COMPACT  0
 #define ALIEN_ATLAS_LEGACY   1
 
+/*
+ * ALT WALK sprites: used for the 1-frame "hit flash" when an alien takes
+ * damage.  Both COMPACT (lbW019A8E entries 24-39) and LEGACY (lbW01945E
+ * entries 8-23) store the bright hit-variant sprites at y=96 and y=128,
+ * with x = direction * ALIEN_SPRITE_W (same column layout as normal walk).
+ * Ref: lbC009B80 @ main.asm#L6675 (add.l #256,a6 → ALT WALK anim pointer).
+ */
+#define ALIEN_ALT_WALK_Y       96   /* atlas y of first ALT WALK row */
+
 /* Death/explosion sprite dimensions and atlas position */
 #define ALIEN_DEATH_FRAMES      16  /* 16 explosion frames total */
 #define ALIEN_DEATH_W           32  /* pixels wide  (0x20 = ALIEN_SPRITE_W) */

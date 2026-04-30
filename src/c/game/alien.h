@@ -24,6 +24,11 @@ typedef struct {
      * (Ref: lbB00A228 direction table @ main.asm#L7077) */
     int   direction;
     int   death_frame;   /* 0-15 during death explosion animation */
+    /* Hit flash: set to 1 by aliens_collisions_with_weapons when the alien
+     * takes damage; cleared by the render loop after drawing the ALT WALK
+     * sprite (y=96) for one frame.
+     * Mirrors ASM offset 50(a0) used in lbC009B80 @ main.asm#L6675. */
+    int   hit_flag;
     /* Pathfinding state */
     int   target_x, target_y;
 } Alien;
@@ -76,9 +81,28 @@ void alien_spawn_tick(void);
 int  alien_living_count(void);
 
 /* Spawn a player projectile at world position (x,y) moving at (vx,vy).
- * player_idx identifies the shooter for score/collision purposes. */
+ * player_idx    : identifies the shooter for score/collision purposes.
+ * weapon_type   : WEAPON_* constant for behaviour selection and rendering.
+ * penetrating   : 1 = bullet passes through aliens (PLASMAGUN/FLAMETHROWER/LAZER).
+ * lifetime      : auto-expire after this many 25 Hz ticks (-1 = infinite).
+ * bounce_count  : remaining wall bounces (FLAMEARC=1, LAZER=5, others=0).
+ * direction     : firing direction 1-8 (PLAYER_FACE_*) for sprite selection.
+ * Ref: lbC00E178/lbC00E21E @ main.asm#L9431-L9511. */
 void alien_spawn_projectile(int player_idx, WORD x, WORD y,
-                            WORD vx, WORD vy, WORD strength);
+                            WORD vx, WORD vy, WORD strength,
+                            int weapon_type, int penetrating,
+                            int lifetime, int bounce_count, int direction);
+
+/*
+ * Flamethrower in-flight lifetime in 25 Hz ticks.
+ * lbL018D06 has 8 entries with delay=1 each. delay=1 means each frame is
+ * held for delay+1 = 2 ticks (compare FLAMEARC delay=0 = 1 tick/frame).
+ * Total lifetime = 8 frames × 2 ticks = 16 ticks → range = 16 × 8 px = 128 px.
+ * With fire rate=3 (~4 ticks between shots) this gives 4 simultaneous bullets,
+ * each at a different animation stage, creating the continuous stream effect.
+ * Ref: lbL018D06 @ main.asm#L13935.
+ */
+#define FLAME_LIFETIME_TICKS 16
 
 /* Draw all active projectiles. */
 void projectiles_render(void);

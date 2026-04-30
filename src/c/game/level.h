@@ -53,6 +53,50 @@ extern int  g_boss_active;           /* 1 while a boss encounter is in progress 
 /* When >= 0, jump to this level index at next level transition (enter_level_N_holocode in main.asm). */
 extern int  g_holocode_jump_level;
 
+/* -----------------------------------------------------------------
+ * Projectile-environment interaction state
+ * ----------------------------------------------------------------- */
+
+/*
+ * Reactor hit counters — one per face (up=0x2a, left=0x2b, down=0x2c, right=0x2d).
+ * Each face requires 6 projectile hits to "blow out".  When all 4 faces are
+ * blown (all counters == 6), self-destruct is triggered.
+ * Mirrors reactor_up_done / reactor_left_done / reactor_down_done / reactor_right_done
+ * @ main.asm#L9661-L9664, reset in reset_game_variables @ L9747.
+ */
+extern int  g_reactor_up_done;
+extern int  g_reactor_left_done;
+extern int  g_reactor_down_done;
+extern int  g_reactor_right_done;
+
+/*
+ * Door-impact accumulator (impact_on_door @ main.asm#L9669).
+ * Tracks accumulated projectile damage to a specific door tile.
+ * When the total reaches 300, the door is force-opened by temporarily
+ * giving the firing player one key and calling force_door.
+ *
+ * g_door_impact_col/row: which door tile is being damaged (changed when
+ *   a projectile hits a different door, resetting the counter — mirrors
+ *   the lbL00E4EC / clr.w door_impact pattern @ main.asm#L9674-L9678).
+ * g_door_impact_accum  : accumulated weapon strength on the current tile.
+ */
+extern int  g_door_impact_accum;
+extern int  g_door_impact_col;
+extern int  g_door_impact_row;
+
+/*
+ * Alarm-system state (level 3 specific — lbW002AC2 @ main.asm#L1053).
+ * g_alarm_system_active : 1 if the alarm system is armed (only level 3).
+ * g_alarm_buttons_pressed: count of distinct alarm buttons hit (lbW002AC0).
+ *   When this reaches 3 and g_alarm_system_active==1, self-destruct fires.
+ * g_alarm_last_col/row  : tile coords of the last alarm button hit, to
+ *   prevent counting the same button twice (mirrors lbL00E756 @ main.asm#L9822).
+ */
+extern int  g_alarm_system_active;
+extern int  g_alarm_buttons_pressed;
+extern int  g_alarm_last_col;
+extern int  g_alarm_last_row;
+
 /* Initialise level-specific variables (destruction timer, flags). */
 void level_init_variables(void);
 

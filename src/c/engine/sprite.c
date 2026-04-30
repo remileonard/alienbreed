@@ -272,17 +272,28 @@ void sprite_draw_alien(int direction, int anim_frame, int x, int y)
     if (direction  < 0) direction  = 0;
     if (direction  >= ALIEN_DIR_COUNT) direction = ALIEN_DIR_COUNT - 1;
     if (anim_frame < 0) anim_frame = 0;
-    if (anim_frame >= ALIEN_WALK_FRAMES) anim_frame = ALIEN_WALK_FRAMES - 1;
+    /* Allow anim_frame == ALIEN_WALK_FRAMES as the ALT WALK hit-flash signal.
+     * Values strictly above that are clamped to ALIEN_WALK_FRAMES.
+     * (Formerly the clamp was ">= ALIEN_WALK_FRAMES" which made the ALT WALK
+     *  branch below dead code — the flash was never rendered.) */
+    if (anim_frame > ALIEN_WALK_FRAMES) anim_frame = ALIEN_WALK_FRAMES;
 
     int atlas_x = direction * ALIEN_SPRITE_W;
 
-    /* Walk frame Y = frame_idx * 32 for ALL atlas types.
-     * Both COMPACT (lbW019A8E) and LEGACY (lbW01945E) store the main walk
-     * cycle at y=0, y=32, y=64: lbL01B036 references entries 100-123 in
-     * lbW01945E which are at (dir*32, frame*32) — identical layout to COMPACT.
-     * (lbW01945E entries 8-23 at y=96/128 are SECONDARY BOBs for a different
-     *  idle-animation layer and must NOT be used here.) */
-    int atlas_y = anim_frame * ALIEN_WALK_FRAME_STRIDE;
+    /* Walk frame Y = frame_idx * 32 for normal walk (ALL atlas types).
+     * When anim_frame == ALIEN_WALK_FRAMES it is the ALT WALK "hit flash":
+     *   use y = ALIEN_ALT_WALK_Y (= 96) so the bright orange/red variants are
+     *   drawn.  Both COMPACT (lbW019A8E entries 24-39) and LEGACY (lbW01945E
+     *   entries 8-23) store these sprites at x = dir*32, y = 96.
+     * Ref: lbC009B80 @ main.asm#L6675 (add.l #256,a6 / clr.w 50(a0)).
+     * (lbW01945E entries 8-23 at y=96/128 are SECONDARY BOBs for the hit
+     *  flash layer — identical column layout to the normal walk.) */
+    int atlas_y;
+    if (anim_frame >= ALIEN_WALK_FRAMES) {
+        atlas_y = ALIEN_ALT_WALK_Y;  /* bright hit-flash sprites */
+    } else {
+        atlas_y = anim_frame * ALIEN_WALK_FRAME_STRIDE;
+    }
 
     const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
     /* (x,y) is the centre of the 32×32 alien world bbox; blit at top-left. */

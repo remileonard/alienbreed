@@ -179,6 +179,12 @@ void check_tile_interaction(Player *p);
  * Called when player steps on or interacts with a door tile. */
 void open_door(Player *p);
 
+/* Open the door at the specified tile (col, row) and its paired neighbour tile,
+ * consuming one key from p.  Used when a projectile destroys a door (force_door
+ * path) so that the correct tile is patched rather than the player's position.
+ * Ref: lbC00E56C-lbC00E574 + force_door @ main.asm#L9697-L9700. */
+void open_door_at(Player *p, int col, int row);
+
 /* Invincibility frame counter per player */
 extern int g_player_invincibility[MAX_PLAYERS];
 

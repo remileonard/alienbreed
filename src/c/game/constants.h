@@ -110,6 +110,8 @@
 /* Sample IDs (index into samples array) */
 /* ----------------------------------------------------- */
 #define SAMPLE_ONE_WAY_DOOR     5
+#define SAMPLE_DOOR_HIT         4   /* sound on projectile-hit-door @ main.asm#L9671 */
+#define SAMPLE_REACTOR_BLAST    11  /* reactor face destroyed @ main.asm#L9655 */
 #define SAMPLE_INTEX_SHUTDOWN   13
 #define SAMPLE_CARET_MOVE       14
 #define SAMPLE_DESTRUCT_IMM     18
@@ -125,6 +127,7 @@
 #define SAMPLE_FIRE_GUN         37
 #define SAMPLE_DESCENT          41
 #define SAMPLE_DESCENT_END      42
+#define SAMPLE_RICOCHET         46  /* FLAMEARC/LAZER wall bounce @ main.asm#L9723 */
 #define SAMPLE_TYPE_WRITER      48
 #define SAMPLE_DYING_PLAYER     73
 #define SAMPLE_EMPTY            76

@@ -64,6 +64,19 @@ int  g_exit_unlocked            = 0;
 int  g_boss_active              = 0;
 int  g_holocode_jump_level      = -1; /* >= 0: jump to this level (enter_level_N_holocode in main.asm) */
 
+/* Projectile-environment interaction state */
+int  g_reactor_up_done          = 0;
+int  g_reactor_left_done        = 0;
+int  g_reactor_down_done        = 0;
+int  g_reactor_right_done       = 0;
+int  g_door_impact_accum        = 0;
+int  g_door_impact_col          = -1;
+int  g_door_impact_row          = -1;
+int  g_alarm_system_active      = 0;
+int  g_alarm_buttons_pressed    = 0;
+int  g_alarm_last_col           = -1;
+int  g_alarm_last_row           = -1;
+
 /* Internal: frames per second = 50, timer displayed in M:SS */
 #define TIMER_FRAMES_PER_SECOND 50
 
@@ -83,6 +96,26 @@ void level_init_variables(void)
     g_boss_active             = 0;
     /* Timer set by level_finalize based on level def */
     g_destruction_timer = (LONG)DESTRUCTION_TIMER_SECONDS * TIMER_FRAMES_PER_SECOND;
+
+    /* Reactor state — reset in init_level_variables @ main.asm#L747-L750 */
+    g_reactor_up_done         = 0;
+    g_reactor_left_done       = 0;
+    g_reactor_down_done       = 0;
+    g_reactor_right_done      = 0;
+
+    /* Door impact accumulator — reset in reset_game_variables @ main.asm#L763 */
+    g_door_impact_accum       = 0;
+    g_door_impact_col         = -1;
+    g_door_impact_row         = -1;
+
+    /* Alarm system:
+     * lbW002AC0/AC2 are cleared globally (main.asm#L763-L764) and re-armed
+     * per-level (only level 3 sets lbW002AC2=1 @ main.asm#L1053).
+     * In the C port we set g_alarm_system_active per-level in level_finalize(). */
+    g_alarm_system_active     = 0;
+    g_alarm_buttons_pressed   = 0;
+    g_alarm_last_col          = -1;
+    g_alarm_last_row          = -1;
 }
 
 void level_get_timer_digits(int *minutes, int *seconds_hi, int *seconds_lo)
@@ -145,6 +178,19 @@ void level_check_destruction(void)
     if (g_self_destruct_initiated && g_flag_destruct_level) {
         g_flag_jump_to_gameover = 1;
     }
+
+    /*
+     * Alarm-system check (level 3 only, lbC000E56 @ main.asm#L536).
+     * If the alarm system is armed and 3+ alarm buttons have been shot,
+     * trigger self-destruct, then disarm to prevent re-triggering.
+     */
+    if (g_alarm_system_active && g_alarm_buttons_pressed >= 3) {
+        g_alarm_system_active   = 0;  /* clr.w lbW002AC2 @ main.asm#L542 */
+        g_alarm_buttons_pressed = 0;  /* clr.w lbW002AC0 @ main.asm#L544 */
+        g_alarm_last_col        = -1; /* clr.l lbL00E756 @ main.asm#L543 */
+        g_alarm_last_row        = -1;
+        level_start_destruction();
+    }
 }
 
 void level_check_gameover(void)
@@ -179,6 +225,14 @@ void level_finalize(void)
 
     /* Set map overview flag if player has supply */
     /* (handled when player collects SUPPLY_MAP_OVERVIEW) */
+
+    /*
+     * Arm alarm system for level 3 only.
+     * Mirrors init_level_3 @ main.asm#L1053: move.w #1,lbW002AC2.
+     * The alarm fires self-destruct when 3 alarm-door buttons are shot
+     * (lbC000E56 @ main.asm#L536-L544).
+     */
+    g_alarm_system_active = (g_cur_level == 2) ? 1 : 0; /* level 3 is index 2 (0-based) */
 }
 
 void level_run(int level_idx)

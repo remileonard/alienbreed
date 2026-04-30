@@ -17,6 +17,14 @@
 /* Update acid pool damage counter (persists across frames while on acid) */
 static int g_acid_damage_counter[MAX_PLAYERS] = {0, 0};
 
+/*
+ * Arc-pattern fire counter — shared between both players, matching the
+ * single lbL00EAA6 global in the original ASM.
+ * Cycles: 1=straight, 2=+spread, 3=-spread (then reset to 0).
+ * Ref: lbL00EAA6 / addq.w #1,(a1) @ main.asm#L9470-L9482.
+ */
+static int s_arc_counter = 0;
+
 Player g_players[MAX_PLAYERS];
 int    g_player_invincibility[MAX_PLAYERS];
 
@@ -192,6 +200,25 @@ static int try_move(Player *p, int dx, int dy)
     return 1;
 }
 
+/* Patch the tile at (col, row) to floor and open any adjacent paired door tile.
+ * Shared by open_door() and open_door_at().
+ * Ref: animation overlay at lbL020CFE/lbL020D32 covers both tiles of a 2-tile door. */
+static void patch_door_tiles(int col, int row)
+{
+    tilemap_replace_tile(&g_cur_map, col, row);
+
+    const int dirs[4][2] = { {0, -1}, {0, 1}, {-1, 0}, {1, 0} };
+    for (int i = 0; i < 4; i++) {
+        int adj_col = col + dirs[i][0];
+        int adj_row = row + dirs[i][1];
+        if (adj_col >= 0 && adj_col < MAP_COLS && adj_row >= 0 && adj_row < MAP_ROWS) {
+            if (tilemap_attr(&g_cur_map, adj_col, adj_row) == TILE_DOOR) {
+                tilemap_replace_tile(&g_cur_map, adj_col, adj_row);
+            }
+        }
+    }
+}
+
 /* Open a door at the player's current tile position.
  * Mirrors open_door routine @ main.asm#L5246.
  *
@@ -208,22 +235,22 @@ void open_door(Player *p)
     int col = tilemap_pixel_to_col(p->pos_x);
     int row = tilemap_pixel_to_row(p->pos_y);
 
-    /* Patch the current tile (the one the player is standing on). */
-    tilemap_replace_tile(&g_cur_map, col, row);
+    patch_door_tiles(col, row);
 
-    /* Also open the adjacent paired door tile, if any, without an extra key.
-     * Doors come in pairs (horizontal or vertical).  Ref: the animation data
-     * at lbL020CFE / lbL020D32 covers a 32-px-wide area over both tiles. */
-    const int dirs[4][2] = { {0, -1}, {0, 1}, {-1, 0}, {1, 0} };
-    for (int i = 0; i < 4; i++) {
-        int adj_col = col + dirs[i][0];
-        int adj_row = row + dirs[i][1];
-        if (adj_col >= 0 && adj_col < MAP_COLS && adj_row >= 0 && adj_row < MAP_ROWS) {
-            if (tilemap_attr(&g_cur_map, adj_col, adj_row) == TILE_DOOR) {
-                tilemap_replace_tile(&g_cur_map, adj_col, adj_row);
-            }
-        }
-    }
+    p->keys--;
+    audio_play_sample(SAMPLE_OPENING_DOOR);
+}
+
+/* Open the door tile at (col, row) and its paired neighbour, consuming one key.
+ * Mirrors the force_door path (lbC00E56C → open_door) used when a projectile
+ * accumulates >= 300 damage on a door tile.  The door position is already known
+ * (the hit tile's col/row) so we open it directly rather than re-deriving it
+ * from the player's walk position. */
+void open_door_at(Player *p, int col, int row)
+{
+    if (p->keys <= 0) return;
+
+    patch_door_tiles(col, row);
 
     p->keys--;
     audio_play_sample(SAMPLE_OPENING_DOOR);
@@ -603,14 +630,103 @@ void player_update(Player *p, UWORD input_mask)
             }
 
             /* Compute projectile velocity from facing direction and weapon speed.
-             * ASM: PLAYER_WEAPON_SPEED = 16 (much higher than movement speed). */
-            static const WORD k_vx[9] = { 0,  0,  6,  8,  6,  0, -6, -8, -6 };
-            static const WORD k_vy[9] = { 0, -8, -6,  0,  6,  8,  6,  0, -6 };
+             *
+             * Direction unit vectors from lbW00E9F6 @ main.asm#L9995:
+             *   dc.w 0,0, 0,-1, 1,-1, 1,0, 1,1, 0,1, -1,1, -1,0, -1,-1, 0,0
+             * Each pair (dx,dy) gives the raw unit vector for cur_sprite 0-8.
+             * After mulu with speed: vx = dx*speed, vy = dy*speed (stored as WORD,
+             * so -1*speed wraps correctly via MULU + MOVE.W lower 16 bits).
+             * Ref: move.w 0(a2,d2.w),d4 / mulu d1,d4 @ main.asm#L9450-L9461.
+             */
+            static const int k_dir_x[9] = { 0, 0, 1, 1, 1, 0,-1,-1,-1 };
+            static const int k_dir_y[9] = { 0,-1,-1, 0, 1, 1, 1, 0,-1 };
             int dir = (p->direction >= 1 && p->direction <= 8) ? p->direction : 5;
-            WORD vx = (WORD)((k_vx[dir] * p->weapon_speed) / 8);
-            WORD vy = (WORD)((k_vy[dir] * p->weapon_speed) / 8);
-            alien_spawn_projectile(p->port, p->pos_x, p->pos_y,
-                                   vx, vy, p->weapon_strength);
+            int dx = k_dir_x[dir];
+            int dy = k_dir_y[dir];
+            int spd = p->weapon_speed;
+            int vxi = dx * spd;
+            int vyi = dy * spd;
+
+            /*
+             * Arc spread for FLAMEARC / PLASMAGUN / SIDEWINDERS.
+             * Each consecutive fire alternates: straight → CW-offset → CCW-offset.
+             * The global counter cycles 1→2→3→0 (reset after 3).
+             * At counter=2: vx += mult*raw_dy, vy -= mult*raw_dx  (CW rotation offset)
+             * At counter=3: vx -= mult*raw_dy, vy += mult*raw_dx  (CCW rotation offset), reset
+             * Ref: lbL00EAA6 / cmp.w #3 / add.w d7,d4 / sub.w d6,d5
+             *      @ main.asm#L9470-L9482.
+             *
+             * ASM uses raw unit-vector registers d6/d7 as spread offset.
+             * FLAMEARC (weapon 3) branches to arc code BEFORE the add.w d6,d6/d7 doubling,
+             *   so offset multiplier = 1 (d6=unit_x, d7=unit_y).
+             * PLASMAGUN (4) and SIDEWINDERS (6) branch AFTER the doubling,
+             *   so offset multiplier = 2 (d6=2*unit_x, d7=2*unit_y), giving wider spread.
+             * Ref: cmp.w #3,PLAYER_WEAPON_INDEX / add.w d6,d6 / add.w d7,d7
+             *      / cmp.w #4 / cmp.w #6 @ main.asm#L9462-L9468.
+             */
+            int wt = p->cur_weapon;
+            if (wt == WEAPON_FLAMEARC || wt == WEAPON_PLASMAGUN ||
+                wt == WEAPON_SIDEWINDERS) {
+                int arc_mult = (wt == WEAPON_PLASMAGUN || wt == WEAPON_SIDEWINDERS) ? 2 : 1;
+                s_arc_counter++;
+                if (s_arc_counter == 1) {
+                    /* straight — no change */
+                } else if (s_arc_counter == 2) {
+                    /* CW offset: add.w d7,d4 / sub.w d6,d5 @ main.asm#L9476. */
+                    vxi += arc_mult * dy;
+                    vyi -= arc_mult * dx;
+                } else {
+                    /* CCW offset: sub.w d7,d4 / add.w d6,d5 + reset @ main.asm#L9480-L9482. */
+                    vxi -= arc_mult * dy;
+                    vyi += arc_mult * dx;
+                    s_arc_counter = 0;
+                }
+            }
+
+            WORD vx = (WORD)vxi;
+            WORD vy = (WORD)vyi;
+
+            /*
+             * Weapon-specific parameters:
+             *   penetrating  : 1 for PLASMAGUN/FLAMETHROWER/LAZER (field4=01 in
+             *                    weapons_attr_table @ main.asm#L736-L742).
+             *                  Ref: tst.w 18(a1) @ main.asm#L7739.
+             *   lifetime     : FLAMETHROWER = 8 ticks (lbL018D06 8-frame list,
+             *                    delay=1 each @ main.asm#L13935); others = -1.
+             *   bounce_count : FLAMEARC=1 (cmp.w #2,24(a3) @ main.asm#L9712),
+             *                  LAZER=5 (cmp.w #6,24(a3) @ main.asm#L9716), others=0.
+             */
+            int penetrating  = (wt == WEAPON_PLASMAGUN ||
+                                 wt == WEAPON_FLAMETHROWER ||
+                                 wt == WEAPON_LAZER) ? 1 : 0;
+            int lifetime     = (wt == WEAPON_FLAMETHROWER) ? FLAME_LIFETIME_TICKS : -1;
+            int bounce_count = 0;
+            if (wt == WEAPON_FLAMEARC)  bounce_count = 1;
+            else if (wt == WEAPON_LAZER) bounce_count = 5;
+
+            /*
+             * Muzzle position: add per-direction offset to the player's
+             * CENTER (pos_x, pos_y).
+             * ASM lbC00E264 does:
+             *   move.l 16(a0),a4       ; sprite pointer
+             *   move.l -4(a4),d1       ; player CENTER packed (x|y)
+             *                          ; (set by lbC006BE4: move.w PLAYER_POS_X,-4(a1))
+             *   move.l 0(a2,d2.w),d2   ; muzzle offset (x_off|y_off)
+             *   add.w  d2,d1 / swap / add.w / swap  → spawn = CENTER + offset
+             * lbW00EA3E + 0  → weapons with PLAYER_WEAPON_INDEX >= 2 (TWINFIRE…LAZER)
+             * lbW00EA3E + 32 → MACHINEGUN (weapon index 1)
+             * Offsets indexed by direction 1-8; entry 0 is unused.
+             */
+            static const int k_muzzle_x[9] = { 0,  2, 12, 16, 12,  0, -12, -16, -12 };
+            static const int k_muzzle_y[9] = { 0, -16, -12,  0, 12, 16,  12,  -2, -12 };
+            int safe_dir = (dir >= 1 && dir <= 8) ? dir : 5;
+            int spawn_x = p->pos_x + k_muzzle_x[safe_dir];
+            int spawn_y = p->pos_y + k_muzzle_y[safe_dir];
+
+            alien_spawn_projectile(p->port, (WORD)spawn_x, (WORD)spawn_y,
+                                   vx, vy, p->weapon_strength,
+                                   wt, penetrating, lifetime,
+                                   bounce_count, dir);
         }
     }
 

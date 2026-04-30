@@ -40,17 +40,250 @@ static const WORD k_alien_type_hp[7] = {
     292   /* type 7 */
 };
 
-/* Projectile list (simplified — position + owner + strength) */
+/*
+ * Projectile struct — extends simple position/velocity with weapon-specific
+ * behaviour flags derived from weapons_behaviour_table @ main.asm#L10000:
+ *
+ *   weapon_type   : WEAPON_* constant (used to select rendering and behaviour)
+ *   penetrating   : 1 = passes through aliens (weapons 4/5/7).
+ *                   From offset 18(a3) in the ASM projectile struct, set from
+ *                   field 4 of weapons_attr_table (=01 for PLASMAGUN/FLAMETHROWER/LAZER).
+ *                   Ref: tst.w 18(a1) @ main.asm#L7739.
+ *   lifetime      : frames remaining before auto-expire (-1 = infinite).
+ *                   Used by FLAMETHROWER (8 ticks @ 25 Hz = 64 px range).
+ *                   Matches lbL018D06 8-entry animation list (delay=1 each).
+ *   bounce_count  : remaining wall bounces.
+ *                   FLAMEARC: 1 bounce (cmp.w #2,24(a3) @ main.asm#L9712).
+ *                   LAZER: 5 bounces (cmp.w #6,24(a3) @ main.asm#L9716).
+ *                   Others: 0.
+ *   direction     : firing direction (1-8, PLAYER_FACE_*) used for bounce axis
+ *                   selection and sprite rendering.
+ *   impact_active : 1 = playing end-of-life impact animation (8 frames).
+ *                   Mirrors lbL018CBA BOB animation @ main.asm#L13925.
+ *   impact_x/y    : world position where the impact occurred.
+ *   impact_frame  : current impact animation frame (0-7).
+ *   impact_timer  : countdown per impact frame (ticks per frame).
+ */
 typedef struct {
     WORD  x, y;
     WORD  vx, vy;
     WORD  strength;
-    int   player_idx;  /* which player fired it */
-    int   active;
+    int   player_idx;     /* which player fired it */
+    int   active;         /* 1=flying, 0=inactive */
+    int   weapon_type;    /* WEAPON_* */
+    int   penetrating;    /* 1=pass through aliens */
+    int   lifetime;       /* ticks remaining; -1=infinite */
+    int   bounce_count;   /* remaining wall bounces */
+    int   direction;      /* firing direction 1-8 (PLAYER_FACE_*) */
+    /* Impact animation (played after projectile deactivates on wall/alien hit) */
+    int   impact_active;      /* 1=impact animation playing */
+    int   impact_x;           /* world x of impact */
+    int   impact_y;           /* world y of impact */
+    int   impact_frame;       /* 0-7 */
+    int   impact_timer;       /* ticks remaining on current impact frame */
+    int   flight_anim_frame;  /* cycling frame for animated in-flight BOBs (FLAMEARC: 0-7) */
 } Projectile;
+
+/*
+ * Impact animation atlas coordinates (BOBs 56-63 from lbL018CBA @ main.asm#L13925).
+ * Each entry: {atlas_x, atlas_y, width=16, height=16}.
+ * Ref: lbW018D4A entries 56-63 @ main.asm#L14001-L14008.
+ */
+static const int k_impact_frames[8][4] = {
+    { 192, 224, 16, 14 },   /* frame 0: lbL0185CE → lbW0188CE[56]: $C0,$E0,$10,$0E */
+    { 208, 224, 16, 14 },   /* frame 1: lbL0185FE → lbW0188CE[57]: $D0,$E0,$10,$0E */
+    { 224, 224, 16, 14 },   /* frame 2: lbL01862E → lbW0188CE[58]: $E0,$E0,$10,$0E */
+    { 240, 224, 16, 14 },   /* frame 3: lbL01865E → lbW0188CE[59]: $F0,$E0,$10,$0E */
+    { 192, 240, 16, 14 },   /* frame 4: lbL01868E → lbW0188CE[60]: $C0,$F0,$10,$0E */
+    { 208, 240, 16, 14 },   /* frame 5: lbL0186BE → lbW0188CE[61]: $D0,$F0,$10,$0E */
+    { 224, 240, 16, 14 },   /* frame 6: lbL0186EE → lbW0188CE[62]: $E0,$F0,$10,$0E */
+    { 240, 240, 16, 14 },   /* frame 7: lbL01871E → lbW0188CE[63]: $F0,$F0,$10,$0E */
+};
+#define IMPACT_ANIM_FRAMES   8
+#define IMPACT_FRAME_TICKS   1  /* 1 tick per impact frame (25 Hz cadence) */
+
+/*
+ * Flamethrower flame atlas coordinates (BOBs 56-63 used for in-flight flame,
+ * same sprite region as impact; lbL018D06 @ main.asm#L13935).
+ * At 25 Hz with delay=1 each, the 8 frames play over FLAME_LIFETIME_TICKS ticks.
+ */
+
+/*
+ * Lazer in-flight atlas coordinates: 16×14 sprites from lbW0188CE entries 68-71.
+ * Mapping from lbL00EDAA/lbL00EDCE-lbL00EE22 @ main.asm#L10119-L10135:
+ *   dirs 0,1,5 → BOB entry 68: lbW0188CE $100,$F0,$10,$0E = (256,240,16,14)
+ *   dirs 2,6   → BOB entry 71: lbW0188CE $130,$F0,$10,$0E = (304,240,16,14)
+ *   dirs 3,7   → BOB entry 70: lbW0188CE $120,$F0,$10,$0E = (288,240,16,14)
+ *   dirs 4,8   → BOB entry 69: lbW0188CE $110,$F0,$10,$0E = (272,240,16,14)
+ */
+static const int k_lazer_atlas[9][4] = {
+    { 256, 240, 16, 14 },  /* dir 0 idle  → lbW0188CE[68] */
+    { 256, 240, 16, 14 },  /* dir 1 up    → lbW0188CE[68] */
+    { 304, 240, 16, 14 },  /* dir 2 up-R  → lbW0188CE[71] */
+    { 288, 240, 16, 14 },  /* dir 3 right → lbW0188CE[70] */
+    { 272, 240, 16, 14 },  /* dir 4 dn-R  → lbW0188CE[69] */
+    { 256, 240, 16, 14 },  /* dir 5 down  → lbW0188CE[68] */
+    { 304, 240, 16, 14 },  /* dir 6 dn-L  → lbW0188CE[71] */
+    { 288, 240, 16, 14 },  /* dir 7 left  → lbW0188CE[70] */
+    { 272, 240, 16, 14 },  /* dir 8 up-L  → lbW0188CE[69] */
+};
+
+/*
+ * MACHINEGUN in-flight BOB sprites: direction-dependent 16×14 sprite.
+ * BOB animation structs lbL017FCE-lbL01811E → lbL01790A entries 24-31.
+ * Each maps to one lbW0188CE descriptor (entries 24-31, all at y=176=0xB0):
+ *   dir 0,1 → entry 24: $40,$B0,$10,$0E = (64, 176,16,14)
+ *   dir 2   → entry 25: $50,$B0  dir 3 → entry 26: $60,$B0
+ *   dir 4   → entry 27: $70,$B0  dir 5 → entry 28: $80,$B0
+ *   dir 6   → entry 29: $90,$B0  dir 7 → entry 30: $A0,$B0
+ *   dir 8   → entry 31: $B0,$B0
+ * In the ASM the bullet shows for 1 frame then turns blank (delay 0 then
+ * 32000); we render it for the full flight as there is no animation-frame
+ * timer in this C port.
+ * Ref: lbL00EACA @ main.asm#L10010-L10034.
+ */
+static const int k_machinegun_atlas[9][4] = {
+    {  64, 176, 16, 14 },  /* dir 0       → lbW0188CE[24] */
+    {  64, 176, 16, 14 },  /* dir 1 up    → lbW0188CE[24] */
+    {  80, 176, 16, 14 },  /* dir 2 up-R  → lbW0188CE[25] */
+    {  96, 176, 16, 14 },  /* dir 3 right → lbW0188CE[26] */
+    { 112, 176, 16, 14 },  /* dir 4 dn-R  → lbW0188CE[27] */
+    { 128, 176, 16, 14 },  /* dir 5 down  → lbW0188CE[28] */
+    { 144, 176, 16, 14 },  /* dir 6 dn-L  → lbW0188CE[29] */
+    { 160, 176, 16, 14 },  /* dir 7 left  → lbW0188CE[30] */
+    { 176, 176, 16, 14 },  /* dir 8 up-L  → lbW0188CE[31] */
+};
+
+/*
+ * TWINFIRE in-flight BOB sprites: direction-dependent 16×14 static frame.
+ * BOB animation structs lbL017B4E-lbL017C9E → lbL01790A entries 0-7.
+ * Each maps to one lbW0188CE descriptor (entries 0-7, all at y=160=0xA0):
+ *   dir 0,1 → entry 0: $C0,$A0,$10,$0E = (192,160,16,14)
+ *   dir 2   → entry 1: $D0,$A0  dir 3 → entry 2: $E0,$A0
+ *   dir 4   → entry 3: $F0,$A0  dir 5 → entry 4: $100,$A0
+ *   dir 6   → entry 5: $110,$A0 dir 7 → entry 6: $120,$A0
+ *   dir 8   → entry 7: $130,$A0
+ * Ref: lbL00EB8E/lbL00EBB2-lbL00EC06 @ main.asm#L10036-L10052.
+ */
+static const int k_twinfire_atlas[9][4] = {
+    { 192, 160, 16, 14 },  /* dir 0       → lbW0188CE[0] */
+    { 192, 160, 16, 14 },  /* dir 1 up    → lbW0188CE[0] */
+    { 208, 160, 16, 14 },  /* dir 2 up-R  → lbW0188CE[1] */
+    { 224, 160, 16, 14 },  /* dir 3 right → lbW0188CE[2] */
+    { 240, 160, 16, 14 },  /* dir 4 dn-R  → lbW0188CE[3] */
+    { 256, 160, 16, 14 },  /* dir 5 down  → lbW0188CE[4] */
+    { 272, 160, 16, 14 },  /* dir 6 dn-L  → lbW0188CE[5] */
+    { 288, 160, 16, 14 },  /* dir 7 left  → lbW0188CE[6] */
+    { 304, 160, 16, 14 },  /* dir 8 up-L  → lbW0188CE[7] */
+};
+
+/*
+ * FLAMEARC in-flight BOB sprites: 8-frame animated 16×14 cycling sequence.
+ * BOB animation structs lbL017E4E-lbL017F9E → lbL01790A entries 16-23.
+ * Each maps to one lbW0188CE descriptor (entries 16-23, all at y=160=0xA0):
+ *   frame 0 → entry 16: $40,$A0,$10,$0E = (64,160,16,14)
+ *   frame 1 → entry 17: $50,$A0  frame 2 → entry 18: $60,$A0
+ *   frame 3 → entry 19: $70,$A0  frame 4 → entry 20: $80,$A0
+ *   frame 5 → entry 21: $90,$A0  frame 6 → entry 22: $A0,$A0
+ *   frame 7 → entry 23: $B0,$A0
+ * All directions share the same 8-frame loop (delay=0 → one frame per tick).
+ * Ref: lbL00EC36 @ main.asm#L10063-L10070.
+ */
+static const int k_flamearc_atlas[8][4] = {
+    {  64, 160, 16, 14 },  /* frame 0: lbL017E4E → lbW0188CE[16] */
+    {  80, 160, 16, 14 },  /* frame 1: lbL017E7E → lbW0188CE[17] */
+    {  96, 160, 16, 14 },  /* frame 2: lbL017EAE → lbW0188CE[18] */
+    { 112, 160, 16, 14 },  /* frame 3: lbL017EDE → lbW0188CE[19] */
+    { 128, 160, 16, 14 },  /* frame 4: lbL017F0E → lbW0188CE[20] */
+    { 144, 160, 16, 14 },  /* frame 5: lbL017F3E → lbW0188CE[21] */
+    { 160, 160, 16, 14 },  /* frame 6: lbL017F6E → lbW0188CE[22] */
+    { 176, 160, 16, 14 },  /* frame 7: lbL017F9E → lbW0188CE[23] */
+};
+#define FLAMEARC_ANIM_FRAMES 8
+
+/*
+ * PLASMAGUN in-flight BOB sprites: direction-dependent 16×14 static frame.
+ * BOB animation structs lbL01814E-lbL01829E → lbL01790A entries 32-39.
+ * Each maps to one lbW0188CE descriptor (entries 32-39):
+ *   dir 0,1 → entry 32: $00,$A0,$10,$0E = (0, 160,16,14)
+ *   dir 2   → entry 33: $10,$A0  dir 3 → entry 34: $20,$A0
+ *   dir 4   → entry 35: $30,$A0  dir 5 → entry 36: $00,$B0
+ *   dir 6   → entry 37: $10,$B0  dir 7 → entry 38: $20,$B0
+ *   dir 8   → entry 39: $30,$B0
+ * Ref: lbL00ECFE/lbL00ED22-lbL00ED76 @ main.asm#L10090-L10106.
+ */
+static const int k_plasmagun_atlas[9][4] = {
+    {  0, 160, 16, 14 },  /* dir 0       → lbW0188CE[32] */
+    {  0, 160, 16, 14 },  /* dir 1 up    → lbW0188CE[32] */
+    { 16, 160, 16, 14 },  /* dir 2 up-R  → lbW0188CE[33] */
+    { 32, 160, 16, 14 },  /* dir 3 right → lbW0188CE[34] */
+    { 48, 160, 16, 14 },  /* dir 4 dn-R  → lbW0188CE[35] */
+    {  0, 176, 16, 14 },  /* dir 5 down  → lbW0188CE[36] */
+    { 16, 176, 16, 14 },  /* dir 6 dn-L  → lbW0188CE[37] */
+    { 32, 176, 16, 14 },  /* dir 7 left  → lbW0188CE[38] */
+    { 48, 176, 16, 14 },  /* dir 8 up-L  → lbW0188CE[39] */
+};
+
+/*
+ * SIDEWINDERS in-flight BOB sprites: direction-dependent 16×14 static frame.
+ * BOB animation structs lbL017CCE-lbL017E1E → lbL01790A entries 8-15.
+ * Each maps to one lbW0188CE descriptor (entries 8-15, all at y=176=0xB0):
+ *   dir 0,1 → entry 8:  $C0,$B0,$10,$0E = (192,176,16,14)
+ *   dir 2   → entry 9:  $D0,$B0  dir 3 → entry 10: $E0,$B0
+ *   dir 4   → entry 11: $F0,$B0  dir 5 → entry 12: $100,$B0
+ *   dir 6   → entry 13: $110,$B0 dir 7 → entry 14: $120,$B0
+ *   dir 8   → entry 15: $130,$B0
+ * Ref: lbL00EC7A/lbL00EC9E-lbL00ECF2 @ main.asm#L10072-L10088.
+ */
+static const int k_sidewinders_atlas[9][4] = {
+    { 192, 176, 16, 14 },  /* dir 0       → lbW0188CE[8]  */
+    { 192, 176, 16, 14 },  /* dir 1 up    → lbW0188CE[8]  */
+    { 208, 176, 16, 14 },  /* dir 2 up-R  → lbW0188CE[9]  */
+    { 224, 176, 16, 14 },  /* dir 3 right → lbW0188CE[10] */
+    { 240, 176, 16, 14 },  /* dir 4 dn-R  → lbW0188CE[11] */
+    { 256, 176, 16, 14 },  /* dir 5 down  → lbW0188CE[12] */
+    { 272, 176, 16, 14 },  /* dir 6 dn-L  → lbW0188CE[13] */
+    { 288, 176, 16, 14 },  /* dir 7 left  → lbW0188CE[14] */
+    { 304, 176, 16, 14 },  /* dir 8 up-L  → lbW0188CE[15] */
+};
 
 #define MAX_PROJECTILES 32
 static Projectile s_projectiles[MAX_PROJECTILES];
+
+/*
+ * Fallback velocity used when a bounced projectile ends up with zero vx or vy.
+ * Mirrors lbW0004D6 (dc.w 8) @ main.asm#L197, which is negated on every bounce
+ * call (neg.w lbW0004D6 @ main.asm#L9759), alternating between +8 and -8.
+ */
+static int s_bounce_fallback = 8;
+
+/*
+ * Map a post-bounce LAZER velocity pair (vx,vy) to a direction index (1–8).
+ * Matches lbW00EA1E velocity table @ main.asm#L9996 and the direction-BOB
+ * lookup loop lbC00E68A-lbC00E698 @ main.asm#L9772-L9781.
+ *
+ * lbW00EA1E: (0,-8) (8,-8) (8,0) (8,8) (0,8) (-8,8) (-8,0) (-8,-8)
+ *             dir1   dir2   dir3  dir4   dir5  dir6   dir7   dir8
+ * Fallback when no entry matches: direction 8 (last entry = lbL00EE22).
+ */
+static int lazer_velocity_to_dir(int16_t vx, int16_t vy)
+{
+    static const int16_t k[8][2] = {
+        {  0, -8 }, /* dir 1: up         */
+        {  8, -8 }, /* dir 2: up-right   */
+        {  8,  0 }, /* dir 3: right      */
+        {  8,  8 }, /* dir 4: down-right */
+        {  0,  8 }, /* dir 5: down       */
+        { -8,  8 }, /* dir 6: down-left  */
+        { -8,  0 }, /* dir 7: left       */
+        { -8, -8 }, /* dir 8: up-left    */
+    };
+    for (int j = 0; j < 8; j++) {
+        if (vx == k[j][0] && vy == k[j][1])
+            return j + 1;
+    }
+    return 8; /* fallback: lbL00EE22, same as ASM when d1 reaches 8 without match */
+}
 
 /* Score awarded per alien kill */
 #define ALIEN_SCORE_VALUE 100
@@ -574,38 +807,328 @@ void alien_update_all(void)
 
     /* Update projectiles */
     for (int i = 0; i < MAX_PROJECTILES; i++) {
+        /* Advance impact animation for deactivated projectiles that hit something */
+        if (s_projectiles[i].impact_active) {
+            if (--s_projectiles[i].impact_timer <= 0) {
+                s_projectiles[i].impact_timer = IMPACT_FRAME_TICKS;
+                s_projectiles[i].impact_frame++;
+                if (s_projectiles[i].impact_frame >= IMPACT_ANIM_FRAMES)
+                    s_projectiles[i].impact_active = 0;
+            }
+            continue;
+        }
+
         if (!s_projectiles[i].active) continue;
+
         s_projectiles[i].x += s_projectiles[i].vx;
         s_projectiles[i].y += s_projectiles[i].vy;
 
-        /* Check if projectile hit a wall */
-        int col = tilemap_pixel_to_col(s_projectiles[i].x);
-        int row = tilemap_pixel_to_row(s_projectiles[i].y);
-        if (tilemap_is_solid(&g_cur_map, col, row)) {
-            s_projectiles[i].active = 0;
+        /* Advance FLAMEARC flight animation (8-frame looping sequence, delay=0
+         * per frame means one frame per tick.
+         * Ref: lbL00EC36 all delay=0 @ main.asm#L10063-L10070). */
+        if (s_projectiles[i].weapon_type == WEAPON_FLAMEARC)
+            s_projectiles[i].flight_anim_frame =
+                (s_projectiles[i].flight_anim_frame + 1) % FLAMEARC_ANIM_FRAMES;
+
+        /* MACHINEGUN: advance flight_anim_frame from 0 → 1 after the first
+         * tick so that the bullet sprite (muzzle flash) shows only at the
+         * cannon position for one frame, then becomes invisible.
+         * Mirrors ASM lbL00EAEE: dc.l BOB,0 / dc.l lbW01389C,32000,-1
+         * (delay=0 → show once, then blank for 32000 ticks).
+         * Ref: lbL00EAEE @ main.asm#L10019-L10034. */
+        if (s_projectiles[i].weapon_type == WEAPON_MACHINEGUN &&
+                s_projectiles[i].flight_anim_frame == 0)
+            s_projectiles[i].flight_anim_frame = 1;
+
+        /* FLAMETHROWER: in-flight frame is computed from lifetime in the render
+         * pass (frame = (elapsed / 2) % 8, delay=1 → 2 ticks/frame, mirroring
+         * lbL018D06 @ main.asm#L13935 with -1 looping at 25 Hz). */
+
+        /* Flamethrower lifetime countdown — 16 ticks (8 frames × delay+1=2 ticks/frame)
+         * matching lbL018D06 @ main.asm#L13935 with delay=1 each.
+         * On natural expiry, spawn an impact flash at the bullet's final position
+         * so the 8-frame explosion animation plays where the flame terminates
+         * (matching how lbL018D06 transitions to -1 at max range). */
+        if (s_projectiles[i].lifetime > 0) {
+            s_projectiles[i].lifetime--;
+            if (s_projectiles[i].lifetime == 0) {
+                /* Spawn impact animation at current position, same as wall hit. */
+                s_projectiles[i].active       = 0;
+                s_projectiles[i].impact_active = 1;
+                s_projectiles[i].impact_x     = (WORD)s_projectiles[i].x;
+                s_projectiles[i].impact_y     = (WORD)s_projectiles[i].y;
+                s_projectiles[i].impact_frame  = 0;
+                s_projectiles[i].impact_timer  = IMPACT_FRAME_TICKS;
+                continue;
+            }
+        }
+
+        /* --- Impact dispatch (weapons_special_impact_table) ---
+         * Ref: calc_shot_impact → weapons_special_impact_table @ main.asm#L9513-L9599.
+         * tile_attr & 0x3F selects the dispatch entry (0x00–0x3F).
+         *
+         * Two categories:
+         *  a) Non-blocking triggers (fire door buttons 0x08/0x09/0x12/0x13):
+         *     apply tile effect and let the projectile continue.
+         *  b) Blocking tiles (0x01/0x03/0x1d/0x23/0x2a-0x2d): stop or bounce.
+         */
+        int px = (int)(WORD)s_projectiles[i].x;
+        int py = (int)(WORD)s_projectiles[i].y;
+        int col = tilemap_pixel_to_col(px);
+        int row = tilemap_pixel_to_row(py);
+        UBYTE attr = tilemap_attr(&g_cur_map, col, row) & 0x3F;
+
+        /* ── Non-blocking trigger tiles (fire door buttons) ─────────────
+         * patch_fire_door_left_btn (0x08) / right_btn (0x09):
+         *   Play door sound, floor-replace the button and 3 adjacent door
+         *   panel tiles.  Projectile is NOT stopped.
+         *   Tile column offsets:
+         *     left  button: +0, +3, +2, +4  (Ref: main.asm#L9790-L9804)
+         *     right button: +0, -1, -2, -4  (Ref: main.asm#L9806-L9820)
+         *
+         * patch_fire_door_left_btn_alarm  (0x12) / right_btn_alarm (0x13):
+         *   Same as above but also increment alarm counter (level 3 only).
+         *   When counter reaches 3 → self-destruct (checked in
+         *   level_check_destruction, Ref: lbC000E56 @ main.asm#L536).
+         *   Dedup: ignore re-hits of the same tile (lbL00E756 @ main.asm#L9822).
+         *   Ref: main.asm#L9824-L9866.
+         */
+        if (tilemap_is_projectile_trigger(&g_cur_map, col, row)) {
+            audio_play_sample(SAMPLE_OPENING_DOOR);
+            if (attr == 0x08 || attr == 0x12) {
+                /* Left button: col+0, col+3, col+2, col+4 */
+                tilemap_replace_tile(&g_cur_map, col,     row);
+                tilemap_replace_tile(&g_cur_map, col + 3, row);
+                tilemap_replace_tile(&g_cur_map, col + 2, row);
+                tilemap_replace_tile(&g_cur_map, col + 4, row);
+            } else {
+                /* Right button: col+0, col-1, col-2, col-4 */
+                tilemap_replace_tile(&g_cur_map, col,     row);
+                tilemap_replace_tile(&g_cur_map, col - 1, row);
+                tilemap_replace_tile(&g_cur_map, col - 2, row);
+                tilemap_replace_tile(&g_cur_map, col - 4, row);
+            }
+            /* Alarm variants: increment counter if this is not the last-hit button.
+             * Mirrors lbL00E756 / cmp.l / beq guard @ main.asm#L9827-L9832.
+             * NOTE: only consecutive re-hits of the same tile are skipped; if
+             * button A → button B → button A, all three increments will count.
+             * This exactly matches the ASM behavior. */
+            if ((attr == 0x12 || attr == 0x13) &&
+                    g_alarm_system_active &&
+                    (col != g_alarm_last_col || row != g_alarm_last_row)) {
+                g_alarm_buttons_pressed++;
+                g_alarm_last_col = col;
+                g_alarm_last_row = row;
+            }
+            /* Projectile continues — do NOT deactivate */
+        } else if (tilemap_is_projectile_blocking(&g_cur_map, col, row)) {
+            /*
+             * ── impact_on_door (tile 0x03) ─────────────────────────────
+             * Ref: impact_on_door @ main.asm#L9669-L9700.
+             * Play sample 4 on every hit.  Track cumulative damage on
+             * the current door tile; reset the accumulator when the
+             * projectile hits a different tile (lbL00E4EC / clr door_impact).
+             * When accumulated strength >= 300, give the firing player a
+             * temporary key and call open_door (= force_door path in ASM).
+             * Always falls through to impact_on_wall (bounce/die) below.
+             */
+            if (attr == 0x03) {
+                audio_play_sample(SAMPLE_DOOR_HIT);
+                if (col != g_door_impact_col || row != g_door_impact_row) {
+                    g_door_impact_col   = col;
+                    g_door_impact_row   = row;
+                    g_door_impact_accum = 0;
+                }
+                g_door_impact_accum += (int)(WORD)s_projectiles[i].strength;
+                if (g_door_impact_accum >= 300) {
+                    g_door_impact_accum = 0;
+                    int pi = s_projectiles[i].player_idx;
+                    if (pi >= 0 && pi < MAX_PLAYERS) {
+                        Player *p = &g_players[pi];
+                        /* Temporarily grant one key so open_door can work
+                         * without requiring the player to carry a key.
+                         * Mirrors: addq.w #1,PLAYER_KEYS(a0) / bsr force_door
+                         * then the key is consumed by open_door itself.
+                         * Ref: lbC00E56C-lbC00E574 @ main.asm#L9697-L9699. */
+                        p->keys++;
+                        open_door_at(p, col, row);
+                    }
+                }
+                /* falls through to impact_on_wall below */
+            }
+
+            /*
+             * ── patch_reactor_* (tiles 0x2a-0x2d) ─────────────────────
+             * Ref: patch_reactor_up/left/down/right @ main.asm#L9603-L9658.
+             * Each reactor face needs exactly 6 projectile hits to blow out.
+             * Hits 1-5 and 7+: pure impact_on_wall (bounce or die).
+             * Hit 6: floor-replace the face tile, play sample 11, then also
+             *   check if all 4 faces are done (all counters non-zero) →
+             *   trigger self-destruct (check_reactors / lbC000E56 path).
+             * Falls through to impact_on_wall in all cases.
+             */
+            else if (attr >= 0x2a && attr <= 0x2d) {
+                int *hit_count;
+                switch (attr) {
+                case 0x2a: hit_count = &g_reactor_up_done;    break;
+                case 0x2b: hit_count = &g_reactor_left_done;  break;
+                case 0x2c: hit_count = &g_reactor_down_done;  break;
+                default:   hit_count = &g_reactor_right_done; break;
+                }
+                (*hit_count)++;
+                if (*hit_count == 6) {
+                    tilemap_replace_tile(&g_cur_map, col, row);
+                    audio_play_sample(SAMPLE_REACTOR_BLAST);
+                    /*
+                     * check_reactors: all 4 faces done (all counters != 0)?
+                     * Ref: check_reactors @ main.asm#L9640-L9649.
+                     * In ASM, beq.b patch_reactor means "if == 0 jump"
+                     * (i.e. NOT done yet); fall-through = all non-zero = all done.
+                     */
+                    if (g_reactor_up_done    != 0 &&
+                        g_reactor_left_done  != 0 &&
+                        g_reactor_down_done  != 0 &&
+                        g_reactor_right_done != 0) {
+                        level_start_destruction();
+                    }
+                }
+                /* falls through to impact_on_wall below */
+            }
+
+            /*
+             * ── impact_on_wall (tiles 0x01, 0x1d, 0x23, plus all above) ──
+             * FLAMEARC bounces 1×, LAZER bounces 5×.  All other weapons
+             * (or bounces exhausted) deactivate here.
+             * Ref: impact_on_wall @ main.asm#L9702-L9788.
+             */
+            if (tilemap_is_impact_wall(&g_cur_map, col, row) &&
+                    s_projectiles[i].bounce_count > 0) {
+                s_projectiles[i].bounce_count--;
+                /*
+                 * Bounce axis detection — exact ASM algorithm:
+                 *   vx >= 0 (moving right): check tile at (col-1, row).
+                 *     If tile type == 0x01 → negate vy.
+                 *   vx < 0  (moving left):  check tile at (col+1, row).
+                 *     If tile type == 0x01 → negate vy.
+                 *   vy >= 0 (moving down, using UPDATED vy from above):
+                 *     check tile at (col, row+1). If type == 0x01 → negate vx.
+                 *   vy < 0  (moving up, using UPDATED vy from above):
+                 *     check tile at (col, row-1). If type == 0x01 → negate vx.
+                 * Ref: lbC00E5C4-lbC00E64A @ main.asm#L9718-L9765.
+                 * Note: ASM checks neighbor attribute == 0x01 specifically
+                 *       (and.w #$3F,d4 / cmp.w #1,d4 @ main.asm#L9729-L9730).
+                 */
+                int16_t vx = (int16_t)s_projectiles[i].vx;
+                int16_t vy = (int16_t)s_projectiles[i].vy;
+
+                if (vx < 0) {
+                    /* Moving left: check tile to the RIGHT */
+                    if ((tilemap_attr(&g_cur_map, col + 1, row) & 0x3F) == 0x01)
+                        vy = (int16_t)-vy;
+                } else {
+                    /* Moving right (or zero): check tile to the LEFT.
+                     * Ricochet sound is only played in this branch (vx >= 0),
+                     * matching the ASM where sample 46 is emitted at lbC00E5C4
+                     * before the vx≥0 neighbor check and never for vx<0.
+                     * This asymmetry is intentional — faithful to original ASM.
+                     * Ref: move.w #46,d0 / jsr trigger_sample_select_channel
+                     *      @ main.asm#L9723-L9726. */
+                    if (!g_in_destruction_sequence)
+                        audio_play_sample(SAMPLE_RICOCHET);
+                    if ((tilemap_attr(&g_cur_map, col - 1, row) & 0x3F) == 0x01)
+                        vy = (int16_t)-vy;
+                }
+
+                /* Vertical check uses the UPDATED vy from above */
+                if (vy < 0) {
+                    /* Moving up: check tile ABOVE */
+                    if ((tilemap_attr(&g_cur_map, col, row - 1) & 0x3F) == 0x01)
+                        vx = (int16_t)-vx;
+                } else {
+                    /* Moving down (or zero): check tile BELOW */
+                    if ((tilemap_attr(&g_cur_map, col, row + 1) & 0x3F) == 0x01)
+                        vx = (int16_t)-vx;
+                }
+
+                /*
+                 * Fallback: lbW0004D6 alternates ±8 every bounce call.
+                 * If vx or vy is still zero, assign the current fallback so
+                 * the projectile never gets stuck with zero velocity.
+                 * Ref: neg.w lbW0004D6 / tst.w 4(a3) / move.w … @ main.asm#L9759-L9765.
+                 */
+                s_bounce_fallback = -s_bounce_fallback;
+                if (vx == 0) vx = (int16_t)s_bounce_fallback;
+                if (vy == 0) vy = (int16_t)s_bounce_fallback;
+
+                s_projectiles[i].vx = (WORD)vx;
+                s_projectiles[i].vy = (WORD)vy;
+
+                /*
+                 * LAZER only: update direction sprite from new velocity.
+                 * FLAMEARC returns without this step (cmp.l #lbL00EC36 / beq return
+                 * @ main.asm#L9766-L9767).
+                 * Ref: lbC00E66C-lbC00E698 @ main.asm#L9766-L9781.
+                 */
+                if (s_projectiles[i].weapon_type == WEAPON_LAZER)
+                    s_projectiles[i].direction = lazer_velocity_to_dir(vx, vy);
+
+            } else {
+                /* Standard wall hit (all other weapons, or bounces exhausted):
+                 * deactivate projectile and trigger impact flash animation.
+                 * Ref: lbC00E6A8 @ main.asm#L9783-L9788:
+                 *   clr.w 24(a3)           ; clear bounce counter
+                 *   move.w #32000,0(a3)    ; disable projectile (move off-screen)
+                 *   move.l #lbL018CBA,40(a4) ; set impact animation
+                 */
+                s_projectiles[i].active       = 0;
+                s_projectiles[i].impact_active = 1;
+                s_projectiles[i].impact_x     = px;
+                s_projectiles[i].impact_y     = py;
+                s_projectiles[i].impact_frame  = 0;
+                s_projectiles[i].impact_timer  = IMPACT_FRAME_TICKS;
+            }
+            continue;
         }
 
         /* Off-screen */
-        if (s_projectiles[i].x < 0 || s_projectiles[i].x >= MAP_COLS * MAP_TILE_W ||
-            s_projectiles[i].y < 0 || s_projectiles[i].y >= MAP_ROWS * MAP_TILE_H) {
+        if (px < 0 || px >= MAP_COLS * MAP_TILE_W ||
+            py < 0 || py >= MAP_ROWS * MAP_TILE_H) {
             s_projectiles[i].active = 0;
         }
     }
 }
 
-/* Spawn a projectile from player p (called by player_update logic) */
+/* Spawn a projectile from player p (called by player_update logic).
+ * weapon_type : WEAPON_* constant
+ * penetrating : 1=passes through aliens (PLASMAGUN/FLAMETHROWER/LAZER)
+ * lifetime    : ticks until auto-expire (-1=infinite; FLAME_LIFETIME_TICKS for FLAMETHROWER)
+ * bounce_count: remaining wall bounces (1=FLAMEARC, 5=LAZER, 0=others)
+ * direction   : firing direction 1-8 (PLAYER_FACE_*) for sprite selection
+ * Ref: lbC00E178/lbC00E1DC @ main.asm#L9431-L9511.
+ */
 void alien_spawn_projectile(int player_idx, WORD x, WORD y,
-                            WORD vx, WORD vy, WORD strength)
+                            WORD vx, WORD vy, WORD strength,
+                            int weapon_type, int penetrating,
+                            int lifetime, int bounce_count, int direction)
 {
     for (int i = 0; i < MAX_PROJECTILES; i++) {
-        if (!s_projectiles[i].active) {
-            s_projectiles[i].x          = x;
-            s_projectiles[i].y          = y;
-            s_projectiles[i].vx         = vx;
-            s_projectiles[i].vy         = vy;
-            s_projectiles[i].strength   = strength;
-            s_projectiles[i].player_idx = player_idx;
-            s_projectiles[i].active     = 1;
+        if (!s_projectiles[i].active && !s_projectiles[i].impact_active) {
+            s_projectiles[i].x             = x;
+            s_projectiles[i].y             = y;
+            s_projectiles[i].vx            = vx;
+            s_projectiles[i].vy            = vy;
+            s_projectiles[i].strength      = strength;
+            s_projectiles[i].player_idx    = player_idx;
+            s_projectiles[i].active        = 1;
+            s_projectiles[i].weapon_type   = weapon_type;
+            s_projectiles[i].penetrating   = penetrating;
+            s_projectiles[i].lifetime      = lifetime;
+            s_projectiles[i].bounce_count  = bounce_count;
+            s_projectiles[i].direction     = direction;
+            s_projectiles[i].impact_active = 0;
+            s_projectiles[i].impact_frame  = 0;
+            s_projectiles[i].impact_timer  = 0;
+            s_projectiles[i].flight_anim_frame = 0;
             return;
         }
     }
@@ -637,8 +1160,13 @@ void aliens_collisions_with_weapons(void)
             int ay2 = (int)g_aliens[ai].pos_y + 16;
 
             if (ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1) {
-                s_projectiles[pi].active = 0;
+                /* Apply damage */
                 g_aliens[ai].strength -= s_projectiles[pi].strength;
+                /* Trigger ALT WALK hit-flash for two rendered frames (≈40ms
+                 * at 50Hz = one 25Hz game-logic tick, same duration as the
+                 * original single-VBL flash).
+                 * Mirrors move.w #1,50(a0) @ main.asm#L7724. */
+                g_aliens[ai].hit_flag = 2;
                 if (g_aliens[ai].strength <= 0) {
                     alien_kill(ai);
                     /* Award score to the firing player */
@@ -646,6 +1174,23 @@ void aliens_collisions_with_weapons(void)
                     if (owner >= 0 && owner < MAX_PLAYERS)
                         g_players[owner].score += ALIEN_SCORE_VALUE;
                 }
+
+                /*
+                 * Penetrating weapons (PLASMAGUN/FLAMETHROWER/LAZER) keep
+                 * flying after hitting an alien.
+                 * Non-penetrating weapons deactivate and play an impact flash.
+                 * Ref: tst.w 18(a1) / bne.b lbC00AC38 @ main.asm#L7739-L7744.
+                 */
+                if (!s_projectiles[pi].penetrating) {
+                    s_projectiles[pi].active       = 0;
+                    s_projectiles[pi].impact_active = 1;
+                    s_projectiles[pi].impact_x     = (int)s_projectiles[pi].x;
+                    s_projectiles[pi].impact_y     = (int)s_projectiles[pi].y;
+                    s_projectiles[pi].impact_frame  = 0;
+                    s_projectiles[pi].impact_timer  = IMPACT_FRAME_TICKS;
+                    break; /* projectile gone, stop checking other aliens */
+                }
+                /* Penetrating: keep active, continue checking remaining aliens */
             }
         }
     }
@@ -735,15 +1280,188 @@ int alien_living_count(void)
     return n;
 }
 
+/*
+ * Draw a BOB (Blitter Object) from the alien atlas at screen position (sx,sy).
+ * atlas_x, atlas_y : top-left of the sprite in the atlas (pixel coordinates).
+ * w, h             : sprite dimensions in pixels.
+ * Transparency: color index 0 is treated as transparent (blitter minterm $CA).
+ * Ref: disp_sprite / blitter BOB rendering @ main.asm#L12365-L12411.
+ */
+static void draw_atlas_bob(int sx, int sy, int atlas_x, int atlas_y, int w, int h)
+{
+    const UBYTE *atlas = alien_gfx_get_atlas();
+    if (!atlas) return;
+    /* Clip to viewport */
+    if (sx >= 320 || sy >= 256 || sx + w <= 0 || sy + h <= 0) return;
+    int src_x = atlas_x, src_y = atlas_y;
+    int dst_x = sx, dst_y = sy;
+    int bw = w, bh = h;
+    if (dst_x < 0) { src_x -= dst_x; bw += dst_x; dst_x = 0; }
+    if (dst_y < 0) { src_y -= dst_y; bh += dst_y; dst_y = 0; }
+    if (dst_x + bw > 320) bw = 320 - dst_x;
+    if (dst_y + bh > 256) bh = 256 - dst_y;
+    if (bw <= 0 || bh <= 0) return;
+    const UBYTE *src = atlas + src_y * ALIEN_ATLAS_W + src_x;
+    video_blit(src, ALIEN_ATLAS_W, dst_x, dst_y, bw, bh, 0);
+}
+
 void projectiles_render(void)
 {
     extern int g_camera_x, g_camera_y;
+
     for (int i = 0; i < MAX_PROJECTILES; i++) {
+        /*
+         * Render impact flash animation (8-frame 16×16 explosion BOB).
+         * Shown after the projectile deactivates on wall or alien hit.
+         * Mirrors lbL018CBA BOB animation @ main.asm#L13925.
+         * BOBs 56-63: lbW018D4A entries 56-63 @ main.asm#L14001-L14008.
+         */
+        if (s_projectiles[i].impact_active) {
+            int f = s_projectiles[i].impact_frame;
+            if (f < IMPACT_ANIM_FRAMES) {
+                int ix = s_projectiles[i].impact_x - g_camera_x - 8;
+                int iy = s_projectiles[i].impact_y - g_camera_y - 7;
+                draw_atlas_bob(ix, iy,
+                               k_impact_frames[f][0], k_impact_frames[f][1],
+                               k_impact_frames[f][2], k_impact_frames[f][3]);
+            }
+            continue;
+        }
+
         if (!s_projectiles[i].active) continue;
-        int sx = s_projectiles[i].x - g_camera_x;
-        int sy = s_projectiles[i].y - g_camera_y;
-        if (sx < -4 || sx > 324 || sy < -4 || sy > 260) continue;
-        /* Draw a 3×3 yellow pixel dot for the bullet (color 1 = first non-black) */
-        video_fill_rect(sx - 1, sy - 1, 3, 3, 1);
+
+        int sx = (int)(WORD)s_projectiles[i].x - g_camera_x;
+        int sy = (int)(WORD)s_projectiles[i].y - g_camera_y;
+
+        switch (s_projectiles[i].weapon_type) {
+
+        case WEAPON_MACHINEGUN:
+            /*
+             * MACHINEGUN: Direction-dependent 16×14 muzzle-flash BOB shown
+             * for ONE tick only (muzzle flash at the cannon position).
+             * ASM lbL00EAEE: dc.l BOB,0 (delay=0 = 1 tick) then
+             *                dc.l lbW01389C,32000,-1 (blank for the rest).
+             * flight_anim_frame==0: first tick → draw sprite.
+             * flight_anim_frame==1: all later ticks → bullet invisible.
+             * Ref: lbL00EACA @ main.asm#L10010-L10034.
+             */
+            if (s_projectiles[i].flight_anim_frame == 0) {
+                int dir = s_projectiles[i].direction;
+                if (dir < 0 || dir > 8) dir = 0;
+                draw_atlas_bob(sx - 8, sy - 7,
+                               k_machinegun_atlas[dir][0], k_machinegun_atlas[dir][1],
+                               k_machinegun_atlas[dir][2], k_machinegun_atlas[dir][3]);
+            }
+            break;
+
+        case WEAPON_TWINFIRE:
+            /*
+             * TWINFIRE: Direction-dependent single-frame 16×14 BOB.
+             * BOB animation structs lbL017B4E-lbL017C9E → lbL01790A entries 0-7.
+             * lbW0188CE descriptors at entries 0-7, all at y=160=0xA0.
+             * Ref: lbL00EB8E/lbL00EBB2-lbL00EC06 @ main.asm#L10036-L10052.
+             * Sprite centred on projectile position (blit at sx-8, sy-7).
+             */
+            {
+                int dir = s_projectiles[i].direction;
+                if (dir < 0 || dir > 8) dir = 0;
+                draw_atlas_bob(sx - 8, sy - 7,
+                               k_twinfire_atlas[dir][0], k_twinfire_atlas[dir][1],
+                               k_twinfire_atlas[dir][2], k_twinfire_atlas[dir][3]);
+            }
+            break;
+
+        case WEAPON_FLAMEARC:
+            /*
+             * FLAMEARC: 8-frame animated 16×14 BOB, same sequence for all directions.
+             * BOB animation structs lbL017E4E-lbL017F9E → lbL01790A entries 16-23.
+             * lbW0188CE descriptors at entries 16-23 (all at y=160=0xA0), delay=0.
+             * Ref: lbL00EC36 @ main.asm#L10063-L10070.
+             */
+            {
+                int f = s_projectiles[i].flight_anim_frame;
+                draw_atlas_bob(sx - 8, sy - 7,
+                               k_flamearc_atlas[f][0], k_flamearc_atlas[f][1],
+                               k_flamearc_atlas[f][2], k_flamearc_atlas[f][3]);
+            }
+            break;
+
+        case WEAPON_PLASMAGUN:
+            /*
+             * PLASMAGUN: Direction-dependent single-frame 16×14 BOB.
+             * BOB animation structs lbL01814E-lbL01829E → lbL01790A entries 32-39.
+             * lbW0188CE descriptors at entries 32-39.
+             * Ref: lbL00ECFE/lbL00ED22-lbL00ED76 @ main.asm#L10090-L10106.
+             * Sprite centred on projectile position (blit at sx-8, sy-7).
+             */
+            {
+                int dir = s_projectiles[i].direction;
+                if (dir < 0 || dir > 8) dir = 0;
+                draw_atlas_bob(sx - 8, sy - 7,
+                               k_plasmagun_atlas[dir][0], k_plasmagun_atlas[dir][1],
+                               k_plasmagun_atlas[dir][2], k_plasmagun_atlas[dir][3]);
+            }
+            break;
+
+        case WEAPON_FLAMETHROWER:
+            /*
+             * FLAMETHROWER: cycle through all 8 impact frames at 2 ticks/frame
+             * (delay=1 in lbL018D06 @ main.asm#L13935).  The sequence loops back
+             * to frame 0 via the -1 terminator exactly as lbC011B37 does on the
+             * Amiga blitter at 25 Hz.
+             * elapsed = FLAME_LIFETIME_TICKS - lifetime → 0..15
+             * frame  = (elapsed / 2) % 8              → 0..7, 2 ticks each
+             */
+            {
+                int elapsed = FLAME_LIFETIME_TICKS - (int)s_projectiles[i].lifetime;
+                int frame   = (elapsed / 2) % IMPACT_ANIM_FRAMES;
+                draw_atlas_bob(sx - 8, sy - 7,
+                               k_impact_frames[frame][0], k_impact_frames[frame][1],
+                               k_impact_frames[frame][2], k_impact_frames[frame][3]);
+            }
+            break;
+
+        case WEAPON_SIDEWINDERS:
+            /*
+             * SIDEWINDERS: Direction-dependent single-frame 16×14 BOB.
+             * BOB animation structs lbL017CCE-lbL017E1E → lbL01790A entries 8-15.
+             * lbW0188CE descriptors at entries 8-15 (all at y=176=0xB0).
+             * Ref: lbL00EC7A/lbL00EC9E-lbL00ECF2 @ main.asm#L10072-L10088.
+             * Fire pattern: arc-spread (3-shot alternating burst, same mechanism as
+             * FLAMEARC and PLASMAGUN — lbC00E200 @ main.asm#L9470), but with
+             * doubled direction-vector offsets (d6/d7 doubled before branching,
+             * giving a wider spread than FLAMEARC).
+             * Sprite centred on projectile position (blit at sx-8, sy-7).
+             */
+            {
+                int dir = s_projectiles[i].direction;
+                if (dir < 0 || dir > 8) dir = 0;
+                draw_atlas_bob(sx - 8, sy - 7,
+                               k_sidewinders_atlas[dir][0], k_sidewinders_atlas[dir][1],
+                               k_sidewinders_atlas[dir][2], k_sidewinders_atlas[dir][3]);
+            }
+            break;
+
+        case WEAPON_LAZER:
+            /*
+             * LAZER: Penetrating beam — 16×14 BOB, direction-dependent.
+             * BOB animation structs → lbL01790A entries 68-71; lbW0188CE entries 68-71.
+             * Ref: lbL00EDAA / lbL00EDCE-lbL00EE22 @ main.asm#L10119-L10135.
+             */
+            {
+                int dir = s_projectiles[i].direction;
+                if (dir < 0 || dir > 8) dir = 0;
+                draw_atlas_bob(sx - 8, sy - 7,
+                               k_lazer_atlas[dir][0], k_lazer_atlas[dir][1],
+                               k_lazer_atlas[dir][2], k_lazer_atlas[dir][3]);
+            }
+            break;
+
+        default:
+            /* Unknown weapon type — fall back to simple dot */
+            if (sx >= -2 && sx < 322 && sy >= -2 && sy < 258)
+                video_fill_rect(sx - 1, sy - 1, 3, 3, 1);
+            break;
+        }
     }
 }
