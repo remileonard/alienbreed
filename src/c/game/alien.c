@@ -840,25 +840,24 @@ void alien_update_all(void)
                 s_projectiles[i].flight_anim_frame == 0)
             s_projectiles[i].flight_anim_frame = 1;
 
-        /* FLAMETHROWER: advance flight_anim_frame forward 0→7 at the rate
-         * of 1 frame every 2 ticks (ASM delay=1 → frame shown for delay+1=2 ticks).
-         * Compute frame from the bullet's age: age = FLAME_LIFETIME_TICKS - lifetime.
-         * Age runs 0→15 over the 16-tick lifetime; frame = age/2 clamps at 7.
-         * lbL018D06 @ main.asm#L13935: 8 entries with delay=1, 8×2=16 ticks total. */
-        if (s_projectiles[i].weapon_type == WEAPON_FLAMETHROWER) {
-            int age = FLAME_LIFETIME_TICKS - s_projectiles[i].lifetime;
-            int f = age / 2;
-            if (f >= IMPACT_ANIM_FRAMES) f = IMPACT_ANIM_FRAMES - 1;
-            s_projectiles[i].flight_anim_frame = f;
-        }
+        /* FLAMETHROWER: flight_anim_frame not used for in-flight rendering
+         * (bullet is invisible during flight; animation spawned at end of life). */
 
         /* Flamethrower lifetime countdown — 16 ticks (8 frames × delay+1=2 ticks/frame)
-         * matching lbL018D06 @ main.asm#L13935 with delay=1 each. */
+         * matching lbL018D06 @ main.asm#L13935 with delay=1 each.
+         * On natural expiry, spawn an impact flash at the bullet's final position
+         * so the 8-frame explosion animation plays where the flame terminates
+         * (matching how lbL018D06 transitions to -1 at max range). */
         if (s_projectiles[i].lifetime > 0) {
             s_projectiles[i].lifetime--;
             if (s_projectiles[i].lifetime == 0) {
-                s_projectiles[i].active = 0;
-                /* No impact flash when flame expires naturally */
+                /* Spawn impact animation at current position, same as wall hit. */
+                s_projectiles[i].active       = 0;
+                s_projectiles[i].impact_active = 1;
+                s_projectiles[i].impact_x     = (WORD)s_projectiles[i].x;
+                s_projectiles[i].impact_y     = (WORD)s_projectiles[i].y;
+                s_projectiles[i].impact_frame  = 0;
+                s_projectiles[i].impact_timer  = IMPACT_FRAME_TICKS;
                 continue;
             }
         }
@@ -1405,26 +1404,14 @@ void projectiles_render(void)
 
         case WEAPON_FLAMETHROWER:
             /*
-             * FLAMETHROWER: Short-range flame BOB rendered from the atlas.
-             * lbL018D06 @ main.asm#L13935 is an 8-frame forward animation
-             * (frame 0 at spawn → frame 7 at expiry), delay=1 per frame.
-             * All 10 direction entries in lbL00ED82 point to the same sequence
-             * → direction-independent animation.
-             * Uses flight_anim_frame (advanced 0→7 in the update loop) to
-             * index the frame, matching the per-bullet animation counter in
-             * the original BOB system.
-             * Ref: lbL018D06 @ main.asm#L13935; lbW0188CE entries 56-63.
+             * FLAMETHROWER: no in-flight sprite.
+             * The 8-frame explosion animation (lbL018D06 / k_impact_frames) is
+             * spawned as an impact_active event when the bullet reaches its
+             * maximum range (natural lifetime expiry) or hits a wall.
+             * This creates the intended effect: rapid invisible bullets each
+             * "exploding" at their terminal position, producing a continuous
+             * stream of fire bursts as new bullets keep spawning.
              */
-            {
-                int f = s_projectiles[i].flight_anim_frame;
-                if (f < 0) f = 0;
-                if (f >= IMPACT_ANIM_FRAMES) f = IMPACT_ANIM_FRAMES - 1;
-                int bx = sx - 8;
-                int by = sy - 7;
-                draw_atlas_bob(bx, by,
-                               k_impact_frames[f][0], k_impact_frames[f][1],
-                               k_impact_frames[f][2], k_impact_frames[f][3]);
-            }
             break;
 
         case WEAPON_SIDEWINDERS:
