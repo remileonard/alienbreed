@@ -18,7 +18,7 @@
  */
 
 #include "alien_gfx.h"
-#include <stdio.h>
+#include "../hal/vfs.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -34,7 +34,7 @@ int alien_gfx_load(const char *path, int atlas_type)
     const int plane_size    = ALIEN_ATLAS_H * bytes_per_row;        /* 15360 */
     const int total_raw     = ALIEN_ATLAS_PLANES * plane_size;      /* 76800 */
 
-    FILE *f = fopen(path, "rb");
+    VFile *f = vfs_open(path);
     if (!f) {
         fprintf(stderr, "alien_gfx_load: cannot open %s\n", path);
         return -1;
@@ -42,12 +42,12 @@ int alien_gfx_load(const char *path, int atlas_type)
 
     UBYTE *raw = (UBYTE *)malloc((size_t)total_raw);
     if (!raw) {
-        fclose(f);
+        vfs_close(f);
         return -1;
     }
 
-    int got = (int)fread(raw, 1, (size_t)total_raw, f);
-    fclose(f);
+    int got = (int)vfs_read(raw, 1, (size_t)total_raw, f);
+    vfs_close(f);
 
     if (got < total_raw) {
         fprintf(stderr, "alien_gfx_load: expected %d bytes, got %d in %s\n",

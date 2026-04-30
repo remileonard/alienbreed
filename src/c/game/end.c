@@ -11,6 +11,7 @@
 #include "../hal/input.h"
 #include "../hal/audio.h"
 #include "../hal/timer.h"
+#include "../hal/vfs.h"
 #include "../engine/palette.h"
 #include "../engine/typewriter.h"
 #include <stdio.h>
@@ -34,21 +35,21 @@ void end_run(void)
 
     typedef struct { UBYTE *pixels; int w, h; } Img;
     Img bg = {NULL, 0, 0};
-    FILE *f = fopen("assets/gfx/end_bkgnd_320x256.raw", "rb");
+    VFile *f = vfs_open("assets/gfx/end_bkgnd_320x256.raw");
     if (f) {
-        fread(&bg.w, 4, 1, f); fread(&bg.h, 4, 1, f);
+        vfs_read(&bg.w, 4, 1, f); vfs_read(&bg.h, 4, 1, f);
         bg.pixels = (UBYTE *)malloc((size_t)(bg.w * bg.h));
-        if (bg.pixels) fread(bg.pixels, 1, (size_t)(bg.w * bg.h), f);
-        fclose(f);
+        if (bg.pixels) vfs_read(bg.pixels, 1, (size_t)(bg.w * bg.h), f);
+        vfs_close(f);
     }
 
     Img scroll_bg = {NULL, 0, 0};
-    f = fopen("assets/gfx/end_scroll_320x1024.raw", "rb");
+    f = vfs_open("assets/gfx/end_scroll_320x1024.raw");
     if (f) {
-        fread(&scroll_bg.w, 4, 1, f); fread(&scroll_bg.h, 4, 1, f);
+        vfs_read(&scroll_bg.w, 4, 1, f); vfs_read(&scroll_bg.h, 4, 1, f);
         scroll_bg.pixels = (UBYTE *)malloc((size_t)(scroll_bg.w * scroll_bg.h));
-        if (scroll_bg.pixels) fread(scroll_bg.pixels, 1, (size_t)(scroll_bg.w * scroll_bg.h), f);
-        fclose(f);
+        if (scroll_bg.pixels) vfs_read(scroll_bg.pixels, 1, (size_t)(scroll_bg.w * scroll_bg.h), f);
+        vfs_close(f);
     }
 
     Font font = {0};

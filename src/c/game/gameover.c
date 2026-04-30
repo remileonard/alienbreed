@@ -11,6 +11,7 @@
 #include "../hal/input.h"
 #include "../hal/audio.h"
 #include "../hal/timer.h"
+#include "../hal/vfs.h"
 #include "../engine/palette.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,20 +24,20 @@ void gameover_run(void)
 {
     audio_stop_music();
 
-    FILE *f = fopen("assets/anim/gameover.anim", "rb");
+    VFile *f = vfs_open("assets/anim/gameover.anim");
     int num_frames = 0;
     UBYTE **frames = NULL;
 
     if (f) {
-        fread(&num_frames, 4, 1, f);
+        vfs_read(&num_frames, 4, 1, f);
         if (num_frames > 0 && num_frames < 500) {
             frames = (UBYTE **)calloc((size_t)num_frames, sizeof(UBYTE *));
             for (int i = 0; i < num_frames && frames; i++) {
                 frames[i] = (UBYTE *)malloc(320 * 256);
-                if (frames[i]) fread(frames[i], 1, 320 * 256, f);
+                if (frames[i]) vfs_read(frames[i], 1, 320 * 256, f);
             }
         }
-        fclose(f);
+        vfs_close(f);
     }
 
     /* From gameover.asm: palette has only 4 colors (2bpp anim) */

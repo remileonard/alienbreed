@@ -13,6 +13,7 @@
  */
 
 #include "soundmon.h"
+#include "vfs.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_mixer.h>
 #include <stdio.h>
@@ -165,26 +166,26 @@ struct SM_Module {
 
 SM_Module *sm_load(const char *path)
 {
-    FILE *f = fopen(path, "rb");
+    VFile *f = vfs_open(path);
     if (!f) {
         fprintf(stderr, "soundmon: cannot open '%s'\n", path);
         return NULL;
     }
 
-    fseek(f, 0, SEEK_END);
-    long fsz = ftell(f);
-    rewind(f);
-    if (fsz < 512) { fclose(f); return NULL; }
+    vfs_seek(f, 0, SEEK_END);
+    long fsz = vfs_tell(f);
+    vfs_seek(f, 0, SEEK_SET);
+    if (fsz < 512) { vfs_close(f); return NULL; }
 
     uint8_t *data = (uint8_t *)malloc((size_t)fsz);
-    if (!data) { fclose(f); return NULL; }
+    if (!data) { vfs_close(f); return NULL; }
 
-    if ((long)fread(data, 1, (size_t)fsz, f) != fsz) {
+    if ((long)vfs_read(data, 1, (size_t)fsz, f) != fsz) {
         free(data);
-        fclose(f);
+        vfs_close(f);
         return NULL;
     }
-    fclose(f);
+    vfs_close(f);
 
     SM_Module *m = (SM_Module *)calloc(1, sizeof(*m));
     if (!m) { free(data); return NULL; }

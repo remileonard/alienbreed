@@ -22,6 +22,7 @@
 #include "../hal/input.h"
 #include "../hal/audio.h"
 #include "../hal/timer.h"
+#include "../hal/vfs.h"
 #include "../engine/palette.h"
 #include "../engine/typewriter.h"
 #include <stdlib.h>
@@ -95,24 +96,24 @@ typedef struct { UBYTE *pixels; int w, h; } StoryImg;
 
 static int img_load(StoryImg *img, const char *path)
 {
-    FILE *f = fopen(path, "rb");
+    VFile *f = vfs_open(path);
     if (!f) {
         fprintf(stderr, "story: cannot open '%s'\n", path);
         return -1;
     }
-    if (fread(&img->w, 4, 1, f) != 1 || fread(&img->h, 4, 1, f) != 1) {
+    if (vfs_read(&img->w, 4, 1, f) != 1 || vfs_read(&img->h, 4, 1, f) != 1) {
         fprintf(stderr, "story: header read error in '%s'\n", path);
-        fclose(f); return -1;
+        vfs_close(f); return -1;
     }
     size_t sz = (size_t)(img->w * img->h);
     img->pixels = (UBYTE *)malloc(sz);
-    if (!img->pixels) { fclose(f); return -1; }
-    if (fread(img->pixels, 1, sz, f) != sz) {
+    if (!img->pixels) { vfs_close(f); return -1; }
+    if (vfs_read(img->pixels, 1, sz, f) != sz) {
         fprintf(stderr, "story: pixel read error in '%s'\n", path);
         free(img->pixels); img->pixels = NULL;
-        fclose(f); return -1;
+        vfs_close(f); return -1;
     }
-    fclose(f);
+    vfs_close(f);
     return 0;
 }
 

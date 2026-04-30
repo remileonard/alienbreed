@@ -9,6 +9,7 @@
 #include "../engine/sprite.h"
 #include "../engine/tilemap.h"
 #include "../hal/video.h"
+#include "../hal/vfs.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -24,15 +25,15 @@ static GfxImage s_paused;
 
 static int load_gfx(GfxImage *img, const char *path)
 {
-    FILE *f = fopen(path, "rb");
+    VFile *f = vfs_open(path);
     if (!f) return -1;
     int w, h;
-    if (fread(&w, 4, 1, f) != 1 || fread(&h, 4, 1, f) != 1) { fclose(f); return -1; }
+    if (vfs_read(&w, 4, 1, f) != 1 || vfs_read(&h, 4, 1, f) != 1) { vfs_close(f); return -1; }
     img->w = w; img->h = h;
     img->pixels = (UBYTE *)malloc((size_t)(w * h));
-    if (!img->pixels) { fclose(f); return -1; }
-    fread(img->pixels, 1, (size_t)(w * h), f);
-    fclose(f);
+    if (!img->pixels) { vfs_close(f); return -1; }
+    vfs_read(img->pixels, 1, (size_t)(w * h), f);
+    vfs_close(f);
     return 0;
 }
 
