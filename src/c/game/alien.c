@@ -1404,14 +1404,13 @@ void projectiles_render(void)
 
         case WEAPON_FLAMETHROWER:
             /*
-             * FLAMETHROWER: no in-flight sprite.
-             * The 8-frame explosion animation (lbL018D06 / k_impact_frames) is
-             * spawned as an impact_active event when the bullet reaches its
-             * maximum range (natural lifetime expiry) or hits a wall.
-             * This creates the intended effect: rapid invisible bullets each
-             * "exploding" at their terminal position, producing a continuous
-             * stream of fire bursts as new bullets keep spawning.
+             * FLAMETHROWER: show frame 0 (small flame) as a static in-flight sprite.
+             * The full 8-frame explosion animation is spawned as an impact_active
+             * event when the bullet reaches its maximum range or hits a wall.
              */
+            draw_atlas_bob(sx - 8, sy - 7,
+                           k_impact_frames[0][0], k_impact_frames[0][1],
+                           k_impact_frames[0][2], k_impact_frames[0][3]);
             break;
 
         case WEAPON_SIDEWINDERS:
