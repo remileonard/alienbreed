@@ -706,11 +706,14 @@ void player_update(Player *p, UWORD input_mask)
 
             /*
              * Muzzle position: add per-direction offset to the player's
-             * centre position (pos_x, pos_y).
-             * The cannon is positioned at the centre of the player sprite
-             * and the offset shifts it to the tip of the barrel for each
-             * of the 8 compass directions.
-             * lbW00EA3E + 0  → weapons with index >= 2 (TWINFIRE … LAZER)
+             * top-left corner (pos_x - 16, pos_y - 16).
+             * ASM lbC00E264 does:
+             *   move.l 16(a0),a4       ; sprite pointer
+             *   move.l -4(a4),d1       ; player TOP-LEFT packed (x|y)
+             *   move.l 0(a2,d2.w),d2   ; muzzle offset (x_off|y_off)
+             *   add.w  d2,d1 / swap / add.w / swap  → spawn = TL + offset
+             * In the C port pos_x/pos_y is the CENTRE, so TL = pos_x-16.
+             * lbW00EA3E + 0  → weapons with PLAYER_WEAPON_INDEX >= 2 (TWINFIRE…LAZER)
              * lbW00EA3E + 32 → MACHINEGUN (weapon index 1)
              * Ref: lbC00E264 @ main.asm#L9496-L9511.
              *
@@ -731,8 +734,8 @@ void player_update(Player *p, UWORD input_mask)
             };
             int tbl = (wt == WEAPON_MACHINEGUN) ? 1 : 0;
             int safe_dir = (dir >= 1 && dir <= 8) ? dir : 5;
-            int spawn_x = p->pos_x + k_muzzle_x[tbl][safe_dir];
-            int spawn_y = p->pos_y + k_muzzle_y[tbl][safe_dir];
+            int spawn_x = p->pos_x - 16 + k_muzzle_x[tbl][safe_dir];
+            int spawn_y = p->pos_y - 16 + k_muzzle_y[tbl][safe_dir];
 
             alien_spawn_projectile(p->port, (WORD)spawn_x, (WORD)spawn_y,
                                    vx, vy, p->weapon_strength,
