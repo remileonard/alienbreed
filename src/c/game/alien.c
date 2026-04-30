@@ -840,16 +840,20 @@ void alien_update_all(void)
                 s_projectiles[i].flight_anim_frame == 0)
             s_projectiles[i].flight_anim_frame = 1;
 
-        /* FLAMETHROWER: advance flight_anim_frame forward 0→7 then clamp at 7.
-         * lbL018D06 @ main.asm#L13935 is 8 frames with delay=1 each playing
-         * forward (frame 0 at spawn, frame 7 at lifetime end). */
+        /* FLAMETHROWER: advance flight_anim_frame forward 0→7 at the rate
+         * of 1 frame every 2 ticks (ASM delay=1 → frame shown for delay+1=2 ticks).
+         * Compute frame from the bullet's age: age = FLAME_LIFETIME_TICKS - lifetime.
+         * Age runs 0→15 over the 16-tick lifetime; frame = age/2 clamps at 7.
+         * lbL018D06 @ main.asm#L13935: 8 entries with delay=1, 8×2=16 ticks total. */
         if (s_projectiles[i].weapon_type == WEAPON_FLAMETHROWER) {
-            if (s_projectiles[i].flight_anim_frame < IMPACT_ANIM_FRAMES - 1)
-                s_projectiles[i].flight_anim_frame++;
+            int age = FLAME_LIFETIME_TICKS - s_projectiles[i].lifetime;
+            int f = age / 2;
+            if (f >= IMPACT_ANIM_FRAMES) f = IMPACT_ANIM_FRAMES - 1;
+            s_projectiles[i].flight_anim_frame = f;
         }
 
-        /* Flamethrower lifetime countdown — matches 8-frame lbL018D06 list
-         * with delay=1 each @ main.asm#L13935. */
+        /* Flamethrower lifetime countdown — 16 ticks (8 frames × delay+1=2 ticks/frame)
+         * matching lbL018D06 @ main.asm#L13935 with delay=1 each. */
         if (s_projectiles[i].lifetime > 0) {
             s_projectiles[i].lifetime--;
             if (s_projectiles[i].lifetime == 0) {

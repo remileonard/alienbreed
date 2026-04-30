@@ -95,11 +95,14 @@ void alien_spawn_projectile(int player_idx, WORD x, WORD y,
 
 /*
  * Flamethrower in-flight lifetime in 25 Hz ticks.
- * Matches the 8-entry lbL018D06 animation list (delay=1 each) which gives
- * 8 ticks × 8 px/tick = 64 pixels of range.
+ * lbL018D06 has 8 entries with delay=1 each. delay=1 means each frame is
+ * held for delay+1 = 2 ticks (compare FLAMEARC delay=0 = 1 tick/frame).
+ * Total lifetime = 8 frames × 2 ticks = 16 ticks → range = 16 × 8 px = 128 px.
+ * With fire rate=3 (~4 ticks between shots) this gives 4 simultaneous bullets,
+ * each at a different animation stage, creating the continuous stream effect.
  * Ref: lbL018D06 @ main.asm#L13935.
  */
-#define FLAME_LIFETIME_TICKS 8
+#define FLAME_LIFETIME_TICKS 16
 
 /* Draw all active projectiles. */
 void projectiles_render(void);
