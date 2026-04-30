@@ -840,6 +840,14 @@ void alien_update_all(void)
                 s_projectiles[i].flight_anim_frame == 0)
             s_projectiles[i].flight_anim_frame = 1;
 
+        /* FLAMETHROWER: advance flight_anim_frame forward 0→7 then clamp at 7.
+         * lbL018D06 @ main.asm#L13935 is 8 frames with delay=1 each playing
+         * forward (frame 0 at spawn, frame 7 at lifetime end). */
+        if (s_projectiles[i].weapon_type == WEAPON_FLAMETHROWER) {
+            if (s_projectiles[i].flight_anim_frame < IMPACT_ANIM_FRAMES - 1)
+                s_projectiles[i].flight_anim_frame++;
+        }
+
         /* Flamethrower lifetime countdown — matches 8-frame lbL018D06 list
          * with delay=1 each @ main.asm#L13935. */
         if (s_projectiles[i].lifetime > 0) {
@@ -1394,26 +1402,24 @@ void projectiles_render(void)
         case WEAPON_FLAMETHROWER:
             /*
              * FLAMETHROWER: Short-range flame BOB rendered from the atlas.
-             * lbL018D06 uses lbL01790A entries 56-63 (BOB structs lbL0185CE-lbL01871E)
-             * which share the same lbW0188CE descriptors as the impact flash (entries
-             * 56-63, 16×14 sprites at y=224/240).  delay=1 each → animated flame.
-             * The 'lifetime' field counts down from FLAME_LIFETIME_TICKS=8 to 1;
-             * the animation plays in REVERSE order (large flame first, shrinking to
-             * a small spark) so frame = lt - 1 (7→0 as lifetime decrements 8→1).
+             * lbL018D06 @ main.asm#L13935 is an 8-frame forward animation
+             * (frame 0 at spawn → frame 7 at expiry), delay=1 per frame.
+             * All 10 direction entries in lbL00ED82 point to the same sequence
+             * → direction-independent animation.
+             * Uses flight_anim_frame (advanced 0→7 in the update loop) to
+             * index the frame, matching the per-bullet animation counter in
+             * the original BOB system.
              * Ref: lbL018D06 @ main.asm#L13935; lbW0188CE entries 56-63.
              */
             {
-                int lt = s_projectiles[i].lifetime;
-                if (lt > 0) {
-                    int f = lt - 1;
-                    if (f < 0) f = 0;
-                    if (f >= IMPACT_ANIM_FRAMES) f = IMPACT_ANIM_FRAMES - 1;
-                    int bx = sx - 8;
-                    int by = sy - 7;
-                    draw_atlas_bob(bx, by,
-                                   k_impact_frames[f][0], k_impact_frames[f][1],
-                                   k_impact_frames[f][2], k_impact_frames[f][3]);
-                }
+                int f = s_projectiles[i].flight_anim_frame;
+                if (f < 0) f = 0;
+                if (f >= IMPACT_ANIM_FRAMES) f = IMPACT_ANIM_FRAMES - 1;
+                int bx = sx - 8;
+                int by = sy - 7;
+                draw_atlas_bob(bx, by,
+                               k_impact_frames[f][0], k_impact_frames[f][1],
+                               k_impact_frames[f][2], k_impact_frames[f][3]);
             }
             break;
 
