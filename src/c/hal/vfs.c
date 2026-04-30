@@ -129,7 +129,10 @@ int vfs_eof(VFile *f)
 SDL_RWops *vfs_rwops(const char *path)
 {
     const AssetEntry *entry = bundle_lookup(path);
-    if (entry)
+    if (entry) {
+        /* SDL_RWFromConstMem takes an int size; game assets are always < 2 GB. */
+        if (entry->size > (size_t)0x7fffffff) return NULL;
         return SDL_RWFromConstMem(entry->data, (int)entry->size);
+    }
     return SDL_RWFromFile(path, "rb");
 }

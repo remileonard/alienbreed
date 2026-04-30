@@ -32,7 +32,10 @@ static int load_gfx(GfxImage *img, const char *path)
     img->w = w; img->h = h;
     img->pixels = (UBYTE *)malloc((size_t)(w * h));
     if (!img->pixels) { vfs_close(f); return -1; }
-    vfs_read(img->pixels, 1, (size_t)(w * h), f);
+    if (vfs_read(img->pixels, 1, (size_t)(w * h), f) != (size_t)(w * h)) {
+        free(img->pixels); img->pixels = NULL;
+        vfs_close(f); return -1;
+    }
     vfs_close(f);
     return 0;
 }
