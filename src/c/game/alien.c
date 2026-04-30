@@ -840,8 +840,9 @@ void alien_update_all(void)
                 s_projectiles[i].flight_anim_frame == 0)
             s_projectiles[i].flight_anim_frame = 1;
 
-        /* FLAMETHROWER: flight_anim_frame not used for in-flight rendering
-         * (bullet is invisible during flight; animation spawned at end of life). */
+        /* FLAMETHROWER: in-flight frame is computed from lifetime in the render
+         * pass (frame = (elapsed / 2) % 8, delay=1 → 2 ticks/frame, mirroring
+         * lbL018D06 @ main.asm#L13935 with -1 looping at 25 Hz). */
 
         /* Flamethrower lifetime countdown — 16 ticks (8 frames × delay+1=2 ticks/frame)
          * matching lbL018D06 @ main.asm#L13935 with delay=1 each.
@@ -1404,13 +1405,20 @@ void projectiles_render(void)
 
         case WEAPON_FLAMETHROWER:
             /*
-             * FLAMETHROWER: show frame 0 (small flame) as a static in-flight sprite.
-             * The full 8-frame explosion animation is spawned as an impact_active
-             * event when the bullet reaches its maximum range or hits a wall.
+             * FLAMETHROWER: cycle through all 8 impact frames at 2 ticks/frame
+             * (delay=1 in lbL018D06 @ main.asm#L13935).  The sequence loops back
+             * to frame 0 via the -1 terminator exactly as lbC011B37 does on the
+             * Amiga blitter at 25 Hz.
+             * elapsed = FLAME_LIFETIME_TICKS - lifetime → 0..15
+             * frame  = (elapsed / 2) % 8              → 0..7, 2 ticks each
              */
-            draw_atlas_bob(sx - 8, sy - 7,
-                           k_impact_frames[0][0], k_impact_frames[0][1],
-                           k_impact_frames[0][2], k_impact_frames[0][3]);
+            {
+                int elapsed = FLAME_LIFETIME_TICKS - (int)s_projectiles[i].lifetime;
+                int frame   = (elapsed / 2) % IMPACT_ANIM_FRAMES;
+                draw_atlas_bob(sx - 8, sy - 7,
+                               k_impact_frames[frame][0], k_impact_frames[frame][1],
+                               k_impact_frames[frame][2], k_impact_frames[frame][3]);
+            }
             break;
 
         case WEAPON_SIDEWINDERS:
