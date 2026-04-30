@@ -1,0 +1,108 @@
+name: Build and Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Allow one concurrent deployment; cancel in-progress runs for the same branch.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------ #
+      # Step 1 — Build native asset-conversion tools                        #
+      # ------------------------------------------------------------------ #
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+
+      - name: Configure native build (tools only)
+        run: |
+          cmake -B build_native \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DEMBED_ASSETS=OFF
+
+      - name: Build native tools
+        run: |
+          cmake --build build_native --target \
+            bin2c convert_bitplanes convert_tileset \
+            convert_sprites convert_audio parse_levels \
+            -- -j$(nproc)
+
+      # ------------------------------------------------------------------ #
+      # Step 2 — Convert Amiga game data to portable asset files            #
+      # ------------------------------------------------------------------ #
+      - name: Convert game assets
+        run: |
+          BUILD=./build_native ./convert_assets.sh
+
+      # ------------------------------------------------------------------ #
+      # Step 3 — Build the WebAssembly version with all assets embedded     #
+      # ------------------------------------------------------------------ #
+      - name: Set up Emscripten SDK
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.64
+          actions-cache-folder: emsdk-cache
+
+      - name: Configure WASM build
+        run: |
+          emcmake cmake -B build_wasm \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DEMBED_ASSETS=ON \
+            -DBIN2C_EXECUTABLE="$(pwd)/build_native/bin2c"
+
+      - name: Build WASM
+        run: emmake make -C build_wasm alienbreed -j$(nproc)
+
+      # ------------------------------------------------------------------ #
+      # Step 4 — Assemble the GitHub Pages site                             #
+      # ------------------------------------------------------------------ #
+      - name: Prepare Pages directory
+        run: |
+          mkdir -p pages
+          # Emscripten emits alienbreed.html / alienbreed.js / alienbreed.wasm
+          cp build_wasm/alienbreed.html pages/index.html
+          cp build_wasm/alienbreed.js   pages/
+          cp build_wasm/alienbreed.wasm pages/
+          # Add a minimal _headers file so GitHub Pages serves WASM correctly
+          # (Cross-Origin-Embedder-Policy + Cross-Origin-Opener-Policy are
+          #  required for SharedArrayBuffer used by Emscripten threads, and
+          #  good practice for WASM in general).
+          cat > pages/_headers <<'EOF'
+          /*
+            Cross-Origin-Opener-Policy: same-origin
+            Cross-Origin-Embedder-Policy: require-corp
+          EOF
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

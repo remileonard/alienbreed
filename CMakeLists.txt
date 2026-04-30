@@ -4,14 +4,24 @@ project(AlienBreed C)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# Find SDL2
-find_package(SDL2 REQUIRED)
-find_package(SDL2_mixer QUIET)
+# Detect Emscripten cross-compilation
+if(EMSCRIPTEN)
+    # SDL2 and SDL2_mixer are provided by Emscripten ports — no host find_package.
+    # The compiler/linker flags below enable them at build time.
+    set(SDL2_INCLUDE_DIRS "")
+    set(SDL2_LIBRARIES "")
+    set(SDL2_mixer_INCLUDE_DIRS "")
+    set(SDL2_mixer_LIBRARIES "")
+else()
+    # Find SDL2
+    find_package(SDL2 REQUIRED)
+    find_package(SDL2_mixer QUIET)
 
-if(NOT SDL2_mixer_FOUND)
-    # Try pkg-config fallback
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(SDL2_mixer REQUIRED SDL2_mixer)
+    if(NOT SDL2_mixer_FOUND)
+        # Try pkg-config fallback
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(SDL2_mixer REQUIRED SDL2_mixer)
+    endif()
 endif()
 
 # Asset directories (read-only at runtime)
@@ -35,21 +45,32 @@ option(EMBED_ASSETS "Embed all game assets into the binary at link time" OFF)
 
 # -------------------------------------------------------
 # Tools (asset converters - run once at build prep time)
+# These are native-only tools; they are not built when cross-compiling
+# with Emscripten (they cannot run on the target platform).
 # -------------------------------------------------------
 
-add_executable(convert_bitplanes tools/convert_bitplanes.c)
-
-add_executable(convert_tileset tools/convert_tileset.c)
-
-add_executable(convert_sprites tools/convert_sprites.c)
-
-add_executable(convert_audio tools/convert_audio.c)
-
-add_executable(parse_levels tools/parse_levels.c)
+if(NOT EMSCRIPTEN)
+    add_executable(convert_bitplanes tools/convert_bitplanes.c)
+    add_executable(convert_tileset   tools/convert_tileset.c)
+    add_executable(convert_sprites   tools/convert_sprites.c)
+    add_executable(convert_audio     tools/convert_audio.c)
+    add_executable(parse_levels      tools/parse_levels.c)
+endif()
 
 # bin2c — used at build time to convert binary assets to C source arrays.
-# Built for the host so it can always be executed during the build step.
-add_executable(bin2c tools/bin2c.c)
+# When cross-compiling with Emscripten, supply a pre-built native binary via
+# -DBIN2C_EXECUTABLE=/path/to/native/bin2c so it can be executed on the host.
+set(BIN2C_EXECUTABLE "" CACHE FILEPATH
+    "Path to a pre-built native bin2c executable (required when EMSCRIPTEN=1)")
+
+if(BIN2C_EXECUTABLE)
+    # Use the provided pre-built host executable as an imported target.
+    add_executable(bin2c IMPORTED GLOBAL)
+    set_target_properties(bin2c PROPERTIES IMPORTED_LOCATION "${BIN2C_EXECUTABLE}")
+else()
+    # Build bin2c from source (valid for native builds only).
+    add_executable(bin2c tools/bin2c.c)
+endif()
 
 # -------------------------------------------------------
 # Main game
@@ -208,16 +229,46 @@ if(EMBED_ASSETS)
     target_compile_definitions(alienbreed PRIVATE EMBED_ASSETS=1)
 endif()
 
-target_link_libraries(alienbreed PRIVATE
-    ${SDL2_LIBRARIES}
-    ${SDL2_mixer_LIBRARIES}
-    SDL2_mixer::SDL2_mixer
-)
+# -------------------------------------------------------
+# Platform-specific settings
+# -------------------------------------------------------
+
+if(EMSCRIPTEN)
+    # SDL2 and SDL2_mixer come from Emscripten ports (no separate link target).
+    # ASYNCIFY lets the game use its existing blocking-style main loop:
+    #   emscripten_sleep() in timer.c yields back to the browser each frame.
+    set(EM_PORT_FLAGS
+        "-sUSE_SDL=2"
+        "-sUSE_SDL_MIXER=2"
+    )
+    set(EM_LINK_FLAGS
+        ${EM_PORT_FLAGS}
+        "-sASYNCIFY=1"
+        "-sASYNCIFY_STACK_SIZE=1048576"
+        "-sINITIAL_MEMORY=134217728"
+        "-sALLOW_MEMORY_GROWTH=1"
+        "-sEXIT_RUNTIME=1"
+        "--shell-file" "${CMAKE_SOURCE_DIR}/src/wasm/shell.html"
+    )
+
+    target_compile_options(alienbreed PRIVATE ${EM_PORT_FLAGS})
+    target_link_options(alienbreed PRIVATE ${EM_LINK_FLAGS})
+
+    # Emscripten emits <name>.html + <name>.js + <name>.wasm
+    set_target_properties(alienbreed PROPERTIES SUFFIX ".html")
+
+else()
+    target_link_libraries(alienbreed PRIVATE
+        ${SDL2_LIBRARIES}
+        ${SDL2_mixer_LIBRARIES}
+        SDL2_mixer::SDL2_mixer
+    )
+endif()
 
 # -------------------------------------------------------
-# Post-build: copy assets next to the binary (EMBED_ASSETS=OFF only)
+# Post-build: copy assets next to the binary (EMBED_ASSETS=OFF, native only)
 # -------------------------------------------------------
-if(NOT EMBED_ASSETS)
+if(NOT EMBED_ASSETS AND NOT EMSCRIPTEN)
     # Copy assets directory next to the binary (only if assets/ exists)
     if(EXISTS "${ASSETS_DIR}")
         add_custom_command(TARGET alienbreed POST_BUILD

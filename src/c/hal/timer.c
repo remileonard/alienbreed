@@ -6,6 +6,10 @@
 #include "timer.h"
 #include <SDL2/SDL.h>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 ULONG g_frame_counter   = 0;
 ULONG g_elapsed_seconds = 0;
 
@@ -31,12 +35,20 @@ int timer_begin_frame(void)
     Uint64 elapsed = now - s_last_tick;
 
     if (elapsed < target_ticks) {
-        /* Sleep most of the remaining time, then busy-wait the last bit */
         Uint64 remaining_ms = (target_ticks - elapsed) * 1000 / s_freq;
+#ifdef __EMSCRIPTEN__
+        /* In WebAssembly the browser drives the event loop; we must yield via
+         * emscripten_sleep() so it can service redraws and input events.
+         * Busy-waiting would freeze the tab, so we skip the spin-wait. */
+        if (remaining_ms > 0)
+            emscripten_sleep((unsigned int)remaining_ms);
+#else
+        /* Sleep most of the remaining time, then busy-wait the last bit */
         if (remaining_ms > 2)
             SDL_Delay((Uint32)(remaining_ms - 1));
         while (SDL_GetPerformanceCounter() - s_last_tick < target_ticks)
             ; /* spin */
+#endif
     }
 
     now = SDL_GetPerformanceCounter();
