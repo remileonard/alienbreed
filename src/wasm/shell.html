@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Alien Breed Special Edition 92</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0a0a;
+      color: #c8c8c8;
+      font-family: 'Courier New', Courier, monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      min-height: 100vh;
+      padding: 16px 8px;
+      overflow-x: hidden;
+    }
+
+    h1 {
+      color: #e84040;
+      font-size: clamp(14px, 3vw, 22px);
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+      text-shadow: 0 0 12px #e84040aa;
+    }
+
+    .subtitle {
+      font-size: 11px;
+      letter-spacing: 2px;
+      color: #666;
+      margin-bottom: 14px;
+    }
+
+    #canvas-wrapper {
+      position: relative;
+      display: inline-block;
+      border: 2px solid #333;
+      box-shadow: 0 0 24px #e8404044;
+      background: #000;
+      /* Keeps the canvas visually centered on small screens */
+      max-width: 100%;
+    }
+
+    canvas {
+      display: block;
+      /* SDL sets logical size 320×256; let the browser scale uniformly. */
+      width: min(640px, 100vw - 16px);
+      height: auto;
+      aspect-ratio: 320 / 256;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+
+    #status-bar {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #e84040;
+      letter-spacing: 1px;
+      min-height: 18px;
+      text-align: center;
+    }
+
+    #progress-wrap {
+      width: min(640px, 100vw - 16px);
+      height: 4px;
+      background: #1a1a1a;
+      margin-top: 6px;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    #progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #e84040, #ff8040);
+      transition: width 0.15s ease;
+      border-radius: 2px;
+    }
+
+    .controls {
+      margin-top: 18px;
+      font-size: 11px;
+      color: #555;
+      letter-spacing: 1px;
+      text-align: center;
+      line-height: 1.8;
+      max-width: 640px;
+    }
+
+    .controls span { color: #888; }
+
+    /* Hide controls and progress once the game is running */
+    body.running #progress-wrap,
+    body.running .controls { display: none; }
+    body.running #status-bar { color: #555; }
+
+    /* Audio unlock overlay */
+    #audio-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.82);
+      color: #e84040;
+      font-size: 15px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      cursor: pointer;
+      padding: 16px;
+    }
+
+    #audio-overlay.visible {
+      display: flex;
+    }
+  </style>
+</head>
+<body>
+  <h1>Alien Breed Special Edition 92</h1>
+  <p class="subtitle">Team17 &bull; WebAssembly Port</p>
+
+  <div id="canvas-wrapper">
+    <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+    <div id="audio-overlay" onclick="Module.resumeMainLoop && Module.resumeMainLoop(); this.classList.remove('visible');">
+      Click to start
+    </div>
+  </div>
+
+  <div id="status-bar">Loading&hellip;</div>
+  <div id="progress-wrap"><div id="progress-bar"></div></div>
+
+  <div class="controls">
+    <span>Arrow keys / WASD</span> — Move &nbsp;&bull;&nbsp;
+    <span>Left Ctrl / Z</span> — Fire &nbsp;&bull;&nbsp;
+    <span>Left Alt / X</span> — Next weapon<br>
+    <span>P</span> — Pause &nbsp;&bull;&nbsp;
+    <span>M</span> — Map overview &nbsp;&bull;&nbsp;
+    <span>ESC</span> — Game over / quit
+  </div>
+
+  <script>
+    var statusEl   = document.getElementById('status-bar');
+    var progressEl = document.getElementById('progress-bar');
+
+    var Module = {
+      canvas: document.getElementById('canvas'),
+
+      print: function(text) { console.log(text); },
+      printErr: function(text) { console.error(text); },
+
+      setStatus: function(text) {
+        if (text) {
+          /* Emscripten sends "Downloading data... (N/N)" style strings */
+          var m = text.match(/\((\d+)\/(\d+)\)/);
+          if (m) {
+            progressEl.style.width = (100 * parseInt(m[1]) / parseInt(m[2])) + '%';
+          }
+          statusEl.textContent = text;
+        } else {
+          /* Empty string signals that loading is complete */
+          statusEl.textContent = 'Running';
+          document.body.classList.add('running');
+        }
+      },
+
+      onRuntimeInitialized: function() {
+        /* Canvas needs focus to receive keyboard events */
+        document.getElementById('canvas').focus();
+      },
+
+      /* Prevent the default browser context-menu on right-click inside canvas */
+      canvas: (function() {
+        var c = document.getElementById('canvas');
+        c.addEventListener('webglcontextlost', function(e) {
+          alert('WebGL context lost. Please reload the page.');
+          e.preventDefault();
+        }, false);
+        return c;
+      })()
+    };
+
+    window.onerror = function(msg, url, line, col, err) {
+      statusEl.textContent = 'Error: ' + msg;
+      statusEl.style.color = '#ff4040';
+    };
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>
