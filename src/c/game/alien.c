@@ -1398,13 +1398,14 @@ void projectiles_render(void)
              * which share the same lbW0188CE descriptors as the impact flash (entries
              * 56-63, 16×14 sprites at y=224/240).  delay=1 each → animated flame.
              * The 'lifetime' field counts down from FLAME_LIFETIME_TICKS=8 to 1;
-             * we derive the current animation frame as (FLAME_LIFETIME_TICKS - lifetime).
+             * the animation plays in REVERSE order (large flame first, shrinking to
+             * a small spark) so frame = lt - 1 (7→0 as lifetime decrements 8→1).
              * Ref: lbL018D06 @ main.asm#L13935; lbW0188CE entries 56-63.
              */
             {
                 int lt = s_projectiles[i].lifetime;
                 if (lt > 0) {
-                    int f = FLAME_LIFETIME_TICKS - lt;
+                    int f = lt - 1;
                     if (f < 0) f = 0;
                     if (f >= IMPACT_ANIM_FRAMES) f = IMPACT_ANIM_FRAMES - 1;
                     int bx = sx - 8;
