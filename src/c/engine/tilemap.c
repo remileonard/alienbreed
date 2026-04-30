@@ -5,6 +5,7 @@
 
 #include "tilemap.h"
 #include "../hal/video.h"
+#include "../hal/vfs.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,34 +15,34 @@ int       g_camera_y = 0;
 LevelMap  g_cur_map;
 Tileset   g_tileset;
 
-/* Read a big-endian ULONG from a file */
-static ULONG read_u32_be(FILE *f)
+/* Read a big-endian ULONG from a virtual file */
+static ULONG read_u32_be(VFile *f)
 {
     UBYTE b[4];
-    if (fread(b, 1, 4, f) != 4) return 0;
+    if (vfs_read(b, 1, 4, f) != 4) return 0;
     return ((ULONG)b[0] << 24) | ((ULONG)b[1] << 16) |
            ((ULONG)b[2] <<  8) |  (ULONG)b[3];
 }
 
-/* Read a big-endian UWORD from a file */
-static UWORD read_u16_be(FILE *f)
+/* Read a big-endian UWORD from a virtual file */
+static UWORD read_u16_be(VFile *f)
 {
     UBYTE b[2];
-    if (fread(b, 1, 2, f) != 2) return 0;
+    if (vfs_read(b, 1, 2, f) != 2) return 0;
     return (UWORD)((b[0] << 8) | b[1]);
 }
 
 /* Match a 4-byte chunk ID */
-static int match_chunk(FILE *f, const char *id)
+static int match_chunk(VFile *f, const char *id)
 {
     char buf[4];
-    if (fread(buf, 1, 4, f) != 4) return 0;
+    if (vfs_read(buf, 1, 4, f) != 4) return 0;
     return memcmp(buf, id, 4) == 0;
 }
 
 int tilemap_load(const char *path, LevelMap *map)
 {
-    FILE *f = fopen(path, "rb");
+    VFile *f = vfs_open(path);
     if (!f) {
         fprintf(stderr, "tilemap_load: cannot open %s\n", path);
         return -1;
@@ -50,14 +51,14 @@ int tilemap_load(const char *path, LevelMap *map)
     memset(map, 0, sizeof(*map));
 
     /* T7MP header */
-    if (!match_chunk(f, "T7MP")) { fclose(f); return -1; }
+    if (!match_chunk(f, "T7MP")) { vfs_close(f); return -1; }
     read_u32_be(f);  /* chunk size */
     read_u32_be(f);  /* file size */
 
     /* Walk chunks until BODY */
-    while (!feof(f)) {
+    while (!vfs_eof(f)) {
         char id[5] = {0};
-        if (fread(id, 1, 4, f) != 4) break;
+        if (vfs_read(id, 1, 4, f) != 4) break;
         ULONG chunk_sz = read_u32_be(f);
 
         if (memcmp(id, "XBLK", 4) == 0) {
@@ -68,25 +69,25 @@ int tilemap_load(const char *path, LevelMap *map)
             /* Background filename — only chars 13–16 matter per format doc */
             char buf[64] = {0};
             size_t rd = chunk_sz < 64 ? chunk_sz : 64;
-            fread(buf, 1, rd, f);
+            vfs_read(buf, 1, rd, f);
             /* ASM: reads 4 bytes from temp_map_buffer+189 = IFFP_data[13..16]
              * e.g. "ABdisk:CLIP2/LABM-IFF" → bytes 13-16 = "LABM" */
             memcpy(map->bg_filename, buf + 13, 4);
             map->bg_filename[4] = '\0';
-            if ((long)chunk_sz > (long)rd) fseek(f, (long)(chunk_sz - (int)rd), SEEK_CUR);
+            if ((long)chunk_sz > (long)rd) vfs_seek(f, (long)(chunk_sz - (int)rd), SEEK_CUR);
         } else if (memcmp(id, "PALA", 4) == 0) {
             /* Skip 64-byte filename, then read 64 bytes of palette (32 UWORDs) */
-            fseek(f, 64, SEEK_CUR);
+            vfs_seek(f, 64, SEEK_CUR);
             for (int i = 0; i < 32; i++)
                 map->palette_a[i] = read_u16_be(f);
             long remaining = (long)chunk_sz - 64 - 64;
-            if (remaining > 0) fseek(f, remaining, SEEK_CUR);
+            if (remaining > 0) vfs_seek(f, remaining, SEEK_CUR);
         } else if (memcmp(id, "PALB", 4) == 0) {
-            fseek(f, 64, SEEK_CUR);
+            vfs_seek(f, 64, SEEK_CUR);
             for (int i = 0; i < 32; i++)
                 map->palette_b[i] = read_u16_be(f);
             long remaining = (long)chunk_sz - 64 - 64;
-            if (remaining > 0) fseek(f, remaining, SEEK_CUR);
+            if (remaining > 0) vfs_seek(f, remaining, SEEK_CUR);
         } else if (memcmp(id, "BODY", 4) == 0) {
             /* 23040 bytes = 96 × 120 × 2 */
             for (int row = 0; row < MAP_ROWS; row++)
@@ -95,11 +96,11 @@ int tilemap_load(const char *path, LevelMap *map)
             break;  /* BODY is the last useful chunk */
         } else {
             /* Skip unknown chunk */
-            fseek(f, (long)chunk_sz, SEEK_CUR);
+            vfs_seek(f, (long)chunk_sz, SEEK_CUR);
         }
     }
 
-    fclose(f);
+    vfs_close(f);
     map->valid = 1;
     return 0;
 }
@@ -110,11 +111,11 @@ int tileset_load(const char *bg_filename, Tileset *ts)
     snprintf(path, sizeof(path), "assets/tiles/%s.raw", bg_filename);
 
 
-    FILE *f = fopen(path, "rb");
+    VFile *f = vfs_open(path);
     if (!f) {
         /* Fallback: use the map background file */
         snprintf(path, sizeof(path), "assets/tiles/mapbkgnd.raw");
-        f = fopen(path, "rb");
+        f = vfs_open(path);
         if (!f) {
             fprintf(stderr, "tileset_load: cannot open tileset\n");
             return -1;
@@ -124,22 +125,22 @@ int tileset_load(const char *bg_filename, Tileset *ts)
     /* File header: width (int), height (int) — written by convert_bitplanes.
      * Tiles are always 16×16; tile_count = height / 16. */
     int w, h;
-    if (fread(&w, 4, 1, f) != 1 || fread(&h, 4, 1, f) != 1) {
-        fclose(f); return -1;
+    if (vfs_read(&w, 4, 1, f) != 1 || vfs_read(&h, 4, 1, f) != 1) {
+        vfs_close(f); return -1;
     }
     int tile_count = h / 16;
 
     size_t sz = (size_t)(tile_count * 16 * 16);
     ts->pixels = (UBYTE *)malloc(sz);
-    if (!ts->pixels) { fclose(f); return -1; }
+    if (!ts->pixels) { vfs_close(f); return -1; }
 
-    if (fread(ts->pixels, 1, sz, f) != sz) {
+    if (vfs_read(ts->pixels, 1, sz, f) != sz) {
         free(ts->pixels); ts->pixels = NULL;
-        fclose(f); return -1;
+        vfs_close(f); return -1;
     }
 
     ts->tile_count = tile_count;
-    fclose(f);
+    vfs_close(f);
     return 0;
 }
 

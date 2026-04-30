@@ -11,6 +11,7 @@
 #include "../hal/input.h"
 #include "../hal/audio.h"
 #include "../hal/timer.h"
+#include "../hal/vfs.h"
 #include "../engine/palette.h"
 #include "../engine/typewriter.h"
 #include <stdio.h>
@@ -39,12 +40,12 @@ void briefing_run(int level_idx)
     /* Load briefing background */
     typedef struct { UBYTE *pixels; int w, h; } Img;
     Img bg = {NULL, 0, 0};
-    FILE *f = fopen("assets/gfx/briefing_bkgnd_320x256.raw", "rb");
+    VFile *f = vfs_open("assets/gfx/briefing_bkgnd_320x256.raw");
     if (f) {
-        fread(&bg.w, 4, 1, f); fread(&bg.h, 4, 1, f);
+        vfs_read(&bg.w, 4, 1, f); vfs_read(&bg.h, 4, 1, f);
         bg.pixels = (UBYTE *)malloc((size_t)(bg.w * bg.h));
-        if (bg.pixels) fread(bg.pixels, 1, (size_t)(bg.w * bg.h), f);
-        fclose(f);
+        if (bg.pixels) vfs_read(bg.pixels, 1, (size_t)(bg.w * bg.h), f);
+        vfs_close(f);
     }
 
     Font font = {0};

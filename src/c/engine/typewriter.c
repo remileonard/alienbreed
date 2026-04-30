@@ -6,6 +6,7 @@
 #include "typewriter.h"
 #include "../hal/video.h"
 #include "../hal/audio.h"
+#include "../hal/vfs.h"
 #include "../game/constants.h"
 #include <string.h>
 #include <stdlib.h>
@@ -15,7 +16,7 @@ static const char k_font_chars[] = FONT_CHARS;
 
 int font_load(Font *font, const char *path, int lw, int lh, int transparent)
 {
-    FILE *f = fopen(path, "rb");
+    VFile *f = vfs_open(path);
     if (!f) {
         fprintf(stderr, "font_load: cannot open %s\n", path);
         return -1;
@@ -23,17 +24,17 @@ int font_load(Font *font, const char *path, int lw, int lh, int transparent)
 
     /* Header: 4 bytes width, 4 bytes height (written by convert_bitplanes) */
     int strip_w, strip_h;
-    if (fread(&strip_w, 4, 1, f) != 1 || fread(&strip_h, 4, 1, f) != 1) {
-        fclose(f); return -1;
+    if (vfs_read(&strip_w, 4, 1, f) != 1 || vfs_read(&strip_h, 4, 1, f) != 1) {
+        vfs_close(f); return -1;
     }
 
     size_t sz = (size_t)(strip_w * strip_h);
     UBYTE *pixels = (UBYTE *)malloc(sz);
-    if (!pixels) { fclose(f); return -1; }
-    if (fread(pixels, 1, sz, f) != sz) {
-        free(pixels); fclose(f); return -1;
+    if (!pixels) { vfs_close(f); return -1; }
+    if (vfs_read(pixels, 1, sz, f) != sz) {
+        free(pixels); vfs_close(f); return -1;
     }
-    fclose(f);
+    vfs_close(f);
 
     font->pixels      = pixels;
     font->strip_w     = strip_w;

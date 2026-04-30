@@ -8,6 +8,7 @@
 
 #include "audio.h"
 #include "soundmon.h"
+#include "vfs.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_mixer.h>
 #include <stdio.h>
@@ -117,7 +118,8 @@ int audio_load_all(void)
         if (s_samples[id]) continue;  /* already loaded (shared IDs) */
 
         snprintf(path, sizeof(path), "assets/%s.wav", k_sample_map[i].file);
-        s_samples[id] = Mix_LoadWAV(path);
+        SDL_RWops *rw = vfs_rwops(path);
+        s_samples[id] = rw ? Mix_LoadWAV_RW(rw, 1) : NULL;
         if (!s_samples[id]) {
             fprintf(stderr, "Warning: could not load %s: %s\n", path, Mix_GetError());
         } else {

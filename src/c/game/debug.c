@@ -14,6 +14,7 @@
 #include "../hal/video.h"
 #include "../hal/input.h"
 #include "../hal/timer.h"
+#include "../hal/vfs.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -358,19 +359,19 @@ static DbgImg s_dbg_font = {NULL,0,0};
 static int dbg_img_load(DbgImg *img, const char *path)
 {
     if (img->pixels) { free(img->pixels); img->pixels = NULL; }
-    FILE *f = fopen(path, "rb");
+    VFile *f = vfs_open(path);
     if (!f) return -1;
-    if (fread(&img->w, 4, 1, f) != 1 || fread(&img->h, 4, 1, f) != 1) {
-        fclose(f); return -1;
+    if (vfs_read(&img->w, 4, 1, f) != 1 || vfs_read(&img->h, 4, 1, f) != 1) {
+        vfs_close(f); return -1;
     }
     img->pixels = (UBYTE *)malloc((size_t)img->w * (size_t)img->h);
-    if (!img->pixels) { fclose(f); return -1; }
+    if (!img->pixels) { vfs_close(f); return -1; }
     size_t expected = (size_t)img->w * (size_t)img->h;
-    if (fread(img->pixels, 1, expected, f) != expected) {
+    if (vfs_read(img->pixels, 1, expected, f) != expected) {
         free(img->pixels); img->pixels = NULL;
-        fclose(f); return -1;
+        vfs_close(f); return -1;
     }
-    fclose(f);
+    vfs_close(f);
     return 0;
 }
 

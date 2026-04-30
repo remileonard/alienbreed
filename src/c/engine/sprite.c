@@ -17,6 +17,7 @@
 #include "sprite.h"
 #include "alien_gfx.h"
 #include "../hal/video.h"
+#include "../hal/vfs.h"
 #include "../game/player.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,25 +41,25 @@ static int         s_loaded = 0;
 /* Helper: load a flat indexed raw file (output of convert_sprites) */
 static int load_raw_sprite(SpriteImage *img, const char *path)
 {
-    FILE *f = fopen(path, "rb");
+    VFile *f = vfs_open(path);
     if (!f) return -1;
 
     /* Header written by convert_sprites: 4 bytes width, 4 bytes height */
     int w, h;
-    if (fread(&w, 4, 1, f) != 1 || fread(&h, 4, 1, f) != 1) {
-        fclose(f); return -1;
+    if (vfs_read(&w, 4, 1, f) != 1 || vfs_read(&h, 4, 1, f) != 1) {
+        vfs_close(f); return -1;
     }
 
     img->w = w;
     img->h = h;
     img->pixels = (UBYTE *)malloc((size_t)(w * h));
-    if (!img->pixels) { fclose(f); return -1; }
+    if (!img->pixels) { vfs_close(f); return -1; }
 
-    if ((int)fread(img->pixels, 1, (size_t)(w * h), f) != w * h) {
+    if ((int)vfs_read(img->pixels, 1, (size_t)(w * h), f) != w * h) {
         free(img->pixels); img->pixels = NULL;
-        fclose(f); return -1;
+        vfs_close(f); return -1;
     }
-    fclose(f);
+    vfs_close(f);
     return 0;
 }
 

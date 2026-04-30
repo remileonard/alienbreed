@@ -24,6 +24,7 @@
 #include "../hal/input.h"
 #include "../hal/audio.h"
 #include "../hal/timer.h"
+#include "../hal/vfs.h"
 #include "../engine/palette.h"
 #include "../engine/tilemap.h"
 #include "../engine/typewriter.h"
@@ -1739,26 +1740,26 @@ void intex_run(int player_idx)
     /* Load assets */
     IntexImg bg = {NULL, 0, 0};
     {
-        FILE *f = fopen("assets/gfx/intex_bkgnd_320x256.raw", "rb");
+        VFile *f = vfs_open("assets/gfx/intex_bkgnd_320x256.raw");
         if (f) {
-            fread(&bg.w, 4, 1, f); fread(&bg.h, 4, 1, f);
+            vfs_read(&bg.w, 4, 1, f); vfs_read(&bg.h, 4, 1, f);
             bg.pixels = (UBYTE *)malloc((size_t)(bg.w * bg.h));
-            if (bg.pixels) fread(bg.pixels, 1, (size_t)(bg.w * bg.h), f);
-            fclose(f);
+            if (bg.pixels) vfs_read(bg.pixels, 1, (size_t)(bg.w * bg.h), f);
+            vfs_close(f);
         }
     }
 
     IntexImg wpic = {NULL, 0, 0};
     {
-        FILE *fw = fopen("assets/gfx/intex_weapons_320x264.raw", "rb");
+        VFile *fw = vfs_open("assets/gfx/intex_weapons_320x264.raw");
         if (fw) {
-            fread(&wpic.w, 4, 1, fw); fread(&wpic.h, 4, 1, fw);
+            vfs_read(&wpic.w, 4, 1, fw); vfs_read(&wpic.h, 4, 1, fw);
             if (wpic.w == INTEX_WEAPON_ATLAS_W && wpic.h == INTEX_WEAPON_ATLAS_H) {
                 wpic.pixels = (UBYTE *)malloc((size_t)wpic.w * (size_t)wpic.h);
                 if (wpic.pixels)
-                    fread(wpic.pixels, 1, (size_t)wpic.w * (size_t)wpic.h, fw);
+                    vfs_read(wpic.pixels, 1, (size_t)wpic.w * (size_t)wpic.h, fw);
             }
-            fclose(fw);
+            vfs_close(fw);
         }
     }
 
