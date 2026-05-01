@@ -476,7 +476,10 @@ void briefing_run(int level_idx)
     }
 
     /* --- Prepare palette fade-in (FADE_SPEED=1 in briefingcore.asm) --- */
-    static UWORD cur_pal[32] = {0};
+    /* cur_pal tracks the fully-faded-in palette so palette_prep_fade_to_rgb
+     * at the end has the correct starting point for the fade-to-black.       */
+    UWORD cur_pal[32];
+    memset(cur_pal, 0, sizeof(cur_pal));
     palette_prep_fade_in(k_pal_briefingcore, cur_pal, 32);
 
     /* --- Play SAMPLE_DESCENT --- */
@@ -522,20 +525,60 @@ void briefing_run(int level_idx)
             break;
     }
 
+    /* After elevator loop: palette has fully faded in to k_pal_briefingcore.
+     * Record that state so the fade-to-black at the end has the right start. */
+    memcpy(cur_pal, k_pal_briefingcore, sizeof(cur_pal));
+
     /* --- Play SAMPLE_DESCENT_END --- */
     audio_play_sample(SAMPLE_DESCENT_END);
 
-    /* --- Render background + text (sprites now off screen) --- */
+    /* --- Render background (sprites now off screen) --- */
     video_clear();
     if (bg.pixels)
         video_blit(bg.pixels, bg.w, 0, 0, 320, 256, -1);
+
+    /* ------------------------------------------------------------------ */
+    /* display_text: typewriter with sound (same sequence as level 1)      */
+    /*                                                                      */
+    /* Text colour: palette[7] = 0xFFF = white in k_pal_briefingcore.     */
+    /* The shared font file has pixel value 1 (main lo5 font overwrite);   */
+    /* text_color=7 overrides all glyph pixels to white.                   */
+    /* ------------------------------------------------------------------ */
     if (font.pixels) {
         TextCtx ctx;
         typewriter_init_ctx(&ctx, &font, g_framebuffer, 320, 8, 40);
-        typewriter_display(&ctx, text);
+        ctx.text_color = 7;   /* palette[7] = 0xFFF = white in briefingcore */
+
+        int sound_ctr    = 0;
+        int text_skipped = 0;
+
+        for (const char *p = text; *p && !g_quit_requested; p++) {
+            if (*p == '\n') {
+                ctx.cursor_x  = ctx.start_x;
+                ctx.cursor_y += font.letter_h + 1;
+                continue;
+            }
+
+            typewriter_putchar(&ctx, *p);
+
+            if (!text_skipped) {
+                if (*p != ' ') {
+                    if (++sound_ctr >= 9) {
+                        sound_ctr = 0;
+                        audio_play_sample(SAMPLE_TYPE_WRITER);
+                    }
+                }
+                video_present();
+                timer_begin_frame();
+                input_poll();
+                if ((g_player1_input & INPUT_FIRE1) ||
+                     g_key_pressed == KEY_SPACE      ||
+                     g_key_pressed == KEY_RETURN)
+                    text_skipped = 1;
+            }
+        }
+        video_present();
     }
-    palette_tick();
-    video_present();
 
     /* --- Hold: wait for fire or ~8 s --- */
     int hold = 50 * 8;
@@ -546,31 +589,15 @@ void briefing_run(int level_idx)
              g_key_pressed == KEY_SPACE      ||
              g_key_pressed == KEY_RETURN)
             break;
-        video_clear();
-        if (bg.pixels)
-            video_blit(bg.pixels, bg.w, 0, 0, 320, 256, -1);
-        if (font.pixels) {
-            TextCtx ctx;
-            typewriter_init_ctx(&ctx, &font, g_framebuffer, 320, 8, 40);
-            typewriter_display(&ctx, text);
-        }
         video_present();
     }
 
-    /* --- Fade to black --- */
-    static UWORD s_black[32] = {0};
+    /* --- Fade to black (palette only; framebuffer preserved) --- */
+    UWORD s_black[32] = {0};
     palette_prep_fade_to_rgb(s_black, cur_pal, 32);
     for (int i = 0; i < 25 && !g_done_fade && !g_quit_requested; i++) {
         timer_begin_frame();
         input_poll();
-        video_clear();
-        if (bg.pixels)
-            video_blit(bg.pixels, bg.w, 0, 0, 320, 256, -1);
-        if (font.pixels) {
-            TextCtx ctx;
-            typewriter_init_ctx(&ctx, &font, g_framebuffer, 320, 8, 40);
-            typewriter_display(&ctx, text);
-        }
         palette_tick();
         video_present();
     }
