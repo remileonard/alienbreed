@@ -1,7 +1,8 @@
 #!/bin/sh
 set -e
 cd "$(dirname "$0")"
-BUILD=./build
+
+BUILD="${BUILD:-./build}"
 
 mkdir -p assets/sprites assets/samples assets/voices assets/music assets/gfx assets/fonts assets/maps assets/tiles
 
