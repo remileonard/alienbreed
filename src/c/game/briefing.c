@@ -320,26 +320,113 @@ void briefing_run(int level_idx)
 
     /* ================================================================ */
     /* briefingstart — level 1                                          */
-    /* Palette set immediately (change_palette → set_palette in ASM),   */
-    /* background blitted in full, text displayed, one wait_sync.       */
+    /*                                                                  */
+    /* Sequence (mirrors briefingstart.asm start: routine):             */
+    /*   1. change_palette / set_palette — apply palette immediately    */
+    /*   2. display_picture             — band-fill animation           */
+    /*   3. display_text                — typewriter text with sound    */
+    /*   4. wait_sync                   — one extra frame               */
     /* ================================================================ */
     if (is_start) {
-        static UWORD cur_pal[32] = {0};
+        UWORD cur_pal[32];
         palette_set_immediate(k_pal_briefingstart, 32);
         memcpy(cur_pal, k_pal_briefingstart, sizeof(cur_pal));
 
-        /* Render background + text */
+        /* ------------------------------------------------------------ */
+        /* display_picture: band-fill animation                          */
+        /*                                                               */
+        /* The ASM outer loop runs 8 times. Each iteration (pass p):    */
+        /*   - copies 32 rows spaced 8 apart starting at row p          */
+        /*     (rows p, p+8, p+16, …, p+248)                           */
+        /*   - waits 4 vertical blanks (4 × wait_sync)                  */
+        /*                                                               */
+        /* Combined, all 8 passes cover every row 0..255 exactly once.  */
+        /* ------------------------------------------------------------ */
         video_clear();
-        if (bg.pixels)
+        int anim_skipped = 0;
+        for (int pass = 0; pass < 8 && !anim_skipped && !g_quit_requested; pass++) {
+            /* Reveal rows where (row % 8) == pass */
+            if (bg.pixels) {
+                int cols = (bg.w < 320) ? bg.w : 320;
+                for (int row = pass; row < 256; row += 8) {
+                    const UBYTE *src_row = bg.pixels + row * bg.w;
+                    UBYTE       *dst_row = g_framebuffer + row * 320;
+                    for (int x = 0; x < cols; x++)
+                        dst_row[x] = src_row[x] & 0x1F;
+                }
+            }
+            /* Wait 4 frames (4 × wait_sync in ASM) */
+            for (int f = 0; f < 4 && !anim_skipped && !g_quit_requested; f++) {
+                timer_begin_frame();
+                input_poll();
+                video_present();
+                if ((g_player1_input & INPUT_FIRE1) ||
+                     g_key_pressed == KEY_SPACE      ||
+                     g_key_pressed == KEY_RETURN)
+                    anim_skipped = 1;
+            }
+        }
+        /* If skipped before all passes complete, blit the full background now */
+        if (anim_skipped && bg.pixels)
             video_blit(bg.pixels, bg.w, 0, 0, 320, 256, -1);
+
+        /* ------------------------------------------------------------ */
+        /* display_text: typewriter with sound                           */
+        /*                                                               */
+        /* Original: tiny busy-wait per char + sound every 9 non-space  */
+        /* chars via wait_play_sound counter (briefingstart.asm).        */
+        /* Here: 1 frame per character (visible effect like intex),      */
+        /* SAMPLE_TYPE_WRITER every 9 non-space characters.              */
+        /*                                                               */
+        /* Text colour: palette[9] = 0xFFF = white.  The font file that */
+        /* ends up in assets/ may have pixel value 1 (main lo5 font      */
+        /* overwrites the lo6 briefing font); text_color=9 overrides     */
+        /* all non-transparent pixels to palette index 9 = white.        */
+        /* ------------------------------------------------------------ */
         if (font.pixels) {
             TextCtx ctx;
             typewriter_init_ctx(&ctx, &font, g_framebuffer, 320, 8, 40);
-            typewriter_display(&ctx, text);
-        }
-        video_present();
+            ctx.text_color = 9;   /* palette[9] = 0xFFF = white */
 
-        /* Hold: wait for fire or ~8 s (matches hold_briefing_screen) */
+            int sound_ctr = 0;
+            int text_skipped = anim_skipped; /* fire already pressed → dump at once */
+
+            for (const char *p = text; *p && !g_quit_requested; p++) {
+                if (*p == '\n') {
+                    ctx.cursor_x  = ctx.start_x;
+                    ctx.cursor_y += font.letter_h + 1;
+                    continue;
+                }
+
+                typewriter_putchar(&ctx, *p);
+
+                if (!text_skipped) {
+                    /* Play SAMPLE_TYPE_WRITER every 9 non-space characters
+                     * (wait_play_sound counter in typewriter.asm,
+                     *  reset when == 9 in briefingstart.asm play_sound path). */
+                    if (*p != ' ') {
+                        if (++sound_ctr >= 9) {
+                            sound_ctr = 0;
+                            audio_play_sample(SAMPLE_TYPE_WRITER);
+                        }
+                    }
+                    video_present();
+                    timer_begin_frame();
+                    input_poll();
+                    if ((g_player1_input & INPUT_FIRE1) ||
+                         g_key_pressed == KEY_SPACE      ||
+                         g_key_pressed == KEY_RETURN)
+                        text_skipped = 1;
+                }
+            }
+            /* Present final framebuffer (all text typed) */
+            video_present();
+        }
+
+        /* wait_sync: one extra frame after display_text */
+        timer_begin_frame();
+
+        /* Hold: wait for fire or ~8 s */
         int hold = 50 * 8;
         while (hold-- > 0 && !g_quit_requested) {
             timer_begin_frame();
@@ -348,31 +435,15 @@ void briefing_run(int level_idx)
                  g_key_pressed == KEY_SPACE      ||
                  g_key_pressed == KEY_RETURN)
                 break;
-            video_clear();
-            if (bg.pixels)
-                video_blit(bg.pixels, bg.w, 0, 0, 320, 256, -1);
-            if (font.pixels) {
-                TextCtx ctx;
-                typewriter_init_ctx(&ctx, &font, g_framebuffer, 320, 8, 40);
-                typewriter_display(&ctx, text);
-            }
             video_present();
         }
 
-        /* Fade to black */
-        static UWORD s_black[32] = {0};
+        /* Fade to black (palette only; framebuffer stays as-is) */
+        UWORD s_black[32] = {0};
         palette_prep_fade_to_rgb(s_black, cur_pal, 32);
         for (int i = 0; i < 25 && !g_done_fade && !g_quit_requested; i++) {
             timer_begin_frame();
             input_poll();
-            video_clear();
-            if (bg.pixels)
-                video_blit(bg.pixels, bg.w, 0, 0, 320, 256, -1);
-            if (font.pixels) {
-                TextCtx ctx;
-                typewriter_init_ctx(&ctx, &font, g_framebuffer, 320, 8, 40);
-                typewriter_display(&ctx, text);
-            }
             palette_tick();
             video_present();
         }
@@ -394,7 +465,7 @@ void briefing_run(int level_idx)
         { "assets/gfx/briefing_sprite1.raw", "assets/gfx/briefing_sprite5.raw" },
         { "assets/gfx/briefing_sprite2.raw", "assets/gfx/briefing_sprite6.raw" },
         { "assets/gfx/briefing_sprite3.raw", "assets/gfx/briefing_sprite7.raw" },
-        { "assets/gfx/briefing_sprite4.raw", "assets/gfx/briefing_sprites.raw"  },
+        { "assets/gfx/briefing_sprite4.raw", "assets/gfx/briefing_sprites.raw" },
     };
     UBYTE *sprites[4][2];
     memset(sprites, 0, sizeof(sprites));
