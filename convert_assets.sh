@@ -82,7 +82,28 @@ $BUILD/convert_bitplanes src/intex/gfx/weapons_264x40.lo4 4 \
 printf "  game/mapbkgnd_320x256.lo4 -> "
 $BUILD/convert_bitplanes game/mapbkgnd_320x256.lo4 4 assets/tiles/mapbkgnd.raw && echo "OK" || echo "FAIL"
 
-echo "=== Converting sprites ==="
+echo "=== Converting briefing sprites ==="
+# Each sprite file contains one Amiga hardware attached sprite pair
+# (even + odd strip, 96 lines each) → 16px wide, 16-color indexed output.
+# sprite1-7.raw: one frame each (784 bytes).
+# sprites.raw: first 784 bytes used as frame 2 for sprite position 4 (1P mode).
+for f in src/briefingcore/gfx/sprite1.raw src/briefingcore/gfx/sprite2.raw \
+          src/briefingcore/gfx/sprite3.raw src/briefingcore/gfx/sprite4.raw \
+          src/briefingcore/gfx/sprite5.raw src/briefingcore/gfx/sprite6.raw \
+          src/briefingcore/gfx/sprite7.raw; do
+    [ -f "$f" ] || continue
+    name=$(basename "$f" .raw)
+    printf "  %s -> " "$f"
+    $BUILD/convert_sprites "$f" 96 1 "assets/gfx/briefing_${name}.raw" 1 && echo "OK" || echo "FAIL"
+done
+# sprites.raw: convert first attached pair (first 784 bytes = 1P frame for position 4)
+f=src/briefingcore/gfx/sprites.raw
+if [ -f "$f" ]; then
+    printf "  %s (first frame) -> " "$f"
+    $BUILD/convert_sprites "$f" 96 1 "assets/gfx/briefing_sprites.raw" 1 && echo "OK" || echo "FAIL"
+fi
+
+
 # Player sprites: paired hardware sprites (SPR_A + SPR_B = 32px wide), 32 lines.
 for f in src/main/sprites/player_sprite*.raw; do
     [ -f "$f" ] || continue
