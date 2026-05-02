@@ -113,4 +113,20 @@ void tile_anim_render(void);
  */
 void tile_anim_render_ship_engines(int global_tick);
 
+/*
+ * Render continuous 3-frame animation overlays for all tiles with
+ * attribute 0x2E (TILE_ONE_DEADLY_WAY_LEFT) in the current map.
+ *
+ * The three 16×16 frames are sourced from the level animation atlas (LxAN):
+ *   Frame 0: atlas tile index  3 → pixel (48,  0, 16, 16)  BOB entry 15
+ *   Frame 1: atlas tile index 23 → pixel (48, 16, 16, 16)  BOB entry 14
+ *   Frame 2: atlas tile index 43 → pixel (48, 32, 16, 16)  BOB entry 12
+ * (Ref: lbW01BECA entries 12,14,15 @ main.asm#L14756 — 16×16 BOBs at
+ *  atlas column 3.  The dispatch table has bra.w none for tile 0x2E in all
+ *  levels, so this animation was missing from the C port.)
+ *
+ * global_tick is the running frame counter (incremented every rendered frame).
+ */
+void tile_anim_render_one_deadly_way(int global_tick);
+
 #endif /* AB_TILE_ANIM_H */

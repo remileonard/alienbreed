@@ -6,6 +6,7 @@
 #include "tile_anim.h"
 #include "anim_gfx.h"
 #include "tilemap.h"
+#include "../game/constants.h"
 #include "../hal/video.h"
 #include <string.h>
 
@@ -250,6 +251,58 @@ void tile_anim_render_ship_engines(int global_tick)
 
             const UBYTE *src = atlas + ay * ANIM_ATLAS_W + ax;
             video_blit(src, ANIM_ATLAS_W, dst_x, dst_y, 32, 32, 0);
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* One-deadly-way door animation (tile 0x2E)                          */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Three 16×16 frames in the level animation atlas (column 3, rows 0-2).
+ * Atlas tile indices 3, 23, 43 → pixel (48,0), (48,16), (48,32).
+ * Ref: lbW01BECA entries 15, 14, 12 @ main.asm#L14756.
+ * The ASM dispatch table has bra.w none for tile 0x2E in all levels;
+ * this continuous 3-frame loop was missing from the C port.
+ */
+static const int k_deadly_way_ax = 48;
+static const int k_deadly_way_ay[3] = { 0, 16, 32 };
+
+void tile_anim_render_one_deadly_way(int global_tick)
+{
+    const UBYTE *atlas = anim_gfx_get_atlas();
+    if (!atlas) return;
+
+    int start_col = g_camera_x / MAP_TILE_W;
+    int start_row = g_camera_y / MAP_TILE_H;
+    int off_x     = g_camera_x % MAP_TILE_W;
+    int off_y     = g_camera_y % MAP_TILE_H;
+    int cols_vis  = (320 + off_x + MAP_TILE_W - 1) / MAP_TILE_W;
+    int rows_vis  = (256 + off_y + MAP_TILE_H - 1) / MAP_TILE_H;
+
+    int frame_idx = (global_tick / 2) % 3;
+    int ay = k_deadly_way_ay[frame_idx];
+
+    for (int tr = 0; tr <= rows_vis; tr++) {
+        int map_row = start_row + tr;
+        if (map_row < 0 || map_row >= MAP_ROWS) continue;
+
+        for (int tc = 0; tc <= cols_vis; tc++) {
+            int map_col = start_col + tc;
+            if (map_col < 0 || map_col >= MAP_COLS) continue;
+
+            UBYTE attr = tilemap_attr(&g_cur_map, map_col, map_row) & 0x3F;
+            if (attr != TILE_ONE_DEADLY_WAY_LEFT) continue;
+
+            int dst_x = tc * MAP_TILE_W - off_x;
+            int dst_y = tr * MAP_TILE_H - off_y;
+
+            if (dst_x + 16 < 0 || dst_x >= 320) continue;
+            if (dst_y + 16 < 0 || dst_y >= 256) continue;
+
+            const UBYTE *src = atlas + ay * ANIM_ATLAS_W + k_deadly_way_ax;
+            video_blit(src, ANIM_ATLAS_W, dst_x, dst_y, 16, 16, 0);
         }
     }
 }
