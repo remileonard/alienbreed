@@ -34,6 +34,7 @@
 #include "../engine/tilemap.h"
 #include "../engine/sprite.h"
 #include "../engine/alien_gfx.h"
+#include "../engine/tile_anim.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -183,6 +184,10 @@ void level_game_loop_external(void)
         if (g_key_pressed == KEY_F) {
             debug_gfx_viewer_run();
         }
+        if (g_key_pressed == KEY_H) {
+            /* Debug: skip to next level */
+            g_flag_end_level = 1;
+        }
 
         /* --- Update logic --------------------------------------------- */
         /* Player input/movement runs every frame, mirroring the Amiga VBL
@@ -192,6 +197,8 @@ void level_game_loop_external(void)
             if (g_players[i].alive)
                 player_update(&g_players[i], player_get_input(&g_players[i]));
         }
+
+        tile_anim_update();
 
         /* Alien AI, collisions and level timers mirror the game_level_loop
          * in main.asm which only runs every 2 VBLs (25 Hz on PAL).
@@ -242,7 +249,13 @@ void level_game_loop_external(void)
 
             tilemap_render(&g_cur_map, &g_tileset);
 
-            /* Draw aliens */
+            /* Tile animation overlays: rendered on top of static tiles,
+             * below sprites, so items / doors remain visible briefly after
+             * collection / opening (Ref: patch_tiles / lbW012388 @ main.asm). */
+            static int s_anim_tick = 0;
+            s_anim_tick++;
+            tile_anim_render_reactor(s_anim_tick);
+            tile_anim_render();
             /* Walk cycle: frame sequence 0→1→2→1 (one tick/frame at 50 Hz).
              * Ref: lbL01B036 @ main.asm#L14384 — each frame has delay=1.
              * Compass direction used as atlas column (Ref: lbB00A228#L7077). */

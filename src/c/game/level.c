@@ -10,6 +10,7 @@
 #include "../engine/palette.h"
 #include "../engine/alien_gfx.h"
 #include "../engine/anim_gfx.h"
+#include "../engine/tile_anim.h"
 #include "../hal/audio.h"
 #include "../hal/video.h"
 #include <stdio.h>
@@ -300,6 +301,7 @@ void level_run(int level_idx)
     player_set_starting_positions();
     alien_init_variables();
     alien_spawn_from_map();
+    tile_anim_init();
     level_finalize();
 
     /* Centre camera on player 1.

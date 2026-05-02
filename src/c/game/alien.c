@@ -10,6 +10,7 @@
 #include "../hal/video.h"
 #include "../engine/tilemap.h"
 #include "../engine/alien_gfx.h"
+#include "../engine/tile_anim.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -897,12 +898,14 @@ void alien_update_all(void)
             audio_play_sample(SAMPLE_OPENING_DOOR);
             if (attr == 0x08 || attr == 0x12) {
                 /* Left button: col+0, col+3, col+2, col+4 */
+                tile_anim_queue(col,     row, TILEANIM_FIRE_DOOR);
                 tilemap_replace_tile(&g_cur_map, col,     row);
                 tilemap_replace_tile(&g_cur_map, col + 3, row);
                 tilemap_replace_tile(&g_cur_map, col + 2, row);
                 tilemap_replace_tile(&g_cur_map, col + 4, row);
             } else {
                 /* Right button: col+0, col-1, col-2, col-4 */
+                tile_anim_queue(col,     row, TILEANIM_FIRE_DOOR);
                 tilemap_replace_tile(&g_cur_map, col,     row);
                 tilemap_replace_tile(&g_cur_map, col - 1, row);
                 tilemap_replace_tile(&g_cur_map, col - 2, row);

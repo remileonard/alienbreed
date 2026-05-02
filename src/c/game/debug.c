@@ -244,6 +244,7 @@ void debug_render_overlay(void)
             int sy = ty * MAP_TILE_H - g_camera_y;
 
             Uint8 r, g, b;
+            int is_other = 0;
             if (is_wall(attr)) {
                 r = COLOR_WALL_R;  g = COLOR_WALL_G;  b = COLOR_WALL_B;
             } else if (is_item(attr)) {
@@ -254,10 +255,20 @@ void debug_render_overlay(void)
                 r = COLOR_SPAWN_R; g = COLOR_SPAWN_G; b = COLOR_SPAWN_B;
             } else {
                 r = COLOR_OTHER_R; g = COLOR_OTHER_G; b = COLOR_OTHER_B;
+                is_other = 1;
             }
 
             video_overlay_rect_outline(sx, sy, MAP_TILE_W, MAP_TILE_H,
                                        r, g, b, 220);
+
+            /* For unidentified (yellow) tiles, show the hex attribute ID
+             * in the top-left corner of the tile so unknown tiles can be
+             * identified during reverse-engineering. */
+            if (is_other) {
+                char id_str[8];
+                snprintf(id_str, sizeof(id_str), "%02X", (unsigned)attr);
+                draw_string(sx + 1, sy + 1, id_str, r, g, b);
+            }
         }
     }
 
