@@ -42,9 +42,9 @@ static int load_gfx(GfxImage *img, const char *path)
 
 int hud_init(void)
 {
-    load_gfx(&s_p1_bar, "assets/gfx/player_1_status_304x8.raw");
-    load_gfx(&s_p2_bar, "assets/gfx/player_2_status_304x8.raw");
-    load_gfx(&s_paused, "assets/gfx/game_paused_96x7.raw");
+    load_gfx(&s_p1_bar, "assets/gfx/main_player_1_status_304x8.raw");
+    load_gfx(&s_p2_bar, "assets/gfx/main_player_2_status_304x8.raw");
+    load_gfx(&s_paused, "assets/gfx/main_game_paused_96x7.raw");
     sprite_load_player();
     return 0;
 }
@@ -57,6 +57,96 @@ void hud_quit(void)
     sprite_free_all();
 }
 
+/*
+ * Layout of the 304×8 pixel status bar.
+ * Derived from ASM lbW00FF66 table and lbL00FE00/lbL00FE04/... positions.
+ *
+ *  Bar offset  Width   Element
+ *    0          24     Static background ("1UP"/"2UP" text from .lo2 image)
+ *   24          64     Health bar  (64 px = PLAYER_MAX_HEALTH=64)
+ *   88          40     Static background gap
+ *  128           8     Lives indicator: 4 dots at x+0,+4,+8,+12 (2 px each)
+ *  144          40     Static background ("LIVES" label)
+ *  184          12     Ammo packs: 4 dots at x+0,+3,+6,+9 (2 px each)
+ *  200          32     Ammo bar    (32 px = PLAYER_MAX_AMMO=32)
+ *  232          31     Static background (weapon area)
+ *  263          24     Keys: up to 6 dots; start offsets from ASM lbL00FE8C:
+ *                        {263,266,270,274,278,282} → widths {2,3,3,3,3,3}
+ *  287          17     Static background to end of bar
+ */
+
+#define BAR_X            8    /* left edge of bar on screen */
+#define BAR_P1_Y         0    /* Player 1 bar: top of screen */
+#define BAR_P2_Y       248    /* Player 2 bar: bottom of screen */
+#define BAR_H            8    /* bar height (full 8 scan lines) */
+
+/* Pixel offsets within the 304-px bar */
+#define BAR_HEALTH_OFF   24
+#define BAR_HEALTH_W     64
+#define BAR_LIVES_OFF   128
+#define BAR_AMMO_PKS_OFF 184
+#define BAR_AMMO_OFF    200
+#define BAR_AMMO_W       32
+
+/* Key dot start positions (from ASM lbL00FE8C = {$107,$10A,$10E,$112,$116,$11A}) */
+static const int k_key_off[6] = { 263, 266, 270, 274, 278, 282 };
+
+/* Draw the dynamic overlay for one player's status bar.
+ * bar_y : screen Y of the bar's top row (BAR_P1_Y or BAR_P2_Y).
+ * bg    : static 304×8 background image (may be NULL). */
+static void draw_player_bar(const Player *p, int bar_y, const GfxImage *bg)
+{
+    int sx = BAR_X;  /* screen x of bar start */
+
+    /* 1. Static background image */
+    if (bg && bg->pixels)
+        video_blit(bg->pixels, bg->w, sx, bar_y, bg->w, bg->h, 0);
+
+    /* 2. Health bar (pixels 24..87 in bar, 64 px wide at max health) */
+    int health_w = (p->health * BAR_HEALTH_W) / PLAYER_MAX_HEALTH;
+    if (health_w < 0) health_w = 0;
+    if (health_w > BAR_HEALTH_W) health_w = BAR_HEALTH_W;
+    /* Filled portion (orange) */
+    if (health_w > 0)
+        video_fill_rect(sx + BAR_HEALTH_OFF, bar_y, health_w, BAR_H, 10);
+    /* Empty portion (dark) */
+    if (health_w < BAR_HEALTH_W)
+        video_fill_rect(sx + BAR_HEALTH_OFF + health_w, bar_y,
+                        BAR_HEALTH_W - health_w, BAR_H, 1);
+
+    /* 3. Lives indicator: up to 4 dots at offsets 128,132,136,140 (2 px each) */
+    for (int i = 0; i < 4; i++) {
+        UBYTE c = (i < p->lives) ? 10 : 1;
+        video_fill_rect(sx + BAR_LIVES_OFF + i * 4, bar_y, 2, BAR_H, c);
+    }
+
+    /* 4. Ammo packs: up to 4 dots at offsets 184,187,190,193 (2 px each) */
+    for (int i = 0; i < 4; i++) {
+        UBYTE c = (i < p->ammopacks) ? 12 : 1;
+        video_fill_rect(sx + BAR_AMMO_PKS_OFF + i * 3, bar_y, 2, BAR_H, c);
+    }
+
+    /* 5. Ammo bar (pixels 200..231, 32 px wide at max ammo) */
+    int ammo_w = (p->ammunitions * BAR_AMMO_W) / PLAYER_MAX_AMMO;
+    if (ammo_w < 0) ammo_w = 0;
+    if (ammo_w > BAR_AMMO_W) ammo_w = BAR_AMMO_W;
+    if (ammo_w > 0)
+        video_fill_rect(sx + BAR_AMMO_OFF, bar_y, ammo_w, BAR_H, 12);
+    if (ammo_w < BAR_AMMO_W)
+        video_fill_rect(sx + BAR_AMMO_OFF + ammo_w, bar_y,
+                        BAR_AMMO_W - ammo_w, BAR_H, 1);
+
+    /* 6. Keys: up to 6 dots, positions from ASM lbL00FE8C.
+     *    End position = lbL00FE8C[6] = $11F = 287. */
+    static const int k_key_end = 287;
+    for (int i = 0; i < 6; i++) {
+        if (i < p->keys) {
+            int next = (i < 5) ? k_key_off[i + 1] : k_key_end;
+            video_fill_rect(sx + k_key_off[i], bar_y, next - k_key_off[i], BAR_H, 10);
+        }
+    }
+}
+
 /* Draw a 2-digit decimal number using timer digit sprites */
 static void draw_two_digits(int hi, int lo, int x, int y)
 {
@@ -64,52 +154,25 @@ static void draw_two_digits(int hi, int lo, int x, int y)
     sprite_draw_digit(lo, x + 9, y);
 }
 
-/* Draw a coloured health/ammo bar using filled rectangles */
-static void draw_bar(int x, int y, int w, int val, int max_val, UBYTE color)
-{
-    int filled = (max_val > 0) ? (val * w / max_val) : 0;
-    video_fill_rect(x,          y, filled,     4, color);
-    video_fill_rect(x + filled, y, w - filled, 4, 1);  /* dark = color index 1 */
-}
-
 void hud_render(void)
 {
-    /* ---- Destruction timer (top of screen, centred) ---- */
+    /* ---- Player 1 status bar: top of screen (y=0) ---- */
+    draw_player_bar(&g_players[0], BAR_P1_Y, &s_p1_bar);
+
+    /* ---- Player 2 status bar: bottom of screen (y=248) ---- */
+    draw_player_bar(&g_players[1], BAR_P2_Y, &s_p2_bar);
+
+    /* ---- Destruction timer: centred just inside the top bar ---- */
     int mins, sh, sl;
     level_get_timer_digits(&mins, &sh, &sl);
 
     int tx = 148;  /* centred in 320px */
-    int ty = 2;
+    int ty = 0;
     sprite_draw_digit(mins, tx,      ty);
-    /* colon - just a pixel dot */
+    /* colon dots */
     video_plot_pixel(tx + 9,  ty + 2, 3);
     video_plot_pixel(tx + 9,  ty + 5, 3);
     draw_two_digits(sh, sl, tx + 11, ty);
-
-    /* ---- Player 1 status bar (bottom row) ---- */
-    if (s_p1_bar.pixels) {
-        video_blit(s_p1_bar.pixels, s_p1_bar.w,
-                   8, 248, s_p1_bar.w, s_p1_bar.h, 0);
-    }
-
-    Player *p1 = &g_players[0];
-    /* Health bar */
-    draw_bar(16, 249, 32, p1->health, PLAYER_MAX_HEALTH, 10);
-    /* Lives */
-    sprite_draw_digit(p1->lives > 9 ? 9 : p1->lives, 56, 248);
-    /* Ammo */
-    draw_bar(70, 249, 20, p1->ammunitions, PLAYER_MAX_AMMO, 12);
-    /* Weapon number */
-    sprite_draw_digit(p1->cur_weapon, 100, 248);
-
-    /* ---- Player 2 status bar ---- */
-    if (g_number_players > 1 && s_p2_bar.pixels) {
-        Player *p2 = &g_players[1];
-        video_blit(s_p2_bar.pixels, s_p2_bar.w,
-                   8, 240, s_p2_bar.w, s_p2_bar.h, 0);
-        draw_bar(16, 241, 32, p2->health, PLAYER_MAX_HEALTH, 10);
-        sprite_draw_digit(p2->lives > 9 ? 9 : p2->lives, 56, 240);
-    }
 }
 
 void hud_render_pause(void)
