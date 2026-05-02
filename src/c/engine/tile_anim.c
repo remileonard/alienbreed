@@ -170,52 +170,38 @@ void tile_anim_render(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Reactor engine animation                                            */
+/* Ship engine flame animation (level 1, tiles 0x18-0x1C)             */
 /* ------------------------------------------------------------------ */
 
 /*
- * 12-frame cycle (lbL004C0C @ main.asm#L2693).
- * lbW01C52A entries 47-53 (true indices):
- *   frame 0 → entry 47: (  0, 96, 32, 32)
- *   frame 1 → entry 48: (112, 48, 48, 16)
- *   frame 2 → entry 49: (160, 48, 48, 16)
- *   frame 3 → entry 50: (208, 48, 48, 16)
- *   frame 4 → entry 51: ( 32, 96, 32, 32)
- *   frame 5 → entry 52: ( 64, 64, 32, 32)
- *   frame 6 → entry 53: ( 64, 96, 32, 32)
- *   7..11 mirror back through 5..1
+ * Each of the five ship-engine tile attributes (0x18..0x1C) has a 2-frame
+ * animation using 32×32 BOBs from the L1AN atlas.
+ *
+ * Source: lbW01BECA (level 1 BOB table @ main.asm#L14756) entries 22-32,
+ * combined with the per-tile animation sequences:
+ *
+ *   lbC004884 / lbW01EB12: tile 0x18 → frames 22 (64,64) & 25 (160,64)
+ *   lbC004896 / lbW01EB2E: tile 0x19 → frames 23 (96,64) & 26 (192,64)
+ *   lbC0048A8 / lbW01EB4A: tile 0x1A → frames 24 (128,64) & 27 (224,64)
+ *   lbC0048BA / lbW01EB66: tile 0x1B → frames 28 (64,96)  & 31 (160,96)
+ *   lbC0048CC / lbW01EB82: tile 0x1C → frames 29 (96,96)  & 32 (192,96)
+ *
+ * Each sequence has delay=0, meaning 1 game tick per frame.
+ * The original game runs at 25 fps (50 Hz / frames_slowdown=2); to match
+ * that speed in the C port the frame is advanced every 2 display ticks
+ * (global_tick / 2).
  */
-typedef struct { int ax, ay, aw, ah; } ReactorFrame;
+typedef struct { int ax0, ay0, ax1, ay1; } EngineAnimPair;
 
-static const ReactorFrame k_reactor_frames[12] = {
-    {   0, 96, 32, 32 },  /* 0 */
-    { 112, 48, 48, 16 },  /* 1 */
-    { 160, 48, 48, 16 },  /* 2 */
-    { 208, 48, 48, 16 },  /* 3 */
-    {  32, 96, 32, 32 },  /* 4 */
-    {  64, 64, 32, 32 },  /* 5 */
-    {  64, 96, 32, 32 },  /* 6 */
-    {  64, 64, 32, 32 },  /* 7 = mirror of 5 */
-    {  32, 96, 32, 32 },  /* 8 = mirror of 4 */
-    { 208, 48, 48, 16 },  /* 9 = mirror of 3 */
-    { 160, 48, 48, 16 },  /* 10 = mirror of 2 */
-    { 112, 48, 48, 16 },  /* 11 = mirror of 1 */
+static const EngineAnimPair k_engine_anim[5] = {
+    /* 0x18 */ {  64, 64, 160, 64 },
+    /* 0x19 */ {  96, 64, 192, 64 },
+    /* 0x1A */ { 128, 64, 224, 64 },
+    /* 0x1B */ {  64, 96, 160, 96 },
+    /* 0x1C */ {  96, 96, 192, 96 },
 };
 
-/*
- * The 4 original sequences start at different points in the 12-frame cycle.
- * lbC004B8A assigns:
- *   tile at row R   → lbL004D50 (starts at frame 3, entry 50)
- *   tile at row R+1 → lbL004CE4 (starts at frame 2, entry 49)
- *   tile at row R+2 → lbL004C78 (starts at frame 1, entry 48)
- *   tile at row R+3 → lbL004C0C (starts at frame 0, entry 47)
- * Phase offset relative to row mod 4: phase = (3 - row%4).
- *
- * The Amiga loop runs at 25 Hz with delay=1 per frame → 1 frame per game tick.
- * In the C port at 50 Hz we advance the animation every 2 display frames
- * (global_tick / 2) to preserve the original speed.
- */
-void tile_anim_render_reactor(int global_tick)
+void tile_anim_render_ship_engines(int global_tick)
 {
     const UBYTE *atlas = anim_gfx_get_atlas();
     if (!atlas) return;
@@ -227,6 +213,8 @@ void tile_anim_render_reactor(int global_tick)
     int cols_vis  = (320 + off_x + MAP_TILE_W - 1) / MAP_TILE_W;
     int rows_vis  = (256 + off_y + MAP_TILE_H - 1) / MAP_TILE_H;
 
+    int frame_idx = (global_tick / 2) & 1;
+
     for (int tr = 0; tr <= rows_vis; tr++) {
         int map_row = start_row + tr;
         if (map_row < 0 || map_row >= MAP_ROWS) continue;
@@ -236,26 +224,20 @@ void tile_anim_render_reactor(int global_tick)
             if (map_col < 0 || map_col >= MAP_COLS) continue;
 
             UBYTE attr = tilemap_attr(&g_cur_map, map_col, map_row) & 0x3F;
-            if (attr < 0x2a || attr > 0x2d) continue;
+            if (attr < 0x18 || attr > 0x1C) continue;
 
-            /* Phase offset: tiles in the same vertical reactor column
-             * are staggered by 1 frame per row, matching the 4 sequences
-             * in lbC004B8A.  Row mod 4 gives position within the group.
-             * (map_row % 4) is in [0,3], so (3 - (map_row % 4)) is in [0,3]
-             * and the final % 12 keeps the index in range. */
-            int phase = (3 - (map_row % 4)) % 12;
-            int anim_idx = ((global_tick / 2) + phase) % 12;
-
-            const ReactorFrame *rf = &k_reactor_frames[anim_idx];
+            const EngineAnimPair *ep = &k_engine_anim[attr - 0x18];
+            int ax = frame_idx ? ep->ax1 : ep->ax0;
+            int ay = frame_idx ? ep->ay1 : ep->ay0;
 
             int dst_x = tc * MAP_TILE_W - off_x;
             int dst_y = tr * MAP_TILE_H - off_y;
 
-            if (dst_x + rf->aw < 0 || dst_x >= 320) continue;
-            if (dst_y + rf->ah < 0 || dst_y >= 256) continue;
+            if (dst_x + 32 < 0 || dst_x >= 320) continue;
+            if (dst_y + 32 < 0 || dst_y >= 256) continue;
 
-            const UBYTE *src = atlas + rf->ay * ANIM_ATLAS_W + rf->ax;
-            video_blit(src, ANIM_ATLAS_W, dst_x, dst_y, rf->aw, rf->ah, 0);
+            const UBYTE *src = atlas + ay * ANIM_ATLAS_W + ax;
+            video_blit(src, ANIM_ATLAS_W, dst_x, dst_y, 32, 32, 0);
         }
     }
 }

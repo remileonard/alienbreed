@@ -254,7 +254,7 @@ void level_game_loop_external(void)
              * collection / opening (Ref: patch_tiles / lbW012388 @ main.asm). */
             static int s_anim_tick = 0;
             s_anim_tick++;
-            tile_anim_render_reactor(s_anim_tick);
+            tile_anim_render_ship_engines(s_anim_tick);
             tile_anim_render();
             /* Walk cycle: frame sequence 0→1→2→1 (one tick/frame at 50 Hz).
              * Ref: lbL01B036 @ main.asm#L14384 — each frame has delay=1.

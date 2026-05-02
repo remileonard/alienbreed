@@ -38,21 +38,18 @@
  *        entry 12 → atlas ( 48,  32, 16, 16)  for 2 ticks  lbL01682A
  *        entry 13 → atlas ( 64,  32, 16, 16)  for 4 ticks  lbL01685A
  *
- * 2. CONTINUOUS reactor engine animation (level 1, tiles 0x2a-0x2d):
- *    Rendered every frame as long as the tile attribute remains 0x2a-0x2d.
- *    Uses a global tick counter + per-row phase to create a moving-wave
- *    effect across the vertical reactor column.
- *    12-frame cycle from lbL004C0C/lbL004C78/lbL004CE4/lbL004D50.
- *    Atlas frames (lbW01C52A entries 47-53):
- *      frame 0: (  0,  96, 32, 32)
- *      frame 1: (112,  48, 48, 16)
- *      frame 2: (160,  48, 48, 16)
- *      frame 3: (208,  48, 48, 16)
- *      frame 4: ( 32,  96, 32, 32)
- *      frame 5: ( 64,  64, 32, 32)
- *      frame 6: ( 64,  96, 32, 32)
- *      7..11 mirror back through 5..1
- *    Phase: each tile has phase = (3 - row%4) so adjacent tiles offset by 1.
+ * 2. CONTINUOUS ship engine flame animation (level 1, tiles 0x18-0x1C):
+ *    Rendered every frame as long as the tile attribute remains in range.
+ *    Each tile has a 2-frame, 32×32 BOB animation sourced from L1AN atlas.
+ *    Source: lbC004884-lbC0048CC (tile handlers) + lbW01EB12-lbW01EB82 (sequences).
+ *    Atlas pairs (lbW01BECA entries, all 32×32):
+ *      0x18: frame A (64, 64) / frame B (160, 64)  entries 22 & 25
+ *      0x19: frame A (96, 64) / frame B (192, 64)  entries 23 & 26
+ *      0x1A: frame A (128,64) / frame B (224, 64)  entries 24 & 27
+ *      0x1B: frame A (64, 96) / frame B (160, 96)  entries 28 & 31
+ *      0x1C: frame A (96, 96) / frame B (192, 96)  entries 29 & 32
+ *    Sequence delay=0 (1 game tick per frame); cycle advances every 2
+ *    display ticks (global_tick / 2) to match the original 25 fps rate.
  *
  * Ref: patch_tiles / lbW012388 background sprites @ main.asm.
  */
@@ -109,11 +106,11 @@ void tile_anim_update(void);
 void tile_anim_render(void);
 
 /*
- * Render reactor engine animation overlays for all tiles with
- * attribute 0x2a-0x2d in the current map.
+ * Render ship engine flame animation overlays for all tiles with
+ * attribute 0x18-0x1C in the current map (level 1 spaceship engines).
  * global_tick is the running frame counter (incremented every rendered frame).
  * Must be called after tilemap_render() and before sprite rendering.
  */
-void tile_anim_render_reactor(int global_tick);
+void tile_anim_render_ship_engines(int global_tick);
 
 #endif /* AB_TILE_ANIM_H */
