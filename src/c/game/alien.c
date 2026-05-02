@@ -544,15 +544,20 @@ void alien_spawn_tick(void)
             continue;
         }
 
-        if (!sp->one_shot) {
+        if (!sp->one_shot && !sp->is_hole_spawn) {
             /*
-             * Map spawn point (tile 0x28/0x29): only check in the 80-px
+             * Map spawn point (tile 0x28/0x29): only count down in the 80-px
              * off-screen approach band.  If the tile is already on screen
-             * the countdown is paused — alien spawning from a visible tile
-             * would make the alien appear out of thin air.
+             * the countdown is paused — an alien appearing out of thin air
+             * on a visible tile looks wrong.
              * (In the original ASM, lbC00D22A registers the slot only when
              * the tile first enters the viewport during scrolling, so it
              * always starts at the screen edge — never from mid-screen.)
+             *
+             * Tile 0x34 (is_hole_spawn) is intentionally excluded: it MUST
+             * spawn when the tile is visible so the zoom-in hatch animation
+             * is seen by the player.  The ASM lbC00D17E applies the same
+             * ±80px zone to 0x34 without any stricter visibility gate.
              */
             int on_screen = (sp->world_x >= sc_left  && sp->world_x < sc_right &&
                              sp->world_y >= sc_top    && sp->world_y < sc_bottom);
