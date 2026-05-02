@@ -250,14 +250,17 @@ static const int k_vent_ax[6]    = { 256, 272, 288, 304, 288, 272 };
 
 /* L1AN tile 0x1C slow-blink: delays 120,3,80,3 → display ticks 242,8,162,8.
  * Total cycle = 420 display ticks (also shared by L0AN tile 0x1F, see below). */
-#define SLOW_BLINK_CYCLE   420
+#define SLOW_BLINK_CYCLE        420
+#define SLOW_BLINK_PHASE1_END   242   /* end of frame 0: (delay=120+1)*2 */
+#define SLOW_BLINK_PHASE2_END   250   /* end of frame 1: +8  (delay=3+1)*2 */
+#define SLOW_BLINK_PHASE3_END   412   /* end of frame 2: +162 (delay=80+1)*2 */
 static int slow_blink_frame(int tick)
 {
     int phase = tick % SLOW_BLINK_CYCLE;
-    if (phase < 242) return 0;   /* (0,64,32,32) */
-    if (phase < 250) return 1;   /* (0,96,32,32) */
-    if (phase < 412) return 2;   /* (32,64,32,32) */
-    return 1;                    /* (0,96,32,32) */
+    if (phase < SLOW_BLINK_PHASE1_END) return 0;   /* (0,64,32,32) */
+    if (phase < SLOW_BLINK_PHASE2_END) return 1;   /* (0,96,32,32) */
+    if (phase < SLOW_BLINK_PHASE3_END) return 2;   /* (32,64,32,32) */
+    return 1;                                       /* (0,96,32,32) */
 }
 static const int k_slow_blink_ax[3] = {  0,  0, 32 };
 static const int k_slow_blink_ay[3] = { 64, 96, 64 };
@@ -427,17 +430,20 @@ static const int k_1e_l0an_ay[3]  = { 0, 16, 32 };
 
 /* Tile 0x1E L1AN: 4-step 48×16 (lbL02013E → lbW01C52A entries 48,49,50,49).
  * Delays 3,4,2,2 → display ticks 8,10,6,6 → total cycle = 30. */
-static const int k_1e_l1an_ax[4]  = { 112, 160, 208, 160 };
-#define TID1E_L1AN_AY   48
-#define TID1E_L1AN_W    48
-#define TID1E_L1AN_H    16
-#define TID1E_L1AN_CYCLE 30
+static const int k_1e_l1an_ax[4]   = { 112, 160, 208, 160 };
+#define TID1E_L1AN_AY       48
+#define TID1E_L1AN_W        48
+#define TID1E_L1AN_H        16
+#define TID1E_L1AN_CYCLE    30
+#define TID1E_L1AN_PHASE1   8    /* end of frame 0: (delay=3+1)*2 */
+#define TID1E_L1AN_PHASE2   18   /* end of frame 1: +10 (delay=4+1)*2 */
+#define TID1E_L1AN_PHASE3   24   /* end of frame 2: +6  (delay=2+1)*2 */
 static int tile1e_l1an_frame(int tick)
 {
     int phase = tick % TID1E_L1AN_CYCLE;
-    if (phase <  8) return 0;
-    if (phase < 18) return 1;
-    if (phase < 24) return 2;
+    if (phase < TID1E_L1AN_PHASE1) return 0;
+    if (phase < TID1E_L1AN_PHASE2) return 1;
+    if (phase < TID1E_L1AN_PHASE3) return 2;
     return 3;
 }
 
