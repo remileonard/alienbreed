@@ -285,38 +285,37 @@ void tile_anim_render_ship_engines(int global_tick)
 }
 
 /* ------------------------------------------------------------------ */
-/* INTEX computer screen animation (tiles 0x17 and 0x1D, L1AN levels) */
+/* INTEX computer screen animation (tiles 0x17 and 0x1D)              */
 /* ------------------------------------------------------------------ */
 
 /*
- * On levels using the L1AN animation atlas (levels 2, 10, 11) the INTEX
- * terminal tile (0x17, TILE_INTEX) and the matching screen-body decoration
- * (0x1D) share a 3-frame 16×16 blinking-screen animation from the L1AN atlas:
+ * Tile 0x17 (TILE_INTEX): 9-frame 16×16 blinking-screen animation, active
+ * on all levels.  Frames A67-A75 in the animation atlas — all in atlas row 3
+ * (y=48), columns 7-15 (x = 112, 128, … 240, stepping by 16 each frame).
  *
- *   Frame 0: atlas (176,  0, 16, 16)   BOB 22 of lbW01C52A
- *   Frame 1: atlas (176, 16, 16, 16)   BOB 23 of lbW01C52A
- *   Frame 2: atlas (176, 32, 16, 16)   BOB 24 of lbW01C52A
- *
- * Sequence (from lbL01EC62 @ main.asm, tile 0x1D dispatch for level 2):
- *   22 (delay 2) → 23 (delay 2) → 24 (delay 2) → 23 (delay 2) → loop
- *   = 4-step cycle over 8 game ticks, expressed here as ay[] = {0,16,32,16}.
- *
- * Ref: lbC004976 (level 2 animation dispatch, tile 0x1D) → lbL01EC62.
- *      lbW01C52A (L1AN BOB table) @ main.asm#L14801, entries 22-24.
+ * Tile 0x1D: 4-step blinking animation present only on L1AN levels (2,10,11).
+ *   BOBs 22-24 of lbW01C52A (L1AN table): atlas (176, 0/16/32), 16×16.
+ *   Sequence from lbC004976 → lbL01EC62: delay=2 ticks/frame, 4-step loop.
+ *   Ref: main.asm#L2181 (level 2 tile 0x1D dispatch) → lbL01EC62 @ L15176.
  */
+
+/* Tile 0x17: 9 x-positions in atlas row 3 (y=48), frames A67-A75. */
+static const int k_intex17_ax[9] = { 112, 128, 144, 160, 176, 192, 208, 224, 240 };
+#define INTEX17_AY            48   /* atlas row 3 */
+#define INTEX17_FRAMES         9
+#define INTEX_FRAME_DELAY      2   /* 2 ticks per frame */
+
+/* Tile 0x1D: 4-step sequence at atlas x=176, L1AN only. */
 static const int k_intex_ax          = 176;
 static const int k_intex_ay[4]       = { 0, 16, 32, 16 };
-#define INTEX_FRAME_DELAY  2           /* 2 ticks per sub-frame (lbL01EC62 delay=2) */
-#define INTEX_CYCLE_STEPS  4           /* 4 steps → 8-tick total loop */
+#define INTEX_CYCLE_STEPS  4
 
 void tile_anim_render_intex_screens(int global_tick)
 {
     const UBYTE *atlas = anim_gfx_get_atlas();
     if (!atlas) return;
 
-    /* L1AN is the only atlas that holds INTEX blinking-screen frames at
-     * (176, 0-32). Other atlases have unrelated content at those pixels. */
-    if (strcmp(k_level_defs[g_cur_level].map_an, "L1AN") != 0) return;
+    int is_l1an = (strcmp(k_level_defs[g_cur_level].map_an, "L1AN") == 0);
 
     int start_col = g_camera_x / MAP_TILE_W;
     int start_row = g_camera_y / MAP_TILE_H;
@@ -325,8 +324,12 @@ void tile_anim_render_intex_screens(int global_tick)
     int cols_vis  = (320 + off_x + MAP_TILE_W - 1) / MAP_TILE_W;
     int rows_vis  = (256 + off_y + MAP_TILE_H - 1) / MAP_TILE_H;
 
-    int frame_idx = (global_tick / INTEX_FRAME_DELAY) % INTEX_CYCLE_STEPS;
-    int ay        = k_intex_ay[frame_idx];
+    /* Pre-compute frame indices for both tile types. */
+    int frame17  = (global_tick / INTEX_FRAME_DELAY) % INTEX17_FRAMES;
+    int ax17     = k_intex17_ax[frame17];
+
+    int frame1D  = (global_tick / INTEX_FRAME_DELAY) % INTEX_CYCLE_STEPS;
+    int ay1D     = k_intex_ay[frame1D];
 
     for (int tr = 0; tr <= rows_vis; tr++) {
         int map_row = start_row + tr;
@@ -345,8 +348,16 @@ void tile_anim_render_intex_screens(int global_tick)
             if (dst_x + 16 < 0 || dst_x >= 320) continue;
             if (dst_y + 16 < 0 || dst_y >= 256) continue;
 
-            const UBYTE *src = atlas + ay * ANIM_ATLAS_W + k_intex_ax;
-            video_blit(src, ANIM_ATLAS_W, dst_x, dst_y, 16, 16, 0);
+            if (attr == TILE_INTEX) {
+                /* 9-frame A67-A75 animation, all levels. */
+                const UBYTE *src = atlas + INTEX17_AY * ANIM_ATLAS_W + ax17;
+                video_blit(src, ANIM_ATLAS_W, dst_x, dst_y, 16, 16, 0);
+            } else {
+                /* tile 0x1D: L1AN levels only. */
+                if (!is_l1an) continue;
+                const UBYTE *src = atlas + ay1D * ANIM_ATLAS_W + k_intex_ax;
+                video_blit(src, ANIM_ATLAS_W, dst_x, dst_y, 16, 16, 0);
+            }
         }
     }
 }
