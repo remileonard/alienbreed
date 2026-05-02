@@ -260,13 +260,14 @@ void tile_anim_render_ship_engines(int global_tick)
 /* ------------------------------------------------------------------ */
 
 /*
- * Three 16×16 frames in the level animation atlas (column 3, rows 0-2).
- * Atlas tile indices 3, 23, 43 → pixel (48,0), (48,16), (48,32).
- * Ref: lbW01BECA entries 15, 14, 12 @ main.asm#L14756.
+ * Three 16×16 frames in the level animation atlas (column 19, rows 0-2).
+ * Atlas tile indices A19, A39, A59 → pixel (304,0), (304,16), (304,32).
+ * column = 19, x = 19×16 = 304.  These frames show the electric-field/
+ * lightning effect that fits the one-way-door floor panel visually.
  * The ASM dispatch table has bra.w none for tile 0x2E in all levels;
  * this continuous 3-frame loop was missing from the C port.
  */
-static const int k_deadly_way_ax = 48;
+static const int k_deadly_way_ax = 304;
 static const int k_deadly_way_ay[3] = { 0, 16, 32 };
 
 void tile_anim_render_one_deadly_way(int global_tick)
