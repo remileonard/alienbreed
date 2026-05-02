@@ -213,6 +213,12 @@ void tile_anim_render(void)
  *   Level 12 (level_flag=1024): tile 0x19 is not animated.
  *   All other levels: all 5 tiles animated.
  * The mask is stored in LevelDef.engine_tile_mask (bit N = tile 0x18+N).
+ *
+ * IMPORTANT: the atlas coordinates in k_engine_anim are derived from the
+ * legacy L0AN atlas (lbW01BECA, level 1).  Other levels use compact atlases
+ * (lbW01C52A, lbW01CB8A, …) where those same pixel positions hold different
+ * graphics (e.g. fan sprites on L1AN / level 2).  Until per-atlas coordinate
+ * tables are added, the overlay is only drawn on level 1 (L0AN).
  */
 typedef struct { int ax0, ay0, ax1, ay1; } EngineAnimPair;
 
@@ -228,6 +234,12 @@ void tile_anim_render_ship_engines(int global_tick)
 {
     const UBYTE *atlas = anim_gfx_get_atlas();
     if (!atlas) return;
+
+    /* The k_engine_anim atlas coordinates are valid only for the L0AN atlas
+     * (level 1, lbW01BECA).  Compact atlases used by other levels (L1AN etc.)
+     * have different content at those pixel positions (e.g. fan sprites on
+     * level 2).  Skip the overlay entirely on non-L0AN levels. */
+    if (strcmp(k_level_defs[g_cur_level].map_an, "L0AN") != 0) return;
 
     int engine_mask = k_level_defs[g_cur_level].engine_tile_mask;
 
