@@ -138,18 +138,17 @@ void tile_anim_render_one_deadly_way(int global_tick);
 
 /*
  * Render the blinking-screen animation overlay for INTEX computer tiles
- * (attribute 0x17, TILE_INTEX) and their matching screen-body decoration
- * tiles (attribute 0x1D) in the current map.
+ * in the current map.
  *
- * Only active on levels that use the L1AN animation atlas (levels 2, 10, 11).
- * The animation is a 4-step, 16×16 loop sourced from the L1AN atlas:
- *   Step 0: (176,  0, 16, 16)   BOB 22 of lbW01C52A
- *   Step 1: (176, 16, 16, 16)   BOB 23 of lbW01C52A
- *   Step 2: (176, 32, 16, 16)   BOB 24 of lbW01C52A
- *   Step 3: (176, 16, 16, 16)   BOB 23 (repeat) → total 8-tick cycle
+ * Tile 0x17 (TILE_INTEX): 9-frame 16×16 loop, active on ALL levels.
+ *   Frames A67-A75 in the animation atlas — atlas row 3 (y=48),
+ *   x = 112, 128, 144, 160, 176, 192, 208, 224, 240.  Delay: 2 ticks/frame.
  *
- * Ref: lbC004976 (tile 0x1D level-2 dispatch) → lbL01EC62 @ main.asm.
- *      lbW01C52A (L1AN BOB table) @ main.asm#L14801, entries 22-24.
+ * Tile 0x1D (screen-body decoration): 4-step 16×16 loop, L1AN levels only
+ *   (levels 2, 10, 11).  Source: L1AN atlas (176, 0/16/32), BOBs 22-24.
+ *   Sequence: step 0→1→2→1→loop (8-tick cycle).
+ *   Ref: lbC004976 (tile 0x1D level-2 dispatch) → lbL01EC62 @ main.asm.
+ *        lbW01C52A (L1AN BOB table) @ main.asm#L14801, entries 22-24.
  *
  * global_tick is the running frame counter (incremented every rendered frame).
  */
