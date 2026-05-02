@@ -273,16 +273,17 @@ void tile_anim_render_ship_engines(int global_tick)
 }
 
 /* ------------------------------------------------------------------ */
-/* One-deadly-way door animation (tile 0x2E)                          */
+/* One-deadly-way door animation (tiles 0x26 and 0x2E)                */
 /* ------------------------------------------------------------------ */
 
 /*
- * Three 16×16 frames in the level animation atlas (column 19, rows 0-2).
- * Atlas tile indices A19, A39, A59 → pixel (304,0), (304,16), (304,32).
- * column = 19, x = 19×16 = 304.  These frames show the electric-field/
- * lightning effect that fits the one-way-door floor panel visually.
- * The ASM dispatch table has bra.w none for tile 0x2E in all levels;
- * this continuous 3-frame loop was missing from the C port.
+ * Both one-deadly-way tile variants share the same 3-frame lightning
+ * animation using 16×16 BOBs from the level animation atlas (column 19):
+ *   Atlas tile indices A19, A39, A59 → pixel (304,0), (304,16), (304,32).
+ *   TILE_ONE_DEADLY_WAY_RIGHT (0x26): one-way passage to the right.
+ *   TILE_ONE_DEADLY_WAY_LEFT  (0x2E): one-way passage to the left.
+ * The ASM dispatch table has bra.w none for both tiles in all levels;
+ * the continuous 3-frame loop was missing from the C port.
  */
 static const int k_deadly_way_ax = 304;
 static const int k_deadly_way_ay[3] = { 0, 16, 32 };
@@ -311,7 +312,8 @@ void tile_anim_render_one_deadly_way(int global_tick)
             if (map_col < 0 || map_col >= MAP_COLS) continue;
 
             UBYTE attr = tilemap_attr(&g_cur_map, map_col, map_row) & 0x3F;
-            if (attr != TILE_ONE_DEADLY_WAY_LEFT) continue;
+            if (attr != TILE_ONE_DEADLY_WAY_LEFT &&
+                attr != TILE_ONE_DEADLY_WAY_RIGHT) continue;
 
             int dst_x = tc * MAP_TILE_W - off_x;
             int dst_y = tr * MAP_TILE_H - off_y;

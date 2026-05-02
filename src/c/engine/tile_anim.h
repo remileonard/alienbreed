@@ -121,16 +121,16 @@ void tile_anim_render(void);
 void tile_anim_render_ship_engines(int global_tick);
 
 /*
- * Render continuous 3-frame animation overlays for all tiles with
- * attribute 0x2E (TILE_ONE_DEADLY_WAY_LEFT) in the current map.
+ * Render continuous 3-frame lightning animation overlays for all tiles with
+ * attribute 0x26 (TILE_ONE_DEADLY_WAY_RIGHT) or 0x2E (TILE_ONE_DEADLY_WAY_LEFT)
+ * in the current map.  Both directions share the same 3-frame animation.
  *
  * The three 16×16 frames are sourced from the level animation atlas (LxAN):
- *   Frame 0: atlas tile index  3 → pixel (48,  0, 16, 16)  BOB entry 15
- *   Frame 1: atlas tile index 23 → pixel (48, 16, 16, 16)  BOB entry 14
- *   Frame 2: atlas tile index 43 → pixel (48, 32, 16, 16)  BOB entry 12
- * (Ref: lbW01BECA entries 12,14,15 @ main.asm#L14756 — 16×16 BOBs at
- *  atlas column 3.  The dispatch table has bra.w none for tile 0x2E in all
- *  levels, so this animation was missing from the C port.)
+ *   Frame 0: atlas column 19, row 0 → pixel (304,  0, 16, 16)
+ *   Frame 1: atlas column 19, row 1 → pixel (304, 16, 16, 16)
+ *   Frame 2: atlas column 19, row 2 → pixel (304, 32, 16, 16)
+ * (The ASM dispatch table has bra.w none for both tiles in all levels;
+ *  this animation was absent from the original per-tile handler path.)
  *
  * global_tick is the running frame counter (incremented every rendered frame).
  */
