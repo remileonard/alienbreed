@@ -142,7 +142,8 @@ void tile_anim_render_one_deadly_way(int global_tick);
  *
  * Tile 0x17 (TILE_INTEX): 9-frame 16×16 loop, active on ALL levels.
  *   Frames A67-A75 in the animation atlas — atlas row 3 (y=48),
- *   x = 112, 128, 144, 160, 176, 192, 208, 224, 240.  Delay: 2 ticks/frame.
+ *   x = 112, 128, 144, 160, 176, 192, 208, 224, 240.
+ *   Delay: 4 display ticks/frame (ASM lbL01EC62 delay=2 at 25 Hz = 4×50 Hz).
  *
  * Tile 0x1D (screen-body decoration): 4-step 16×16 loop, L1AN levels only
  *   (levels 2, 10, 11).  Source: L1AN atlas (176, 0/16/32), BOBs 22-24.

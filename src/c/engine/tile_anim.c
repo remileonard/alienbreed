@@ -303,7 +303,9 @@ void tile_anim_render_ship_engines(int global_tick)
 static const int k_intex17_ax[9] = { 112, 128, 144, 160, 176, 192, 208, 224, 240 };
 #define INTEX17_AY            48   /* atlas row 3 */
 #define INTEX17_FRAMES         9
-#define INTEX_FRAME_DELAY      2   /* 2 ticks per frame */
+/* lbL01EC62 delay=2 at 25 Hz (1 game-tick = 2 VBL).
+ * Each animation frame lasts 2 × 2 = 4 display ticks at 50 Hz. */
+#define INTEX_FRAME_DELAY      4
 
 /* Tile 0x1D: 4-step sequence at atlas x=176, L1AN only. */
 static const int k_intex_ax          = 176;
