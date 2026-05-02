@@ -240,8 +240,10 @@ void tile_anim_render_reactor(int global_tick)
 
             /* Phase offset: tiles in the same vertical reactor column
              * are staggered by 1 frame per row, matching the 4 sequences
-             * in lbC004B8A.  Row mod 4 gives position within the group. */
-            int phase = (3 - (map_row % 4) + 12) % 12;
+             * in lbC004B8A.  Row mod 4 gives position within the group.
+             * (map_row % 4) is in [0,3], so (3 - (map_row % 4)) is in [0,3]
+             * and the final % 12 keeps the index in range. */
+            int phase = (3 - (map_row % 4)) % 12;
             int anim_idx = ((global_tick / 2) + phase) % 12;
 
             const ReactorFrame *rf = &k_reactor_frames[anim_idx];
