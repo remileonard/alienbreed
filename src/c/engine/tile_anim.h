@@ -140,10 +140,15 @@ void tile_anim_render_one_deadly_way(int global_tick);
  * Render the blinking-screen animation overlay for INTEX computer tiles
  * in the current map.
  *
- * Tile 0x17 (TILE_INTEX): 9-frame 16×16 loop, active on ALL levels.
- *   Frames A67-A75 in the animation atlas — atlas row 3 (y=48),
- *   x = 112, 128, 144, 160, 176, 192, 208, 224, 240.
- *   Delay: 4 display ticks/frame (ASM lbL01EC62 delay=2 at 25 Hz = 4×50 Hz).
+ * Tile 0x17 (TILE_INTEX): per-decoration 2-frame blink, L1AN levels only
+ *   (levels 2, 10, 11).  Each tile_idx (decoration value) maps to a specific
+ *   pair of 16×16 frames at atlas y=48:
+ *     décor 0x102 → A68 (128,48) ↔ A74 (224,48)
+ *   Decorations not in the lookup table are not animated (matches the
+ *   original ASM behaviour: bra.w none for tile 0x17 @ main.asm lbC004384).
+ *   The y=48 atlas row holds engine fans on L0AN; only the L1AN atlas has
+ *   INTEX screen frames there (lbW01C52A entries 48-50).
+ *   Delay: 4 display ticks/frame (ASM delay=2 at 25 Hz = 4×50 Hz).
  *
  * Tile 0x1D (screen-body decoration): 4-step 16×16 loop, L1AN levels only
  *   (levels 2, 10, 11).  Source: L1AN atlas (176, 0/16/32), BOBs 22-24.

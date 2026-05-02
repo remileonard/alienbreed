@@ -289,9 +289,20 @@ void tile_anim_render_ship_engines(int global_tick)
 /* ------------------------------------------------------------------ */
 
 /*
- * Tile 0x17 (TILE_INTEX): 9-frame 16×16 blinking-screen animation, active
- * on all levels.  Frames A67-A75 in the animation atlas — all in atlas row 3
- * (y=48), columns 7-15 (x = 112, 128, … 240, stepping by 16 each frame).
+ * Tile 0x17 (TILE_INTEX): per-decoration 2-frame blink animation on L1AN
+ * levels (2, 10, 11).
+ *
+ * The L1AN animation atlas (lbW01C52A) stores animation frames at y=48 in
+ * three 48×16 strips (entries 48-50):
+ *   Entry 48 (x=112-159): frames A67/A68/A69 — one per decoration design
+ *   Entry 49 (x=160-207): frames A70/A71/A72 — (other designs or unused)
+ *   Entry 50 (x=208-255): frames A73/A74/A75 — matching "on" states
+ *
+ * Each tile_idx (decoration) maps to a specific (ax0, ax1) pair at y=48.
+ * The animation toggles between ax0 and ax1 every INTEX_FRAME_DELAY ticks.
+ * Tiles with a tile_idx not in the lookup table are not animated (matching
+ * the original ASM behaviour: bra.w none for tile 0x17 in all dispatch
+ * sections @ main.asm lbC004384).
  *
  * Tile 0x1D: 4-step blinking animation present only on L1AN levels (2,10,11).
  *   BOBs 22-24 of lbW01C52A (L1AN table): atlas (176, 0/16/32), 16×16.
@@ -299,17 +310,28 @@ void tile_anim_render_ship_engines(int global_tick)
  *   Ref: main.asm#L2181 (level 2 tile 0x1D dispatch) → lbL01EC62 @ L15176.
  */
 
-/* Tile 0x17: 9 x-positions in atlas row 3 (y=48), frames A67-A75. */
-static const int k_intex17_ax[9] = { 112, 128, 144, 160, 176, 192, 208, 224, 240 };
-#define INTEX17_AY            48   /* atlas row 3 */
-#define INTEX17_FRAMES         9
 /* lbL01EC62 delay=2 at 25 Hz (1 game-tick = 2 VBL).
  * Each animation frame lasts 2 × 2 = 4 display ticks at 50 Hz. */
 #define INTEX_FRAME_DELAY      4
 
+/*
+ * Tile 0x17: per-decoration blink pairs at atlas y=48.
+ * ax0 = frame shown on even half-cycle, ax1 = frame on odd half-cycle.
+ * Source: lbW01C52A entries 48/50 (L1AN atlas y=48 strips).
+ * Add further entries as additional decoration tile_idx values are identified
+ * in the map data.
+ */
+typedef struct { int tile_idx; int ax0; int ax1; } IntexDecor;
+static const IntexDecor k_intex17_decors[] = {
+    /* Design 2: A68 (128,48) ↔ A74 (224,48) — confirmed for décor 0x102 */
+    { 0x102, 128, 224 },
+};
+#define INTEX17_DECOR_COUNT ((int)(sizeof(k_intex17_decors) / sizeof(k_intex17_decors[0])))
+#define INTEX17_AY  48   /* atlas row 3, y=48 */
+
 /* Tile 0x1D: 4-step sequence at atlas x=176, L1AN only. */
-static const int k_intex_ax          = 176;
-static const int k_intex_ay[4]       = { 0, 16, 32, 16 };
+static const int k_intex_ax      = 176;
+static const int k_intex_ay[4]   = { 0, 16, 32, 16 };
 #define INTEX_CYCLE_STEPS  4
 
 void tile_anim_render_intex_screens(int global_tick)
@@ -326,12 +348,12 @@ void tile_anim_render_intex_screens(int global_tick)
     int cols_vis  = (320 + off_x + MAP_TILE_W - 1) / MAP_TILE_W;
     int rows_vis  = (256 + off_y + MAP_TILE_H - 1) / MAP_TILE_H;
 
-    /* Pre-compute frame indices for both tile types. */
-    int frame17  = (global_tick / INTEX_FRAME_DELAY) % INTEX17_FRAMES;
-    int ax17     = k_intex17_ax[frame17];
+    /* 2-frame toggle index for tile 0x17 decorations (0 or 1). */
+    int toggle17 = (global_tick / INTEX_FRAME_DELAY) & 1;
 
-    int frame1D  = (global_tick / INTEX_FRAME_DELAY) % INTEX_CYCLE_STEPS;
-    int ay1D     = k_intex_ay[frame1D];
+    /* 4-step frame index for tile 0x1D. */
+    int frame1D = (global_tick / INTEX_FRAME_DELAY) % INTEX_CYCLE_STEPS;
+    int ay1D    = k_intex_ay[frame1D];
 
     for (int tr = 0; tr <= rows_vis; tr++) {
         int map_row = start_row + tr;
@@ -351,11 +373,26 @@ void tile_anim_render_intex_screens(int global_tick)
             if (dst_y + 16 < 0 || dst_y >= 256) continue;
 
             if (attr == TILE_INTEX) {
-                /* 9-frame A67-A75 animation, all levels. */
-                const UBYTE *src = atlas + INTEX17_AY * ANIM_ATLAS_W + ax17;
+                /* Tile 0x17: per-decoration 2-frame blink, L1AN atlas only.
+                 * The y=48 atlas row contains engine fans on L0AN; only L1AN
+                 * has INTEX screen frames there. */
+                if (!is_l1an) continue;
+
+                int tile_idx = (g_cur_map.tiles[map_row][map_col] >> 6) & 0x3FF;
+                const IntexDecor *decor = NULL;
+                for (int d = 0; d < INTEX17_DECOR_COUNT; d++) {
+                    if (k_intex17_decors[d].tile_idx == tile_idx) {
+                        decor = &k_intex17_decors[d];
+                        break;
+                    }
+                }
+                if (!decor) continue;  /* unknown decoration: no animation */
+
+                int ax = toggle17 ? decor->ax1 : decor->ax0;
+                const UBYTE *src = atlas + INTEX17_AY * ANIM_ATLAS_W + ax;
                 video_blit(src, ANIM_ATLAS_W, dst_x, dst_y, 16, 16, 0);
             } else {
-                /* tile 0x1D: L1AN levels only. */
+                /* Tile 0x1D: 4-step blink, L1AN levels only. */
                 if (!is_l1an) continue;
                 const UBYTE *src = atlas + ay1D * ANIM_ATLAS_W + k_intex_ax;
                 video_blit(src, ANIM_ATLAS_W, dst_x, dst_y, 16, 16, 0);
