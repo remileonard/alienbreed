@@ -49,7 +49,7 @@
  *                                        (bra.w none for tile 0x19)
  */
 const LevelDef k_level_defs[NUM_LEVELS] = {
-    /*          map_an  map_bo  map_ma  str  briefing_text                         music    atlas_type          eng_mask */
+    /*          map_an  map_bo  map_ma  str  briefing_text                         music    atlas_type          engine_tile_mask */
     /* lvl 1  */ { "L0AN", "L0BO", "L0MA",  0, "Level 1: Research Base",          "level", ALIEN_ATLAS_LEGACY,  0x1F },
     /* lvl 2  */ { "L1AN", "L1BO", "L1MA",  0, "Level 2: Bio-Containment",        "level", ALIEN_ATLAS_COMPACT, 0x17 },
     /* lvl 3  */ { "L2AN", "L2BO", "L2MA",  0, "Level 3: Reactor Core",           "level", ALIEN_ATLAS_COMPACT, 0x1F },
