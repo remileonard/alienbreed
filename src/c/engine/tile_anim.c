@@ -285,24 +285,29 @@ void tile_anim_render_ship_engines(int global_tick)
 }
 
 /* ------------------------------------------------------------------ */
-/* INTEX computer screen animation (tiles 0x17 and 0x1D)              */
+/* Screen decoration animation (tile_idx 0x101/0x102/0x103)           */
+/* and tile 0x1D blinking animation                                    */
 /* ------------------------------------------------------------------ */
 
 /*
- * Tile 0x17 (TILE_INTEX): per-decoration 2-frame blink animation on L1AN
- * levels (2, 10, 11).
+ * Tiles with decoration index 0x101, 0x102 or 0x103 display animated
+ * computer screens.  The animation is based purely on the tile_idx (upper
+ * 10 bits of the map word) and is independent of the tile_type (lower 6
+ * bits).  It applies to every map in the game where these decorations appear.
  *
- * The L1AN animation atlas (lbW01C52A) stores animation frames at y=48 in
- * three 48×16 strips (entries 48-50):
- *   Entry 48 (x=112-159): frames A67/A68/A69 — one per decoration design
- *   Entry 49 (x=160-207): frames A70/A71/A72 — (other designs or unused)
- *   Entry 50 (x=208-255): frames A73/A74/A75 — matching "on" states
+ * All three sequences use 16×16 frames at y=48 in the animation atlas.
+ * The atlas row y=48 contains three 48×16 strips (lbW01C52A entries 48-50)
+ * whose frames are interleaved by decoration design:
  *
- * Each tile_idx (decoration) maps to a specific (ax0, ax1) pair at y=48.
- * The animation toggles between ax0 and ax1 every INTEX_FRAME_DELAY ticks.
- * Tiles with a tile_idx not in the lookup table are not animated (matching
- * the original ASM behaviour: bra.w none for tile 0x17 in all dispatch
- * sections @ main.asm lbC004384).
+ *   Strip 1 (x=112, w=48): A67 | A68 | A69
+ *   Strip 2 (x=160, w=48): A70 | A71 | A72
+ *   Strip 3 (x=208, w=48): A73 | A74 | A75
+ *                            ^    ^    ^
+ *                          0x101 0x102 0x103  (column offset within strip)
+ *
+ *   décor 0x101: A67(112) → A70(160) → A73(208)  — left column of each strip
+ *   décor 0x102: A68(128) → A71(176) → A74(224)  — middle column (confirmed)
+ *   décor 0x103: A69(144) → A72(192) → A75(240)  — right column
  *
  * Tile 0x1D: 4-step blinking animation present only on L1AN levels (2,10,11).
  *   BOBs 22-24 of lbW01C52A (L1AN table): atlas (176, 0/16/32), 16×16.
@@ -315,19 +320,22 @@ void tile_anim_render_ship_engines(int global_tick)
 #define INTEX_FRAME_DELAY      4
 
 /*
- * Tile 0x17: per-decoration blink pairs at atlas y=48.
- * ax0 = frame shown on even half-cycle, ax1 = frame on odd half-cycle.
- * Source: lbW01C52A entries 48/50 (L1AN atlas y=48 strips).
- * Add further entries as additional decoration tile_idx values are identified
- * in the map data.
+ * Screen decoration 3-frame sequences at y=48 in the atlas.
+ * ax[0..2] = x coordinates of the three successive animation frames.
  */
-typedef struct { int tile_idx; int ax0; int ax1; } IntexDecor;
-static const IntexDecor k_intex17_decors[] = {
-    /* Design 2: A68 (128,48) ↔ A74 (224,48) — confirmed for décor 0x102 */
-    { 0x102, 128, 224 },
+#define SCREEN_ANIM_AY    48
+#define SCREEN_ANIM_STEPS 3
+
+typedef struct { int tile_idx; int ax[SCREEN_ANIM_STEPS]; } ScreenDecor;
+static const ScreenDecor k_screen_decors[] = {
+    /* décor 0x101: A67(112) → A70(160) → A73(208) */
+    { 0x101, { 112, 160, 208 } },
+    /* décor 0x102: A68(128) → A71(176) → A74(224) — confirmed */
+    { 0x102, { 128, 176, 224 } },
+    /* décor 0x103: A69(144) → A72(192) → A75(240) */
+    { 0x103, { 144, 192, 240 } },
 };
-#define INTEX17_DECOR_COUNT ((int)(sizeof(k_intex17_decors) / sizeof(k_intex17_decors[0])))
-#define INTEX17_AY  48   /* atlas row 3, y=48 */
+#define SCREEN_DECOR_COUNT ((int)(sizeof(k_screen_decors) / sizeof(k_screen_decors[0])))
 
 /* Tile 0x1D: 4-step sequence at atlas x=176, L1AN only. */
 static const int k_intex_ax      = 176;
@@ -348,10 +356,10 @@ void tile_anim_render_intex_screens(int global_tick)
     int cols_vis  = (320 + off_x + MAP_TILE_W - 1) / MAP_TILE_W;
     int rows_vis  = (256 + off_y + MAP_TILE_H - 1) / MAP_TILE_H;
 
-    /* 2-frame toggle index for tile 0x17 decorations (0 or 1). */
-    int toggle17 = (global_tick / INTEX_FRAME_DELAY) & 1;
+    /* 3-step frame index for screen decoration animation (all levels). */
+    int frame_screen = (global_tick / INTEX_FRAME_DELAY) % SCREEN_ANIM_STEPS;
 
-    /* 4-step frame index for tile 0x1D. */
+    /* 4-step frame index for tile 0x1D (L1AN only). */
     int frame1D = (global_tick / INTEX_FRAME_DELAY) % INTEX_CYCLE_STEPS;
     int ay1D    = k_intex_ay[frame1D];
 
@@ -363,8 +371,9 @@ void tile_anim_render_intex_screens(int global_tick)
             int map_col = start_col + tc;
             if (map_col < 0 || map_col >= MAP_COLS) continue;
 
-            UBYTE attr = tilemap_attr(&g_cur_map, map_col, map_row) & 0x3F;
-            if (attr != TILE_INTEX && attr != 0x1D) continue;
+            UWORD tile_word = g_cur_map.tiles[map_row][map_col];
+            int   tile_idx  = (tile_word >> 6) & 0x3FF;
+            UBYTE attr      = tile_word & 0x3F;
 
             int dst_x = tc * MAP_TILE_W - off_x;
             int dst_y = tr * MAP_TILE_H - off_y;
@@ -372,28 +381,24 @@ void tile_anim_render_intex_screens(int global_tick)
             if (dst_x + 16 < 0 || dst_x >= 320) continue;
             if (dst_y + 16 < 0 || dst_y >= 256) continue;
 
-            if (attr == TILE_INTEX) {
-                /* Tile 0x17: per-decoration 2-frame blink, L1AN atlas only.
-                 * The y=48 atlas row contains engine fans on L0AN; only L1AN
-                 * has INTEX screen frames there. */
-                if (!is_l1an) continue;
-
-                int tile_idx = (g_cur_map.tiles[map_row][map_col] >> 6) & 0x3FF;
-                const IntexDecor *decor = NULL;
-                for (int d = 0; d < INTEX17_DECOR_COUNT; d++) {
-                    if (k_intex17_decors[d].tile_idx == tile_idx) {
-                        decor = &k_intex17_decors[d];
-                        break;
-                    }
+            /* Screen decoration animation: tile_idx 0x101/0x102/0x103.
+             * Applies to all maps regardless of tile type. */
+            const ScreenDecor *sdecor = NULL;
+            for (int d = 0; d < SCREEN_DECOR_COUNT; d++) {
+                if (k_screen_decors[d].tile_idx == tile_idx) {
+                    sdecor = &k_screen_decors[d];
+                    break;
                 }
-                if (!decor) continue;  /* unknown decoration: no animation */
-
-                int ax = toggle17 ? decor->ax1 : decor->ax0;
-                const UBYTE *src = atlas + INTEX17_AY * ANIM_ATLAS_W + ax;
+            }
+            if (sdecor) {
+                int ax = sdecor->ax[frame_screen];
+                const UBYTE *src = atlas + SCREEN_ANIM_AY * ANIM_ATLAS_W + ax;
                 video_blit(src, ANIM_ATLAS_W, dst_x, dst_y, 16, 16, 0);
-            } else {
-                /* Tile 0x1D: 4-step blink, L1AN levels only. */
-                if (!is_l1an) continue;
+                continue;
+            }
+
+            /* Tile 0x1D: 4-step blink, L1AN levels only. */
+            if (attr == 0x1D && is_l1an) {
                 const UBYTE *src = atlas + ay1D * ANIM_ATLAS_W + k_intex_ax;
                 video_blit(src, ANIM_ATLAS_W, dst_x, dst_y, 16, 16, 0);
             }
