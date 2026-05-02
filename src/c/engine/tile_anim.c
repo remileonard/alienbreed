@@ -285,6 +285,73 @@ void tile_anim_render_ship_engines(int global_tick)
 }
 
 /* ------------------------------------------------------------------ */
+/* INTEX computer screen animation (tiles 0x17 and 0x1D, L1AN levels) */
+/* ------------------------------------------------------------------ */
+
+/*
+ * On levels using the L1AN animation atlas (levels 2, 10, 11) the INTEX
+ * terminal tile (0x17, TILE_INTEX) and the matching screen-body decoration
+ * (0x1D) share a 3-frame 16×16 blinking-screen animation from the L1AN atlas:
+ *
+ *   Frame 0: atlas (176,  0, 16, 16)   BOB 22 of lbW01C52A
+ *   Frame 1: atlas (176, 16, 16, 16)   BOB 23 of lbW01C52A
+ *   Frame 2: atlas (176, 32, 16, 16)   BOB 24 of lbW01C52A
+ *
+ * Sequence (from lbL01EC62 @ main.asm, tile 0x1D dispatch for level 2):
+ *   22 (delay 2) → 23 (delay 2) → 24 (delay 2) → 23 (delay 2) → loop
+ *   = 4-step cycle over 8 game ticks, expressed here as ay[] = {0,16,32,16}.
+ *
+ * Ref: lbC004976 (level 2 animation dispatch, tile 0x1D) → lbL01EC62.
+ *      lbW01C52A (L1AN BOB table) @ main.asm#L14801, entries 22-24.
+ */
+static const int k_intex_ax          = 176;
+static const int k_intex_ay[4]       = { 0, 16, 32, 16 };
+#define INTEX_FRAME_DELAY  2           /* 2 ticks per sub-frame (lbL01EC62 delay=2) */
+#define INTEX_CYCLE_STEPS  4           /* 4 steps → 8-tick total loop */
+
+void tile_anim_render_intex_screens(int global_tick)
+{
+    const UBYTE *atlas = anim_gfx_get_atlas();
+    if (!atlas) return;
+
+    /* L1AN is the only atlas that holds INTEX blinking-screen frames at
+     * (176, 0-32). Other atlases have unrelated content at those pixels. */
+    if (strcmp(k_level_defs[g_cur_level].map_an, "L1AN") != 0) return;
+
+    int start_col = g_camera_x / MAP_TILE_W;
+    int start_row = g_camera_y / MAP_TILE_H;
+    int off_x     = g_camera_x % MAP_TILE_W;
+    int off_y     = g_camera_y % MAP_TILE_H;
+    int cols_vis  = (320 + off_x + MAP_TILE_W - 1) / MAP_TILE_W;
+    int rows_vis  = (256 + off_y + MAP_TILE_H - 1) / MAP_TILE_H;
+
+    int frame_idx = (global_tick / INTEX_FRAME_DELAY) % INTEX_CYCLE_STEPS;
+    int ay        = k_intex_ay[frame_idx];
+
+    for (int tr = 0; tr <= rows_vis; tr++) {
+        int map_row = start_row + tr;
+        if (map_row < 0 || map_row >= MAP_ROWS) continue;
+
+        for (int tc = 0; tc <= cols_vis; tc++) {
+            int map_col = start_col + tc;
+            if (map_col < 0 || map_col >= MAP_COLS) continue;
+
+            UBYTE attr = tilemap_attr(&g_cur_map, map_col, map_row) & 0x3F;
+            if (attr != TILE_INTEX && attr != 0x1D) continue;
+
+            int dst_x = tc * MAP_TILE_W - off_x;
+            int dst_y = tr * MAP_TILE_H - off_y;
+
+            if (dst_x + 16 < 0 || dst_x >= 320) continue;
+            if (dst_y + 16 < 0 || dst_y >= 256) continue;
+
+            const UBYTE *src = atlas + ay * ANIM_ATLAS_W + k_intex_ax;
+            video_blit(src, ANIM_ATLAS_W, dst_x, dst_y, 16, 16, 0);
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* One-deadly-way door animation (tiles 0x26 and 0x2E)                */
 /* ------------------------------------------------------------------ */
 

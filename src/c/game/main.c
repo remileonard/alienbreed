@@ -255,6 +255,7 @@ void level_game_loop_external(void)
             static int s_anim_tick = 0;
             s_anim_tick++;
             tile_anim_render_ship_engines(s_anim_tick);
+            tile_anim_render_intex_screens(s_anim_tick);
             tile_anim_render_one_deadly_way(s_anim_tick);
             tile_anim_render();
             /* Walk cycle: frame sequence 0→1→2→1 (one tick/frame at 50 Hz).
