@@ -829,12 +829,18 @@ void alien_update_all(void)
             continue;
         }
 
+        /* While the hatch zoom animation is playing, block all movement.
+         * ASM lbC00A568 (main.asm#L7272): `subq.w #1,76(a0)` then `rts` —
+         * the check at main.asm#L6448-6449 (`tst.w 76(a0)` / `bne lbC00A568`)
+         * causes an early return before the movement code is ever reached.
+         * Only when hatch_timer reaches 0 does the alien start moving. */
+        if (g_aliens[i].hatch_timer > 0) {
+            g_aliens[i].hatch_timer--;
+            continue;
+        }
+
         alien_move(i, &g_aliens[i]);
         g_aliens[i].anim_counter++;
-        /* Decrement hatch animation timer (mirrors lbC00A568 @ main.asm#L7272:
-         * `subq.w #1,76(a0)` each tick while the AI is in hatching state). */
-        if (g_aliens[i].hatch_timer > 0)
-            g_aliens[i].hatch_timer--;
     }
 
     /* Update projectiles */
