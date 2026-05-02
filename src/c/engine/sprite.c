@@ -284,7 +284,7 @@ void sprite_draw_alien_hatch(int hatch_frame, int x, int y)
     if (hatch_frame >= ALIEN_HATCH_FRAMES) hatch_frame = ALIEN_HATCH_FRAMES - 1;
 
     int atlas_x = ALIEN_HATCH_ATLAS_X;
-    int atlas_y = ALIEN_HATCH_ATLAS_Y0 + hatch_frame * ALIEN_HATCH_W;
+    int atlas_y = ALIEN_HATCH_ATLAS_Y0 + hatch_frame * ALIEN_HATCH_H;
 
     const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
     video_blit(src, ALIEN_ATLAS_W, x - 16, y - 16, ALIEN_HATCH_W, ALIEN_HATCH_H, 0);
