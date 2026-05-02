@@ -277,14 +277,33 @@ void level_game_loop_external(void)
                          * frames (≈40ms at 50Hz ≈ 1 game-logic tick at 25Hz),
                          * which matches the original one-VBL-frame duration at
                          * 25Hz (lbC009B80 @ main.asm#L6675 clr.w 50(a0)).
-                         * Ref: lbC009B80 @ main.asm#L6675 (50(a0) → ALT WALK). */
-                        int anim_tick  = g_aliens[i].anim_counter % 4;
-                        int anim_frame = k_walk_cycle[anim_tick];
-                        if (g_aliens[i].hit_flag) {
-                            anim_frame = ALIEN_WALK_FRAMES; /* ALT WALK: y=96 */
-                            g_aliens[i].hit_flag--;
+                         * Ref: lbC009B80 @ main.asm#L6675 (50(a0) → ALT WALK).
+                         *
+                         * If hatch_timer > HATCH_ANIM_WALK_THRESHOLD (12), show
+                         * the zoom-in animation.  Each frame is held for 2 ticks
+                         * (delay=1 in lbL01B6F6 / lbL01BC0A).  Frame index:
+                         *   frame = (HATCH_ANIM_TIMER_INIT - hatch_timer) / 2
+                         * Frames 0-2 use sprite_draw_alien_hatch(); frame 3
+                         * (last 2 ticks) is a normal walk frame.
+                         * Ref: lbC00A568 / lbL01B6F6 @ main.asm#L7272-7278,14544.
+                         */
+                        if (g_aliens[i].hatch_timer > HATCH_ANIM_WALK_THRESHOLD) {
+                            int hf = (HATCH_ANIM_TIMER_INIT - g_aliens[i].hatch_timer) / 2;
+                            if (hf < 3) {
+                                sprite_draw_alien_hatch(hf, sx, sy);
+                            } else {
+                                /* Frame 3: full-size = first walk frame */
+                                sprite_draw_alien(g_aliens[i].direction, 0, sx, sy);
+                            }
+                        } else {
+                            int anim_tick  = g_aliens[i].anim_counter % 4;
+                            int anim_frame = k_walk_cycle[anim_tick];
+                            if (g_aliens[i].hit_flag) {
+                                anim_frame = ALIEN_WALK_FRAMES; /* ALT WALK: y=96 */
+                                g_aliens[i].hit_flag--;
+                            }
+                            sprite_draw_alien(g_aliens[i].direction, anim_frame, sx, sy);
                         }
-                        sprite_draw_alien(g_aliens[i].direction, anim_frame, sx, sy);
                     }
                 }
             }

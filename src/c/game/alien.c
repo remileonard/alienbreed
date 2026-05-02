@@ -308,6 +308,10 @@ typedef struct {
     int  alien_type;         /* 1-based alien type (1=weakest … 7=strongest) */
     int  active;             /* 1 = slot occupied */
     int  one_shot;           /* 1 = deactivate after first spawn (facehugger hatch) */
+    int  is_hole_spawn;      /* 1 = tile 0x34 (TILE_ALIEN_HOLE): play hatch sound +
+                              * zoom animation.  Ref: lbC0049EA @ main.asm#L2570,
+                              * do_alien_hatch sets play_alien_hatching_sample=1 and
+                              * alien+76 (hatch_timer) = struct+46 = $14 = 20. */
     int  spawned_alien_idx;  /* index of the alien last spawned from this point,
                               * or −1 if none yet.  Re-spawn is suppressed while
                               * g_aliens[spawned_alien_idx].alive != 0 so that at
@@ -400,9 +404,9 @@ void alien_init_variables(void)
  * Tile attributes that mark alien spawn locations:
  *   0x28 – TILE_ALIEN_SPAWN_BIG   (respawning large alien, e.g. lbW008F94/lbW009094)
  *   0x29 – TILE_ALIEN_SPAWN_SMALL (respawning small alien, e.g. lbW008FD4/lbW009414)
- *
- * Tile 0x34 (TILE_ALIEN_HOLE) is tile_not_used in the main tile action table
- * and is NOT a spawn point.
+ *   0x34 – TILE_ALIEN_HOLE        (respawning hole: alien emerges with zoom animation
+ *                                  and hatch sound.  Ref: lbC0049EA → lbW008F94[52]=
+ *                                  lbL01B6F6 @ main.asm#L2204; do_alien_hatch#L7817.)
  *
  * In the original game the second tile-scan table (lbC0041B8 loop) registers
  * nearby tiles of these types into the two spawn slots (lbL00D29A / lbL00D2AA)
@@ -421,8 +425,9 @@ void alien_spawn_from_map(void)
     for (int row = 0; row < MAP_ROWS && s_spawn_count < MAX_SPAWN_POINTS; row++) {
         for (int col = 0; col < MAP_COLS && s_spawn_count < MAX_SPAWN_POINTS; col++) {
             UBYTE attr = tilemap_attr(&g_cur_map, col, row);
-            if (attr != TILE_ALIEN_SPAWN_BIG &&
-                attr != TILE_ALIEN_SPAWN_SMALL) continue;
+            if (attr != TILE_ALIEN_SPAWN_BIG  &&
+                attr != TILE_ALIEN_SPAWN_SMALL &&
+                attr != TILE_ALIEN_HOLE) continue;
 
             SpawnPoint *sp = &s_spawn_points[s_spawn_count++];
             sp->world_x    = (WORD)(col * MAP_TILE_W + MAP_TILE_W / 2);
@@ -431,7 +436,10 @@ void alien_spawn_from_map(void)
             sp->alien_type = alien_type;
             sp->active     = 1;
             sp->one_shot   = 0;
-            sp->spawned_alien_idx = -1;
+            /* Tile 0x34 (TILE_ALIEN_HOLE): alien emerges with zoom animation and
+             * hatch sound, mirroring lbC0049EA → lbW008F94[52]=lbL01B6F6 in ASM. */
+            sp->is_hole_spawn      = (attr == TILE_ALIEN_HOLE) ? 1 : 0;
+            sp->spawned_alien_idx  = -1;
         }
     }
 }
@@ -461,7 +469,8 @@ void alien_spawn_near(int wx, int wy)
     sp->alien_type = alien_type_for_level();
     sp->active     = 1;
     sp->one_shot   = 1;
-    sp->spawned_alien_idx = -1;
+    sp->is_hole_spawn      = 0;
+    sp->spawned_alien_idx  = -1;
 }
 
 /*
@@ -577,6 +586,19 @@ void alien_spawn_tick(void)
         } else {
             /* Map point: reload timer; next spawn gated by occupancy check. */
             sp->countdown = SPAWN_COUNTDOWN_INIT;
+        }
+
+        /*
+         * Tile 0x34 (TILE_ALIEN_HOLE): alien emerges with zoom-in animation
+         * and hatch sound.  Mirrors ASM do_alien_hatch @ main.asm#L7817:
+         *   move.w 46(a1),76(a0)  — stores struct+46 ($14=20) into alien+76
+         *   move.w #1,play_alien_hatching_sample — triggers SAMPLE_HATCHING_ALIEN
+         * Ref: lbC00A568 / lbC00987E @ main.asm#L7272-L7278 for the counter
+         * decrement and animation pointer update each tick.
+         */
+        if (sp->is_hole_spawn && idx >= 0) {
+            g_aliens[idx].hatch_timer = HATCH_ANIM_TIMER_INIT;
+            audio_play_sample(SAMPLE_HATCHING_ALIEN);
         }
     }
 }
@@ -804,6 +826,10 @@ void alien_update_all(void)
 
         alien_move(i, &g_aliens[i]);
         g_aliens[i].anim_counter++;
+        /* Decrement hatch animation timer (mirrors lbC00A568 @ main.asm#L7272:
+         * `subq.w #1,76(a0)` each tick while the AI is in hatching state). */
+        if (g_aliens[i].hatch_timer > 0)
+            g_aliens[i].hatch_timer--;
     }
 
     /* Update projectiles */

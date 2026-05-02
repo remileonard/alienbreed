@@ -261,6 +261,35 @@ void sprite_draw_player(int player_idx, int x, int y, int facing)
     video_plot_pixel(x,                 y + PROBE_DOWN_Y, 15);/* debug: down  wall probe */
 }
 
+/* Atlas x-position for alien hatch zoom-in frames (identical in both COMPACT and
+ * LEGACY atlases — COMPACT lbW019A8E entries 83-85 and LEGACY lbW01945E entries
+ * 96-98 both resolve to x=288=0x120 in the BO file).
+ * Ref: lbW019A8E @ main.asm#L14244-L14246; lbW01945E @ main.asm#L14130-L14132. */
+#define ALIEN_HATCH_ATLAS_X     288   /* 0x120 */
+#define ALIEN_HATCH_ATLAS_Y0    288   /* y of frame 0 (0x120); frames 1-2 at +32/+64 */
+#define ALIEN_HATCH_W            32
+#define ALIEN_HATCH_H            32
+#define ALIEN_HATCH_FRAMES        3   /* frames 0-2; frame 3 = normal walk */
+
+/* Draw a hatch zoom-in frame (0-2) for a tile-0x34 alien at screen pos (x,y).
+ * Mirrors lbC00A568 @ main.asm#L7272-L7278 (sets BOB animation sequence from
+ * alien struct offset 52 = lbL01B6F6 / lbL01BC0A → 32×32 BOBs at atlas x=288).
+ * Frame 3 (full-size) is a normal walk frame handled by sprite_draw_alien. */
+void sprite_draw_alien_hatch(int hatch_frame, int x, int y)
+{
+    const UBYTE *atlas = alien_gfx_get_atlas();
+    if (!atlas) return;
+
+    if (hatch_frame < 0) hatch_frame = 0;
+    if (hatch_frame >= ALIEN_HATCH_FRAMES) hatch_frame = ALIEN_HATCH_FRAMES - 1;
+
+    int atlas_x = ALIEN_HATCH_ATLAS_X;
+    int atlas_y = ALIEN_HATCH_ATLAS_Y0 + hatch_frame * ALIEN_HATCH_W;
+
+    const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
+    video_blit(src, ALIEN_ATLAS_W, x - 16, y - 16, ALIEN_HATCH_W, ALIEN_HATCH_H, 0);
+}
+
 /* Draw alien walk sprite (direction=0-7 compass, anim_frame=0-2) at (x,y).
  * Atlas column = direction * ALIEN_SPRITE_W.
  * Atlas row depends on atlas type (COMPACT: y=frame*32; LEGACY: y={0,96,128}).
