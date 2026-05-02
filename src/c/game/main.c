@@ -34,6 +34,7 @@
 #include "../engine/tilemap.h"
 #include "../engine/sprite.h"
 #include "../engine/alien_gfx.h"
+#include "../engine/tile_anim.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -183,6 +184,10 @@ void level_game_loop_external(void)
         if (g_key_pressed == KEY_F) {
             debug_gfx_viewer_run();
         }
+        if (g_key_pressed == KEY_H) {
+            /* Debug: skip to next level */
+            g_flag_end_level = 1;
+        }
 
         /* --- Update logic --------------------------------------------- */
         /* Player input/movement runs every frame, mirroring the Amiga VBL
@@ -192,6 +197,8 @@ void level_game_loop_external(void)
             if (g_players[i].alive)
                 player_update(&g_players[i], player_get_input(&g_players[i]));
         }
+
+        tile_anim_update();
 
         /* Alien AI, collisions and level timers mirror the game_level_loop
          * in main.asm which only runs every 2 VBLs (25 Hz on PAL).
@@ -242,7 +249,15 @@ void level_game_loop_external(void)
 
             tilemap_render(&g_cur_map, &g_tileset);
 
-            /* Draw aliens */
+            /* Tile animation overlays: rendered on top of static tiles,
+             * below sprites, so items / doors remain visible briefly after
+             * collection / opening (Ref: patch_tiles / lbW012388 @ main.asm). */
+            static int s_anim_tick = 0;
+            s_anim_tick++;
+            tile_anim_render_ship_engines(s_anim_tick);
+            tile_anim_render_intex_screens(s_anim_tick);
+            tile_anim_render_one_deadly_way(s_anim_tick);
+            tile_anim_render();
             /* Walk cycle: frame sequence 0→1→2→1 (one tick/frame at 50 Hz).
              * Ref: lbL01B036 @ main.asm#L14384 — each frame has delay=1.
              * Compass direction used as atlas column (Ref: lbB00A228#L7077). */
@@ -264,14 +279,33 @@ void level_game_loop_external(void)
                          * frames (≈40ms at 50Hz ≈ 1 game-logic tick at 25Hz),
                          * which matches the original one-VBL-frame duration at
                          * 25Hz (lbC009B80 @ main.asm#L6675 clr.w 50(a0)).
-                         * Ref: lbC009B80 @ main.asm#L6675 (50(a0) → ALT WALK). */
-                        int anim_tick  = g_aliens[i].anim_counter % 4;
-                        int anim_frame = k_walk_cycle[anim_tick];
-                        if (g_aliens[i].hit_flag) {
-                            anim_frame = ALIEN_WALK_FRAMES; /* ALT WALK: y=96 */
-                            g_aliens[i].hit_flag--;
+                         * Ref: lbC009B80 @ main.asm#L6675 (50(a0) → ALT WALK).
+                         *
+                         * If hatch_timer > HATCH_ANIM_WALK_THRESHOLD (12), show
+                         * the zoom-in animation.  Each frame is held for 2 ticks
+                         * (delay=1 in lbL01B6F6 / lbL01BC0A).  Frame index:
+                         *   frame = (HATCH_ANIM_TIMER_INIT - hatch_timer) / 2
+                         * Frames 0-2 use sprite_draw_alien_hatch(); frame 3
+                         * (last 2 ticks) is a normal walk frame.
+                         * Ref: lbC00A568 / lbL01B6F6 @ main.asm#L7272-7278,14544.
+                         */
+                        if (g_aliens[i].hatch_timer > HATCH_ANIM_WALK_THRESHOLD) {
+                            int hf = (HATCH_ANIM_TIMER_INIT - g_aliens[i].hatch_timer) / 2;
+                            if (hf < 3) {
+                                sprite_draw_alien_hatch(hf, sx, sy);
+                            } else {
+                                /* Frame 3: full-size = first walk frame */
+                                sprite_draw_alien(g_aliens[i].direction, 0, sx, sy);
+                            }
+                        } else {
+                            int anim_tick  = g_aliens[i].anim_counter % 4;
+                            int anim_frame = k_walk_cycle[anim_tick];
+                            if (g_aliens[i].hit_flag) {
+                                anim_frame = ALIEN_WALK_FRAMES; /* ALT WALK: y=96 */
+                                g_aliens[i].hit_flag--;
+                            }
+                            sprite_draw_alien(g_aliens[i].direction, anim_frame, sx, sy);
                         }
-                        sprite_draw_alien(g_aliens[i].direction, anim_frame, sx, sy);
                     }
                 }
             }

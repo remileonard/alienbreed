@@ -10,6 +10,7 @@
 #include "../engine/palette.h"
 #include "../engine/alien_gfx.h"
 #include "../engine/anim_gfx.h"
+#include "../engine/tile_anim.h"
 #include "../hal/audio.h"
 #include "../hal/video.h"
 #include <stdio.h>
@@ -33,19 +34,34 @@
  *   LEGACY  (lbW01945E): levels 1, 10, 11  — walk frames at y={0, 96, 128}
  *   COMPACT (all others): walk frames at y={0, 32, 64}
  */
+/*
+ * engine_tile_mask: bitmask of which ship-engine tile attributes (0x18-0x1C)
+ * are animated on each level.  Derived from the per-level dispatch table at
+ * lbC004384 + level_flag (main.asm).  bit 0 = tile 0x18, …, bit 4 = tile 0x1C.
+ *
+ *   level_flag = -256 (lvl 1):          all 5 tiles → 0x1F
+ *   level_flag =    0 (lvl 2,10,11):    skip 0x1B   → 0x17
+ *                                        (lbC004962 = rts for tile 0x1B)
+ *   level_flag =  256 (lvl 7,8,9):      only 0x18,0x19 → 0x03
+ *   level_flag =  512 (lvl 3,6):        all 5 tiles → 0x1F
+ *   level_flag =  768 (lvl 4,5):        all 5 tiles → 0x1F
+ *   level_flag = 1024 (lvl 12):         skip 0x19   → 0x1D
+ *                                        (bra.w none for tile 0x19)
+ */
 const LevelDef k_level_defs[NUM_LEVELS] = {
-    /* lvl 1  */ { "L0AN", "L0BO", "L0MA",  0, "Level 1: Research Base",          "level", ALIEN_ATLAS_LEGACY  },
-    /* lvl 2  */ { "L1AN", "L1BO", "L1MA",  0, "Level 2: Bio-Containment",        "level", ALIEN_ATLAS_COMPACT },
-    /* lvl 3  */ { "L2AN", "L2BO", "L2MA",  0, "Level 3: Reactor Core",           "level", ALIEN_ATLAS_COMPACT },
-    /* lvl 4  */ { "L3AN", "L3BO", "L3MA",  0, "Level 4: Alien Hive",             "boss",  ALIEN_ATLAS_COMPACT },
-    /* lvl 5  */ { "L4AN", "L4BO", "L4MA",  0, "Level 5: Service Tunnels",        "level", ALIEN_ATLAS_COMPACT },
-    /* lvl 6  */ { "L5AN", "L5BO", "L5MA",  0, "Level 6: Weapons Bay",            "boss",  ALIEN_ATLAS_COMPACT },
-    /* lvl 7  */ { "L3AN", "L2BO", "L6MA",  0, "Level 7: Upper Decks",            "level", ALIEN_ATLAS_COMPACT },
-    /* lvl 8  */ { "L3AN", "L2BO", "L7MA",  0, "Level 8: Engine Room",            "boss",  ALIEN_ATLAS_COMPACT },
-    /* lvl 9  */ { "L2AN", "L2BO", "L8MA",  5, "Level 9: Alien Command",          "level", ALIEN_ATLAS_COMPACT },
-    /* lvl10  */ { "L1AN", "L1BO", "L9MA", 10, "Level 10: Central Hive",          "boss",  ALIEN_ATLAS_LEGACY  },
-    /* lvl11  */ { "L1AN", "L2BO", "LAMA", 15, "Level 11: Breeding Grounds",      "level", ALIEN_ATLAS_LEGACY  },
-    /* lvl12  */ { "L5AN", "L5BO", "LBMA", 20, "Level 12: Final Confrontation",   "boss",  ALIEN_ATLAS_COMPACT },
+    /*          map_an  map_bo  map_ma  str  briefing_text                         music    atlas_type          engine_tile_mask */
+    /* lvl 1  */ { "L0AN", "L0BO", "L0MA",  0, "Level 1: Research Base",          "level", ALIEN_ATLAS_LEGACY,  0x1F },
+    /* lvl 2  */ { "L1AN", "L1BO", "L1MA",  0, "Level 2: Bio-Containment",        "level", ALIEN_ATLAS_COMPACT, 0x17 },
+    /* lvl 3  */ { "L2AN", "L2BO", "L2MA",  0, "Level 3: Reactor Core",           "level", ALIEN_ATLAS_COMPACT, 0x1F },
+    /* lvl 4  */ { "L3AN", "L3BO", "L3MA",  0, "Level 4: Alien Hive",             "boss",  ALIEN_ATLAS_COMPACT, 0x1F },
+    /* lvl 5  */ { "L4AN", "L4BO", "L4MA",  0, "Level 5: Service Tunnels",        "level", ALIEN_ATLAS_COMPACT, 0x1F },
+    /* lvl 6  */ { "L5AN", "L5BO", "L5MA",  0, "Level 6: Weapons Bay",            "boss",  ALIEN_ATLAS_COMPACT, 0x1F },
+    /* lvl 7  */ { "L3AN", "L2BO", "L6MA",  0, "Level 7: Upper Decks",            "level", ALIEN_ATLAS_COMPACT, 0x03 },
+    /* lvl 8  */ { "L3AN", "L2BO", "L7MA",  0, "Level 8: Engine Room",            "boss",  ALIEN_ATLAS_COMPACT, 0x03 },
+    /* lvl 9  */ { "L2AN", "L2BO", "L8MA",  5, "Level 9: Alien Command",          "level", ALIEN_ATLAS_COMPACT, 0x03 },
+    /* lvl10  */ { "L1AN", "L1BO", "L9MA", 10, "Level 10: Central Hive",          "boss",  ALIEN_ATLAS_LEGACY,  0x17 },
+    /* lvl11  */ { "L1AN", "L2BO", "LAMA", 15, "Level 11: Breeding Grounds",      "level", ALIEN_ATLAS_LEGACY,  0x17 },
+    /* lvl12  */ { "L5AN", "L5BO", "LBMA", 20, "Level 12: Final Confrontation",   "boss",  ALIEN_ATLAS_COMPACT, 0x1D },
 };
 
 /* ------------------------------------------------------------------ */
@@ -300,6 +316,7 @@ void level_run(int level_idx)
     player_set_starting_positions();
     alien_init_variables();
     alien_spawn_from_map();
+    tile_anim_init();
     level_finalize();
 
     /* Centre camera on player 1.

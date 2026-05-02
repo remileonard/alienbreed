@@ -11,6 +11,8 @@
  *       pink   = wall tiles
  *       green  = collectible tiles (key, credits, health, ammo)
  *       cyan   = door tiles
+ *       blue   = one-way / conveyor tiles (0x0E-0x11, 0x26-0x27, 0x2E-0x2F,
+ *                                          0x37-0x3B, 0x3F) — hex code shown
  *       yellow = all other special tiles
  *   - Collision bounding boxes:
  *       red  (32×32) = alien collision box (origin = alien pos_x, pos_y)

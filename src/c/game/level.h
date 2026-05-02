@@ -32,6 +32,17 @@ typedef struct {
      * ALIEN_ATLAS_COMPACT: y = frame*32 (most levels).
      * ALIEN_ATLAS_LEGACY : y = {0, 96, 128} (L0BO / levels 1, 10, 11). */
     int   atlas_type;
+    /*
+     * Bitmask of ship-engine tile attributes that are animated on this level.
+     * Bit N = 1 means tile attribute (0x18 + N) should be animated.
+     * Derived from the per-level tile dispatch table at lbC004384 + level_flag
+     * (see main.asm).  A tile whose dispatch entry is `bra.w none` or `rts`
+     * is NOT animated and its bit is cleared here.
+     *
+     *   bit 0 → tile 0x18   bit 1 → tile 0x19   bit 2 → tile 0x1A
+     *   bit 3 → tile 0x1B   bit 4 → tile 0x1C
+     */
+    int   engine_tile_mask;
 } LevelDef;
 
 extern const LevelDef k_level_defs[NUM_LEVELS];

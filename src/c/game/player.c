@@ -11,6 +11,7 @@
 #include "../hal/audio.h"
 #include "../hal/video.h"
 #include "../engine/tilemap.h"
+#include "../engine/tile_anim.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -205,9 +206,38 @@ static int try_move(Player *p, int dx, int dy)
  * Ref: animation overlay at lbL020CFE/lbL020D32 covers both tiles of a 2-tile door. */
 static void patch_door_tiles(int col, int row)
 {
-    tilemap_replace_tile(&g_cur_map, col, row);
+    /* Determine door orientation before replacing tiles so we know which
+     * animation to queue.  A horizontal door has its paired tile left/right;
+     * a vertical door has its pair above/below. */
+    TileAnimType anim_type = TILEANIM_DOOR_H;  /* default */
+    int anim_col = col, anim_row = row;
 
     const int dirs[4][2] = { {0, -1}, {0, 1}, {-1, 0}, {1, 0} };
+    for (int i = 0; i < 4; i++) {
+        int nc = col + dirs[i][0];
+        int nr = row + dirs[i][1];
+        if (nc < 0 || nc >= MAP_COLS || nr < 0 || nr >= MAP_ROWS) continue;
+        if (tilemap_attr(&g_cur_map, nc, nr) == TILE_DOOR) {
+            /* Pair found — determine orientation */
+            if (dirs[i][0] != 0) {
+                /* Horizontal pair */
+                anim_type = TILEANIM_DOOR_H;
+                /* Position animation at the left tile */
+                anim_col = (nc < col) ? nc : col;
+                anim_row = row;
+            } else {
+                /* Vertical pair */
+                anim_type = TILEANIM_DOOR_V;
+                /* Position animation at the top tile */
+                anim_col = col;
+                anim_row = (nr < row) ? nr : row;
+            }
+            break;
+        }
+    }
+
+    tilemap_replace_tile(&g_cur_map, col, row);
+
     for (int i = 0; i < 4; i++) {
         int adj_col = col + dirs[i][0];
         int adj_row = row + dirs[i][1];
@@ -217,6 +247,9 @@ static void patch_door_tiles(int col, int row)
             }
         }
     }
+
+    /* Queue door-opening animation overlay */
+    tile_anim_queue(anim_col, anim_row, anim_type);
 }
 
 /* Open a door at the player's current tile position.
@@ -283,12 +316,14 @@ static int pickup_tile_at(Player *p, int col, int row)
         /* ASM: addq.w #1,PLAYER_KEYS(a0) — no cap; HUD shows ">6" above six keys */
         p->keys++;
         tilemap_replace_tile(&g_cur_map, col, row);
+        tile_anim_queue(col, row, TILEANIM_PICKUP_KEY);
         audio_play_sample(SAMPLE_KEY);
         return 1;
     case TILE_FIRST_AID:
         p->health += 20;
         if (p->health > PLAYER_MAX_HEALTH) p->health = PLAYER_MAX_HEALTH;
         tilemap_replace_tile(&g_cur_map, col, row);
+        tile_anim_queue(col, row, TILEANIM_PICKUP_FIRSTAID);
         audio_play_sample(SAMPLE_1STAID_CREDS);
         return 1;
     case TILE_AMMO:
@@ -297,21 +332,25 @@ static int pickup_tile_at(Player *p, int col, int row)
         p->ammopacks++;
         if (p->ammopacks > PLAYER_MAX_AMMOPCKS) p->ammopacks = PLAYER_MAX_AMMOPCKS;
         tilemap_replace_tile(&g_cur_map, col, row);
+        tile_anim_queue(col, row, TILEANIM_PICKUP_AMMO);
         audio_play_sample(SAMPLE_AMMO);
         return 1;
     case TILE_1UP:
         p->lives++;
         tilemap_replace_tile(&g_cur_map, col, row);
+        tile_anim_queue(col, row, TILEANIM_PICKUP_1UP);
         audio_play_sample(SAMPLE_1UP);
         return 1;
     case TILE_CREDITS_100:
         p->credits += 5000;
         tilemap_replace_tile(&g_cur_map, col, row);
+        tile_anim_queue(col, row, TILEANIM_PICKUP_CREDITS100);
         audio_play_sample(SAMPLE_1STAID_CREDS);
         return 1;
     case TILE_CREDITS_1000:
         p->credits += 50000;
         tilemap_replace_tile(&g_cur_map, col, row);
+        tile_anim_queue(col, row, TILEANIM_PICKUP_CREDITS1000);
         audio_play_sample(SAMPLE_1STAID_CREDS);
         return 1;
     default:

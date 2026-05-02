@@ -85,6 +85,21 @@ void sprite_draw_alien(int direction, int anim_frame, int x, int y);
  */
 void sprite_draw_alien_death(int death_frame, int x, int y);
 
+/*
+ * Draw a single frame of the alien hatch zoom-in animation at screen position
+ * (x, y).  This is used for TILE_ALIEN_HOLE (0x34) spawns while hatch_timer
+ * is still counting down (mirrors lbC00A568 @ main.asm#L7272-L7278).
+ *
+ * hatch_frame: 0, 1, or 2 (small → medium → large zoom).
+ *   Frame 3 (full size = walk) is handled by the normal sprite_draw_alien path.
+ *
+ * Both COMPACT and LEGACY alien atlases store these 32×32 BOBs at:
+ *   x = 288 (0x120), y = 288 + hatch_frame * 32
+ * (COMPACT lbW019A8E entries 83-85 @ main.asm#L14244-L14246;
+ *  LEGACY  lbW01945E entries 96-98 @ main.asm#L14130-L14132).
+ */
+void sprite_draw_alien_hatch(int hatch_frame, int x, int y);
+
 /* Total number of player sprites available (both players, 1-based in game = 1-80) */
 #define PLAYER_SPRITE_TOTAL 80
 

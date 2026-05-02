@@ -174,6 +174,10 @@ static void draw_string(int x, int y, const char *s,
 #define COLOR_SPAWN_G  140
 #define COLOR_SPAWN_B    0  /* orange — alien spawn tiles 0x28/0x29 */
 
+#define COLOR_ONEWAY_R   0
+#define COLOR_ONEWAY_G  80
+#define COLOR_ONEWAY_B 255  /* blue — one-way / conveyor tiles */
+
 #define COLOR_OTHER_R  255
 #define COLOR_OTHER_G  255
 #define COLOR_OTHER_B    0  /* yellow */
@@ -206,6 +210,12 @@ static int is_door(UBYTE a)
     return (a == TILE_DOOR        ||
             a == TILE_FIRE_DOOR_A ||
             a == TILE_FIRE_DOOR_B);
+}
+
+/* Returns 1 if attr is a one-way / conveyor tile.                   */
+static int is_one_way(UBYTE a)
+{
+    return TILE_IS_ONEWAY(a);
 }
 
 /* ------------------------------------------------------------------ */
@@ -244,6 +254,7 @@ void debug_render_overlay(void)
             int sy = ty * MAP_TILE_H - g_camera_y;
 
             Uint8 r, g, b;
+            int show_id = 0;
             if (is_wall(attr)) {
                 r = COLOR_WALL_R;  g = COLOR_WALL_G;  b = COLOR_WALL_B;
             } else if (is_item(attr)) {
@@ -252,12 +263,24 @@ void debug_render_overlay(void)
                 r = COLOR_DOOR_R;  g = COLOR_DOOR_G;  b = COLOR_DOOR_B;
             } else if (is_spawn(attr)) {
                 r = COLOR_SPAWN_R; g = COLOR_SPAWN_G; b = COLOR_SPAWN_B;
+            } else if (is_one_way(attr)) {
+                r = COLOR_ONEWAY_R; g = COLOR_ONEWAY_G; b = COLOR_ONEWAY_B;
+                show_id = 1;
             } else {
                 r = COLOR_OTHER_R; g = COLOR_OTHER_G; b = COLOR_OTHER_B;
+                show_id = 1;
             }
 
             video_overlay_rect_outline(sx, sy, MAP_TILE_W, MAP_TILE_H,
                                        r, g, b, 220);
+
+            /* For one-way and unidentified (yellow) tiles, show the hex
+             * attribute ID in the top-left corner of the tile. */
+            if (show_id) {
+                char id_str[8];
+                snprintf(id_str, sizeof(id_str), "%02X", (unsigned)attr);
+                draw_string(sx + 1, sy + 1, id_str, r, g, b);
+            }
         }
     }
 

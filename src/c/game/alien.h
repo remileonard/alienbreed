@@ -29,6 +29,14 @@ typedef struct {
      * sprite (y=96) for one frame.
      * Mirrors ASM offset 50(a0) used in lbC009B80 @ main.asm#L6675. */
     int   hit_flag;
+    /* Hatch animation counter — set to 20 when an alien spawns from a
+     * TILE_ALIEN_HOLE (0x34) tile.  While > 12, the zoom-in animation is
+     * rendered (frames 0-2 at atlas x=288, y=288/320/352); after that the
+     * alien shows the normal walk frame until the timer reaches 0.
+     * Mirrors ASM alien+76 set by do_alien_hatch (move.w 46(a1),76(a0),
+     * struct+46 = $14 = 20) and decremented by lbC00A568 each tick while
+     * the AI is in the "hatching" state. */
+    int   hatch_timer;
     /* Pathfinding state */
     int   target_x, target_y;
 } Alien;
@@ -103,6 +111,17 @@ void alien_spawn_projectile(int player_idx, WORD x, WORD y,
  * Ref: lbL018D06 @ main.asm#L13935.
  */
 #define FLAME_LIFETIME_TICKS 16
+
+/*
+ * Hatch animation timer initial value for TILE_ALIEN_HOLE (0x34) spawns.
+ * Mirrors do_alien_hatch @ main.asm#L7817: `move.w 46(a1),76(a0)` with
+ * lbW008F94[46] = $14 = 20.  While hatch_timer > HATCH_ANIM_WALK_THRESHOLD
+ * (12) the 3-frame zoom-in animation is shown; from 12 down to 0 the alien
+ * displays the normal walk frame but remains stationary.
+ * Ref: lbC00A568 / lbC00987E @ main.asm#L7272-L7278.
+ */
+#define HATCH_ANIM_TIMER_INIT    20
+#define HATCH_ANIM_WALK_THRESHOLD 12
 
 /* Draw all active projectiles. */
 void projectiles_render(void);
