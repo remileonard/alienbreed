@@ -133,7 +133,19 @@ void tile_anim_update(void)
             s_anims[i].ticks = 0;
             s_anims[i].frame++;
             if (s_anims[i].frame >= count) {
-                s_anims[i].active = 0;  /* animation finished */
+                /* Door/fire-door animations: hold on the last frame permanently.
+                 * Mirrors the original ASM behaviour where lbL020CFE/lbL020D32/lbL020D66
+                 * loop back at the -1 terminator, keeping the open-door BOB visible
+                 * over the (already floor-patched) tile forever.
+                 * All other animations (pickups) deactivate normally. */
+                if (s_anims[i].type == TILEANIM_DOOR_H   ||
+                    s_anims[i].type == TILEANIM_DOOR_V    ||
+                    s_anims[i].type == TILEANIM_FIRE_DOOR) {
+                    s_anims[i].frame = count - 1;
+                    s_anims[i].ticks = 0;
+                } else {
+                    s_anims[i].active = 0;  /* animation finished */
+                }
             }
         }
     }
