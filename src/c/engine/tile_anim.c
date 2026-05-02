@@ -7,6 +7,7 @@
 #include "anim_gfx.h"
 #include "tilemap.h"
 #include "../game/constants.h"
+#include "../game/level.h"
 #include "../hal/video.h"
 #include <string.h>
 
@@ -183,12 +184,12 @@ void tile_anim_render(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Ship engine flame animation (level 1, tiles 0x18-0x1C)             */
+/* Ship engine flame animation (tiles 0x18-0x1C, per-level rules)     */
 /* ------------------------------------------------------------------ */
 
 /*
  * Each of the five ship-engine tile attributes (0x18..0x1C) has a 2-frame
- * animation using 32×32 BOBs from the L1AN atlas.
+ * animation using 32×32 BOBs from the LxAN atlas.
  *
  * Source: lbW01BECA (level 1 BOB table @ main.asm#L14756) entries 22-32,
  * combined with the per-tile animation sequences:
@@ -203,6 +204,15 @@ void tile_anim_render(void)
  * The original game runs at 25 fps (50 Hz / frames_slowdown=2); to match
  * that speed in the C port the frame is advanced every 2 display ticks
  * (global_tick / 2).
+ *
+ * Per-level rules (lbC004384 + level_flag dispatch table @ main.asm):
+ *   Level 1 (level_flag=-256): all 5 tiles animated.
+ *   Level 2/10/11 (level_flag=0): tile 0x1B dispatches to lbC004962=rts →
+ *     NOT animated.
+ *   Levels 7/8/9 (level_flag=256): only tiles 0x18 and 0x19 are animated.
+ *   Level 12 (level_flag=1024): tile 0x19 is not animated.
+ *   All other levels: all 5 tiles animated.
+ * The mask is stored in LevelDef.engine_tile_mask (bit N = tile 0x18+N).
  */
 typedef struct { int ax0, ay0, ax1, ay1; } EngineAnimPair;
 
@@ -218,6 +228,8 @@ void tile_anim_render_ship_engines(int global_tick)
 {
     const UBYTE *atlas = anim_gfx_get_atlas();
     if (!atlas) return;
+
+    int engine_mask = k_level_defs[g_cur_level].engine_tile_mask;
 
     int start_col = g_camera_x / MAP_TILE_W;
     int start_row = g_camera_y / MAP_TILE_H;
@@ -238,6 +250,11 @@ void tile_anim_render_ship_engines(int global_tick)
 
             UBYTE attr = tilemap_attr(&g_cur_map, map_col, map_row) & 0x3F;
             if (attr < 0x18 || attr > 0x1C) continue;
+
+            /* Skip tiles that are not animated on this level (dispatch = rts
+             * or bra.w none in the per-level section of lbC004384). */
+            int tile_bit = 1 << (attr - 0x18);
+            if (!(engine_mask & tile_bit)) continue;
 
             const EngineAnimPair *ep = &k_engine_anim[attr - 0x18];
             int ax = frame_idx ? ep->ax1 : ep->ax0;

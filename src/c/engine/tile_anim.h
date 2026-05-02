@@ -38,10 +38,10 @@
  *        entry 12 → atlas ( 48,  32, 16, 16)  for 2 ticks  lbL01682A
  *        entry 13 → atlas ( 64,  32, 16, 16)  for 4 ticks  lbL01685A
  *
- * 2. CONTINUOUS ship engine flame animation (level 1, tiles 0x18-0x1C):
+ * 2. CONTINUOUS ship engine flame animation (tiles 0x18-0x1C, per-level):
  *    Rendered every frame as long as the tile attribute remains in range.
- *    Each tile has a 2-frame, 32×32 BOB animation sourced from L1AN atlas.
- *    Source: lbC004884-lbC0048CC (tile handlers) + lbW01EB12-lbW01EB82 (sequences).
+ *    Each tile has a 2-frame, 32×32 BOB animation sourced from the LxAN atlas.
+ *    Source: lbC004884-lbC0048CC (level 1 tile handlers) + lbW01EB12-lbW01EB82 (sequences).
  *    Atlas pairs (lbW01BECA entries, all 32×32):
  *      0x18: frame A (64, 64) / frame B (160, 64)  entries 22 & 25
  *      0x19: frame A (96, 64) / frame B (192, 64)  entries 23 & 26
@@ -50,6 +50,10 @@
  *      0x1C: frame A (96, 96) / frame B (192, 96)  entries 29 & 32
  *    Sequence delay=0 (1 game tick per frame); cycle advances every 2
  *    display ticks (global_tick / 2) to match the original 25 fps rate.
+ *    Per-level rules (lbC004384 + level_flag @ main.asm): some tiles are
+ *    not animated on certain levels (e.g. tile 0x1B on levels 2/10/11;
+ *    only 0x18-0x19 on levels 7-9; tile 0x19 skipped on level 12).
+ *    The LevelDef.engine_tile_mask field encodes which tiles animate.
  *
  * Ref: patch_tiles / lbW012388 background sprites @ main.asm.
  */
@@ -106,8 +110,11 @@ void tile_anim_update(void);
 void tile_anim_render(void);
 
 /*
- * Render ship engine flame animation overlays for all tiles with
- * attribute 0x18-0x1C in the current map (level 1 spaceship engines).
+ * Render ship engine flame animation overlays for tiles with attribute
+ * 0x18-0x1C in the current map.  Only tiles whose bit is set in
+ * LevelDef.engine_tile_mask for the current level are drawn — this
+ * implements the per-level dispatch rules (lbC004384 + level_flag table
+ * in main.asm: e.g. tile 0x1B is `rts` on levels 2/10/11 so it is skipped).
  * global_tick is the running frame counter (incremented every rendered frame).
  * Must be called after tilemap_render() and before sprite rendering.
  */
