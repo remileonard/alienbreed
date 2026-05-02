@@ -71,9 +71,10 @@ int main(int argc, char **argv)
 {
     if (argc < 5) {
         fprintf(stderr,
-            "Usage: %s <input> <lines_per_frame> <num_pairs> <output.raw>\n"
-            "  num_pairs=1  single 16px simple sprite (4 colors)\n"
-            "  num_pairs=2  two attached pairs = 32px wide, 16 colors (player)\n",
+            "Usage: %s <input> <lines_per_frame> <num_pairs> <output.raw> [attached]\n"
+            "  num_pairs=1             single 16px simple sprite (4 colors)\n"
+            "  num_pairs=1 attached=1  single 16px attached pair (16 colors, briefing)\n"
+            "  num_pairs=2             two attached pairs = 32px wide, 16 colors (player)\n",
             argv[0]);
         return 1;
     }
@@ -82,11 +83,15 @@ int main(int argc, char **argv)
     int lines           = atoi(argv[2]);
     int num_pairs       = atoi(argv[3]);
     const char *outfile = argv[4];
+    int attached        = (argc >= 6) ? atoi(argv[5]) : 0;
 
     if (lines <= 0 || num_pairs < 1 || num_pairs > 4) {
         fprintf(stderr, "Error: invalid parameters\n");
         return 1;
     }
+
+    /* attached=1 with num_pairs=1: one even+odd attached pair, 16px wide, 16 colors */
+    int use_attached = (attached && num_pairs == 1);
 
     int out_w = 16 * num_pairs;
     int out_h = lines;
@@ -109,7 +114,7 @@ int main(int argc, char **argv)
     for (int p = 0; p < num_pairs; p++) {
         int col_off = p * 16;
 
-        if (num_pairs == 1) {
+        if (num_pairs == 1 && !use_attached) {
             /* Simple (non-attached) sprite: 2bpp, colors 0-3 */
             if (read_strip(fin, lines, even_a, even_b) != 0) {
                 fprintf(stderr, "Warning: could not read strip %d\n", p * 2);
@@ -161,9 +166,9 @@ int main(int argc, char **argv)
     fwrite(pixels, 1, (size_t)(out_w * out_h), fout);
     fclose(fout);
 
-    printf("Converted %s (%d pairs, %dx%d, %s) -> %s\n",
-           infile, num_pairs, out_w, out_h,
-           num_pairs == 1 ? "4-color" : "16-color attached",
+    printf("Converted %s (%d pairs%s, %dx%d, %s) -> %s\n",
+           infile, num_pairs, use_attached ? " attached" : "", out_w, out_h,
+           (num_pairs == 1 && !use_attached) ? "4-color" : "16-color attached",
            outfile);
 
     free(pixels);
