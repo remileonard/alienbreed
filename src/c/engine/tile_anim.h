@@ -38,22 +38,16 @@
  *        entry 12 → atlas ( 48,  32, 16, 16)  for 2 ticks  lbL01682A
  *        entry 13 → atlas ( 64,  32, 16, 16)  for 4 ticks  lbL01685A
  *
- * 2. CONTINUOUS ship engine flame animation (tiles 0x18-0x1C, per-level):
+ * 2. CONTINUOUS engine/fan/pipe animation (tiles 0x18-0x1C, per-level):
  *    Rendered every frame as long as the tile attribute remains in range.
- *    Each tile has a 2-frame, 32×32 BOB animation sourced from the LxAN atlas.
- *    Source: lbC004884-lbC0048CC (level 1 tile handlers) + lbW01EB12-lbW01EB82 (sequences).
- *    Atlas pairs (lbW01BECA entries, all 32×32):
- *      0x18: frame A (64, 64) / frame B (160, 64)  entries 22 & 25
- *      0x19: frame A (96, 64) / frame B (192, 64)  entries 23 & 26
- *      0x1A: frame A (128,64) / frame B (224, 64)  entries 24 & 27
- *      0x1B: frame A (64, 96) / frame B (160, 96)  entries 28 & 31
- *      0x1C: frame A (96, 96) / frame B (192, 96)  entries 29 & 32
- *    Sequence delay=0 (1 game tick per frame); cycle advances every 2
- *    display ticks (global_tick / 2) to match the original 25 fps rate.
- *    Per-level rules (lbC004384 + level_flag @ main.asm): some tiles are
- *    not animated on certain levels (e.g. tile 0x1B on levels 2/10/11;
- *    only 0x18-0x19 on levels 7-9; tile 0x19 skipped on level 12).
- *    The LevelDef.engine_tile_mask field encodes which tiles animate.
+ *    Atlas layout and frame counts vary by level atlas (L0AN vs L1AN).
+ *    Per-level rules encoded in LevelDef.engine_tile_mask.
+ *    See tile_anim.c for per-atlas frame tables.
+ *
+ * 3. CONTINUOUS screen/console tile animation (tiles 0x1D, 0x1E, 0x1F):
+ *    Rendered every frame for tiles whose attribute matches one of these IDs.
+ *    Per-atlas (L0AN / L1AN): different frame sizes, counts, and timing.
+ *    See tile_anim.c and tile_anim_render_intex_screens() for details.
  *
  * Ref: patch_tiles / lbW012388 background sprites @ main.asm.
  */
@@ -110,11 +104,16 @@ void tile_anim_update(void);
 void tile_anim_render(void);
 
 /*
- * Render ship engine flame animation overlays for tiles with attribute
- * 0x18-0x1C in the current map.  Only tiles whose bit is set in
- * LevelDef.engine_tile_mask for the current level are drawn — this
- * implements the per-level dispatch rules (lbC004384 + level_flag table
- * in main.asm: e.g. tile 0x1B is `rts` on levels 2/10/11 so it is skipped).
+ * Render engine/fan/pipe animation overlays for tiles with attribute 0x18-0x1C
+ * in the current map.
+ *
+ * Only L0AN (level 1) and L1AN (levels 2/10/11) are implemented.
+ * Per-level mask LevelDef.engine_tile_mask controls which tile IDs animate.
+ *
+ *   L0AN: all five tiles use 2-frame 32×32 animations (lbW01EB12..lbW01EB82).
+ *   L1AN: 0x18 = 4-frame fan (32×32), 0x19 = 6-frame vent at col+1 (16×32),
+ *          0x1A = 6-frame pipe at col+1 (16×48), 0x1B = none, 0x1C = slow blink.
+ *
  * global_tick is the running frame counter (incremented every rendered frame).
  * Must be called after tilemap_render() and before sprite rendering.
  */
@@ -137,22 +136,25 @@ void tile_anim_render_ship_engines(int global_tick);
 void tile_anim_render_one_deadly_way(int global_tick);
 
 /*
- * Render the animated screen overlay for computer-screen decoration tiles
- * in the current map.
+ * Render continuous animation overlays for computer-screen / console tiles
+ * with attributes 0x1D, 0x1E, 0x1F in the current map.
  *
- * Screen decorations (tile_idx 0x101/0x102/0x103): 3-frame animation at
- *   atlas y=48, independent of tile_type, active on ALL maps.
- *   Frames are interleaved in three 48×16 strips (lbW01C52A entries 48-50):
- *     décor 0x101 → A67(112) → A70(160) → A73(208)
- *     décor 0x102 → A68(128) → A71(176) → A74(224)  (confirmed)
- *     décor 0x103 → A69(144) → A72(192) → A75(240)
- *   Delay: 4 display ticks/frame (ASM delay=2 at 25 Hz = 4×50 Hz).
+ * Animations are dispatched by tile attribute (not by tile_idx / decoration
+ * index), mirroring the per-level dispatch tables in main.asm (lbC004384).
+ * Only L0AN (level 1) and L1AN (levels 2/10/11) are implemented; other
+ * atlases produce no overlay.
  *
- * Tile 0x1D (screen-body decoration): 4-step 16×16 loop, L1AN levels only
- *   (levels 2, 10, 11).  Source: L1AN atlas (176, 0/16/32), BOBs 22-24.
- *   Sequence: step 0→1→2→1→loop (8-tick cycle).
- *   Ref: lbC004976 (tile 0x1D level-2 dispatch) → lbL01EC62 @ main.asm.
- *        lbW01C52A (L1AN BOB table) @ main.asm#L14801, entries 22-24.
+ *   Tile 0x1D:
+ *     L0AN — 2-frame 32×32, delay=0.  lbW01EB9E → lbW01BECA entries 30,33.
+ *     L1AN — 4-step 16×16, delay=2 (4 ticks/frame).  lbL01EC62 → entries 22-24.
+ *
+ *   Tile 0x1E:
+ *     L0AN — 3-frame 32×16, delay=0 (2 ticks/frame).  lbL01EC12 → entries 40-42.
+ *     L1AN — 4-step 48×16, delays 3/4/2/2 → 30-tick cycle.  lbL02013E → entries 48-50.
+ *
+ *   Tile 0x1F:
+ *     L0AN — slow-blink 32×32, delays 120/3/80/3 → 420-tick cycle.  lbL01EBBA → entries 34-36.
+ *     L1AN — two-BOB animation (lbC00499A); not yet implemented.
  *
  * global_tick is the running frame counter (incremented every rendered frame).
  */
