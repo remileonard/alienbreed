@@ -198,6 +198,26 @@ void tilemap_replace_tile(LevelMap *map, int col, int row)
     map->tiles[row][col] = floor_word;
 }
 
+void tilemap_replace_reactor_face(LevelMap *map, UBYTE attr)
+{
+    if (!map) return;
+    /*
+     * Scan every tile in the map; replace all that carry the given reactor
+     * attribute.  tilemap_replace_tile() fills each cell with the nearest
+     * adjacent floor-tile word, so border tiles pick up the real surrounding
+     * floor and interior tiles (whose neighbours are also replaced on the
+     * same pass) fall back to 0x0000 — both produce a passable floor cell.
+     * Mirrors patch_dat_reactors / patch_tiles @ main.asm#L9651-L9657 which
+     * patches the graphics of the whole reactor face in one call.
+     */
+    for (int row = 0; row < MAP_ROWS; row++) {
+        for (int col = 0; col < MAP_COLS; col++) {
+            if ((map->tiles[row][col] & 0x3F) == attr)  /* lower 6 bits = attribute */
+                tilemap_replace_tile(map, col, row);
+        }
+    }
+}
+
 void tilemap_render(const LevelMap *map, const Tileset *ts)
 {
     if (!map->valid || !ts->pixels) return;
