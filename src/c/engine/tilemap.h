@@ -179,11 +179,12 @@ int tilemap_find_spawn(const LevelMap *map, int *out_x, int *out_y);
 void tilemap_replace_tile(LevelMap *map, int col, int row);
 
 /*
- * Replace every tile in the map whose attribute byte equals `attr` with a
- * floor tile (calls tilemap_replace_tile for each matching cell).
- * Used to blow out an entire reactor face (attributes 0x2a-0x2d) at once,
- * mirroring patch_dat_reactors / patch_tiles @ main.asm#L9651-L9657 which
- * replaces the graphics of the whole face rather than just the hit tile.
+ * Replace all tiles belonging to one reactor face (attr 0x2a–0x2d).
+ * The four centre tiles (tile_idx 214/215/234/235) are replaced with their
+ * "damaged" counterparts (tile words 0x4100/0x4140/0x4600/0x4640 = tile_idx
+ * 260/261/280/281, attr=0=floor); all other reactor tiles are replaced with
+ * the nearest floor tile.  Tile words come from lbW01C52A entry 37 W5-W8
+ * @ main.asm#L14838 (lbL016CDA BOB, patch_dat_reactors @ main.asm#L15836).
  */
 void tilemap_replace_reactor_face(LevelMap *map, UBYTE attr);
 

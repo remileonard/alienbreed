@@ -202,18 +202,32 @@ void tilemap_replace_reactor_face(LevelMap *map, UBYTE attr)
 {
     if (!map) return;
     /*
-     * Scan every tile in the map; replace all that carry the given reactor
-     * attribute.  tilemap_replace_tile() fills each cell with the nearest
-     * adjacent floor-tile word, so border tiles pick up the real surrounding
-     * floor and interior tiles (whose neighbours are also replaced on the
-     * same pass) fall back to 0x0000 — both produce a passable floor cell.
-     * Mirrors patch_dat_reactors / patch_tiles @ main.asm#L9651-L9657 which
-     * patches the graphics of the whole reactor face in one call.
+     * Replace all tiles belonging to one reactor face (identified by `attr`
+     * in the lower 6 bits of the tile word).
+     *
+     * The four centre tiles of every reactor (tile_idx 214/215/234/235) are
+     * replaced with their damaged-graphics counterparts (tile words 0x4100 /
+     * 0x4140 / 0x4600 / 0x4640 = tile_idx 260/261/280/281, attr=0=floor).
+     * These replacement words come directly from the W5-W8 fields of
+     * lbW01C52A entry 37 (lbL016CDA) @ main.asm#L14838, which is the BOB
+     * used by patch_dat_reactors.  All remaining reactor tiles (outer ring)
+     * are replaced with the nearest floor tile via tilemap_replace_tile().
+     *
+     * Ref: patch_dat_reactors @ main.asm#L15836; lbW01C52A entry 37 W5-W8.
      */
     for (int row = 0; row < MAP_ROWS; row++) {
         for (int col = 0; col < MAP_COLS; col++) {
-            if ((map->tiles[row][col] & 0x3F) == attr)  /* lower 6 bits = attribute */
-                tilemap_replace_tile(map, col, row);
+            UWORD w = map->tiles[row][col];
+            if ((w & 0x3F) != attr)  /* lower 6 bits = attribute */
+                continue;
+            UWORD tile_idx = w >> 6;
+            switch (tile_idx) {
+            case 214: map->tiles[row][col] = 0x4100; break; /* → tile 260, floor */
+            case 215: map->tiles[row][col] = 0x4140; break; /* → tile 261, floor */
+            case 234: map->tiles[row][col] = 0x4600; break; /* → tile 280, floor */
+            case 235: map->tiles[row][col] = 0x4640; break; /* → tile 281, floor */
+            default:  tilemap_replace_tile(map, col, row);  break;
+            }
         }
     }
 }
