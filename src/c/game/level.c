@@ -56,10 +56,10 @@ const LevelDef k_level_defs[NUM_LEVELS] = {
     /*          map_an  map_bo  map_ma  str  briefing_text                         music    atlas_type          engine_tile_mask  timer_s */
     /* lvl 1  */ { "L0AN", "L0BO", "L0MA",  0, "Level 1: Research Base",          "level", ALIEN_ATLAS_LEGACY,  0x1F,  60 },
     /* lvl 2  */ { "L1AN", "L1BO", "L1MA",  0, "Level 2: Bio-Containment",        "level", ALIEN_ATLAS_COMPACT, 0x17,  60 },
-    /* lvl 3  */ { "L2AN", "L2BO", "L2MA",  0, "Level 3: Reactor Core",           "level", ALIEN_ATLAS_COMPACT, 0x1F,  40 },
-    /* lvl 4  */ { "L3AN", "L3BO", "L3MA",  0, "Level 4: Alien Hive",             "boss",  ALIEN_ATLAS_COMPACT, 0x1F,  90 },
+    /* lvl 3  */ { "L3AN", "L3BO", "L2MA",  0, "Level 3: Reactor Core",           "level", ALIEN_ATLAS_COMPACT, 0x1F,  40 },
+    /* lvl 4  */ { "L4AN", "L4BO", "L3MA",  0, "Level 4: Alien Hive",             "boss",  ALIEN_ATLAS_COMPACT, 0x1F,  90 },
     /* lvl 5  */ { "L4AN", "L4BO", "L4MA",  0, "Level 5: Service Tunnels",        "level", ALIEN_ATLAS_COMPACT, 0x1F,  90 },
-    /* lvl 6  */ { "L5AN", "L5BO", "L5MA",  0, "Level 6: Weapons Bay",            "boss",  ALIEN_ATLAS_COMPACT, 0x1F,   2 }, /* sf.b hi; lo=2: "the evil 1up" path in init_level_6 @ main.asm */
+    /* lvl 6  */ { "L3AN", "L3BO", "L5MA",  0, "Level 6: Weapons Bay",            "boss",  ALIEN_ATLAS_COMPACT, 0x1F,   2 }, /* sf.b hi; lo=2: "the evil 1up" path in init_level_6 @ main.asm */
     /* lvl 7  */ { "L3AN", "L2BO", "L6MA",  0, "Level 7: Upper Decks",            "level", ALIEN_ATLAS_COMPACT, 0x03,  99 },
     /* lvl 8  */ { "L3AN", "L2BO", "L7MA",  0, "Level 8: Engine Room",            "boss",  ALIEN_ATLAS_COMPACT, 0x03,  60 },
     /* lvl 9  */ { "L2AN", "L2BO", "L8MA",  5, "Level 9: Alien Command",          "level", ALIEN_ATLAS_COMPACT, 0x03,  77 },
@@ -493,19 +493,22 @@ void level_trigger_end(void)
 
 void level_finalize(void)
 {
-    /* Apply level palette */
+    /* Apply level palette immediately.
+     * Mirrors ASM finalize_level (main.asm#L1635-L1643) which sets up a fast
+     * palette transition using level_palette1 (the PALA chunk values).
+     * We apply the palette instantly so that the correct colours appear on the
+     * very first rendered frame, which matches what the INTEX restore does.
+     *
+     * Replicate copper override: at raster line 51, lbW09A20C in the Amiga
+     * copper list forces COLOR02 and COLOR03 to black in the main play area
+     * (Ref: main.asm#L18513).  Force entries 2 and 3 to zero here. */
     if (g_cur_map.valid) {
-        palette_set_immediate(g_cur_map.palette_a, 32);
-        /* Replicate copper override: at beam line 51 the copper forces COLOR02
-         * and COLOR03 to black for the main 5-bitplane play area regardless of
-         * the loaded palette (Ref: lbW09A20C dc.w COLOR02,0,COLOR03,0
-         * @ main.asm#L18513). */
-        video_set_palette_entry(2, 0x000);
-        video_set_palette_entry(3, 0x000);
+        UWORD level_pal[32];
+        memcpy(level_pal, g_cur_map.palette_a, 32 * sizeof(UWORD));
+        level_pal[2] = 0x000; /* copper COLOR02 override: forced black */
+        level_pal[3] = 0x000; /* copper COLOR03 override: forced black */
+        palette_set_immediate(level_pal, 32);
     }
-
-    /* Set map overview flag if player has supply */
-    /* (handled when player collects SUPPLY_MAP_OVERVIEW) */
 
     /*
      * Arm alarm system for level 3 only.
@@ -577,7 +580,7 @@ void level_run(int level_idx)
 
     /* Initialise subsystems */
     level_init_variables();
-    player_init_variables();
+    player_reset_for_level();
     player_set_starting_positions();
     alien_init_variables();
     alien_spawn_from_map();
