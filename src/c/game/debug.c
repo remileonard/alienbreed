@@ -22,6 +22,7 @@
 extern int g_camera_x, g_camera_y;
 
 int g_debug_overlay_on = 0;
+int g_god_mode         = 0;
 
 /* ------------------------------------------------------------------ */
 /* Minimal 5×7 bitmap font for the info bar                           */
@@ -877,4 +878,112 @@ void debug_gfx_viewer_run(void)
     }
 
     gfx_viewer_free_assets();
+}
+
+/* ================================================================== */
+/* Palette Viewer — scrollable table of the 32 current palette entries */
+/* ================================================================== */
+
+/* Column X positions (pixels) */
+#define PAL_COL_ID      2    /* "ID" — 2 chars wide  */
+#define PAL_COL_R      26    /* "R"  — 3 chars wide  */
+#define PAL_COL_G      50    /* "G"  — 3 chars wide  */
+#define PAL_COL_B      74    /* "B"  — 3 chars wide  */
+#define PAL_COL_SWATCH 100   /* color swatch — fills rest of row */
+#define PAL_SWATCH_W   216   /* 320 - 100 - 4 */
+
+/* Row geometry */
+#define PAL_ROW_H       9    /* 7px font + 2px gap */
+#define PAL_HEADER_H   10    /* sticky header bar */
+#define PAL_N_ENTRIES  32
+
+/* Total virtual canvas height */
+#define PAL_TOTAL_VH   (PAL_HEADER_H + PAL_N_ENTRIES * PAL_ROW_H)
+
+static void palette_viewer_render(int scroll_y)
+{
+    /* ---- Clear ---- */
+    video_clear();
+    video_upload_framebuffer();
+
+    /* ---- Data rows ---- */
+    for (int i = 0; i < PAL_N_ENTRIES; i++) {
+        int vy = PAL_HEADER_H + i * PAL_ROW_H;          /* virtual y     */
+        int sy = vy - scroll_y;                          /* screen y      */
+        if (sy + PAL_ROW_H < PAL_HEADER_H) continue;
+        if (sy >= 256) break;
+
+        Uint8 r = (Uint8)((g_palette[i] >> 16) & 0xFF);
+        Uint8 g = (Uint8)((g_palette[i] >>  8) & 0xFF);
+        Uint8 b = (Uint8)((g_palette[i] >>  0) & 0xFF);
+
+        /* Row background (alternating) */
+        Uint8 bg = (i & 1) ? 30 : 20;
+        video_overlay_fill_rect(0, sy, 320, PAL_ROW_H - 1, bg, bg, bg, 200);
+
+        /* ID */
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%2d", i);
+        draw_string(PAL_COL_ID, sy + 1, buf, 200, 200, 200);
+
+        /* R, G, B values */
+        snprintf(buf, sizeof(buf), "%3d", (int)r);
+        draw_string(PAL_COL_R, sy + 1, buf, 255, 80, 80);
+
+        snprintf(buf, sizeof(buf), "%3d", (int)g);
+        draw_string(PAL_COL_G, sy + 1, buf, 80, 255, 80);
+
+        snprintf(buf, sizeof(buf), "%3d", (int)b);
+        draw_string(PAL_COL_B, sy + 1, buf, 80, 160, 255);
+
+        /* Color swatch */
+        int sw_h = PAL_ROW_H - 2;
+        video_overlay_fill_rect(PAL_COL_SWATCH, sy, PAL_SWATCH_W, sw_h, r, g, b, 255);
+    }
+
+    /* ---- Sticky header ---- */
+    video_overlay_fill_rect(0, 0, 320, PAL_HEADER_H, 0, 0, 0, 220);
+    draw_string(PAL_COL_ID,     1, "ID",    220, 220, 220);
+    draw_string(PAL_COL_R,      1, "R",     255,  80,  80);
+    draw_string(PAL_COL_G,      1, "G",      80, 255,  80);
+    draw_string(PAL_COL_B,      1, "B",      80, 160, 255);
+    draw_string(PAL_COL_SWATCH, 1, "COLOR", 220, 220, 220);
+
+    /* ---- Scrollbar ---- */
+    int viewport_h = 256 - PAL_HEADER_H;
+    int max_scroll = PAL_TOTAL_VH > 256 ? PAL_TOTAL_VH - 256 : 0;
+    if (max_scroll > 0) {
+        int bar_h = viewport_h * viewport_h / PAL_TOTAL_VH;
+        if (bar_h < 4) bar_h = 4;
+        int bar_y = PAL_HEADER_H + scroll_y * (viewport_h - bar_h) / max_scroll;
+        video_overlay_fill_rect(317, bar_y, 3, bar_h, 160, 160, 160, 200);
+    }
+
+    video_flip();
+}
+
+void debug_palette_viewer_run(void)
+{
+    /* Drain the KEY_G event that triggered entry */
+    input_poll();
+
+    int max_scroll = PAL_TOTAL_VH > 256 ? PAL_TOTAL_VH - 256 : 0;
+    int scroll_y   = 0;
+
+    while (!g_quit_requested) {
+        timer_begin_frame();
+        input_poll();
+
+        if (g_key_pressed == KEY_G || g_key_pressed == KEY_ESC)
+            break;
+
+        const Uint8 *ks = SDL_GetKeyboardState(NULL);
+        if (ks[SDL_SCANCODE_UP])   scroll_y -= 3;
+        if (ks[SDL_SCANCODE_DOWN]) scroll_y += 3;
+
+        if (scroll_y < 0)          scroll_y = 0;
+        if (scroll_y > max_scroll) scroll_y = max_scroll;
+
+        palette_viewer_render(scroll_y);
+    }
 }
