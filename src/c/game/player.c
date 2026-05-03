@@ -91,12 +91,6 @@ void player_reset_for_level(void)
         p->anim_seq_frame    = 0;
         p->anim_seq_timer    = 2;
         p->anim_seq_id       = -1;
-        p->death_counter     = 0;
-        p->weapon_rate_counter = 0;
-        p->shot_amount_counter = 0;
-
-        /* Keys are level-specific (doors from one level don't exist in the next) */
-        p->keys = 0;
     }
 }
 
