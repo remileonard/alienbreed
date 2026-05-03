@@ -64,6 +64,41 @@ void player_init_variables(void)
     }
 }
 
+void player_reset_for_level(void)
+{
+    /*
+     * Between-level reset: preserve score, health, lives, credits, ammo and
+     * weapons — only reset movement / animation state that is level-specific.
+     * Mirrors init_players_variables → lbC006C08 @ main.asm#L3906 which clears
+     * animation fields but leaves all persistent player statistics untouched.
+     */
+    memset(g_player_invincibility, 0, sizeof(g_player_invincibility));
+
+    for (int i = 0; i < MAX_PLAYERS; i++) {
+        Player *p = &g_players[i];
+
+        /* Movement state */
+        p->extra_spd_x       = 0;
+        p->extra_spd_y       = 0;
+
+        /* Animation state — mirrors clr.w 274/276/280/372(a0) + move.w #3,PLAYER_CUR_SPRITE */
+        p->cur_sprite        = 3;
+        p->direction         = PLAYER_FACE_DOWN;
+        p->anim_flipflop     = 0;
+        p->anim_fire_counter = 0;
+        p->anim_state        = 0;
+        p->anim_seq_frame    = 0;
+        p->anim_seq_timer    = 2;
+        p->anim_seq_id       = -1;
+        p->death_counter     = 0;
+        p->weapon_rate_counter = 0;
+        p->shot_amount_counter = 0;
+
+        /* Keys are level-specific (doors from one level don't exist in the next) */
+        p->keys = 0;
+    }
+}
+
 void player_set_cur_weapon(Player *p, int weapon_id)
 {
     if (weapon_id < WEAPON_MACHINEGUN || weapon_id >= WEAPON_MAX) return;

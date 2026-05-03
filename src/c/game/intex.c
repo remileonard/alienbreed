@@ -1965,9 +1965,12 @@ void intex_run(int player_idx)
         }
     }
 
-    /* Restore game palette */
-    if (g_cur_map.valid)
+    /* Restore game palette, preserving the copper COLOR02/COLOR03 override */
+    if (g_cur_map.valid) {
         palette_set_immediate(g_cur_map.palette_a, 32);
+        video_set_palette_entry(2, 0x000);
+        video_set_palette_entry(3, 0x000);
+    }
 
     audio_resume_music();
     audio_play_sample(SAMPLE_INTEX_SHUTDOWN);

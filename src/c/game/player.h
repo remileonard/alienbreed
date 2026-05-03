@@ -143,8 +143,16 @@ typedef struct {
 
 extern Player g_players[MAX_PLAYERS];
 
-/* Initialise both player structures to default state. */
+/* Initialise both player structures to default state (game start). */
 void player_init_variables(void);
+
+/*
+ * Reset per-level state while preserving persistent stats (score, health,
+ * lives, credits, ammo, weapons).  Call at the start of each new level
+ * instead of player_init_variables().
+ * Mirrors init_players_variables → lbC006C08 @ main.asm#L3906.
+ */
+void player_reset_for_level(void);
 
 /* Set the starting weapon for a player. */
 void player_set_cur_weapon(Player *p, int weapon_id);

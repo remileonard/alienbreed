@@ -493,19 +493,29 @@ void level_trigger_end(void)
 
 void level_finalize(void)
 {
-    /* Apply level palette */
+    /* Apply level palette with fade-in from black.
+     * The briefing ends with a black palette (palette_set_immediate(s_black))
+     * so we set up a fade from black to the level's PALA palette here.
+     * The game loop's palette_tick() advances the fade each frame.
+     *
+     * Replicate copper override: COLOR02 and COLOR03 must be black during
+     * the main play area (Ref: lbW09A20C dc.w COLOR02,0,COLOR03,0
+     * @ main.asm#L18513), so force entries 2 and 3 to 0 in the target
+     * palette before starting the fade.
+     *
+     * Original ASM finalize_level fades from palette_white to level_palette1
+     * (Ref: main.asm#L1635-L1643).  The C port transitions from black
+     * (briefing end state) to keep the palette fade visually coherent. */
     if (g_cur_map.valid) {
-        palette_set_immediate(g_cur_map.palette_a, 32);
-        /* Replicate copper override: at beam line 51 the copper forces COLOR02
-         * and COLOR03 to black for the main 5-bitplane play area regardless of
-         * the loaded palette (Ref: lbW09A20C dc.w COLOR02,0,COLOR03,0
-         * @ main.asm#L18513). */
-        video_set_palette_entry(2, 0x000);
-        video_set_palette_entry(3, 0x000);
-    }
+        UWORD level_pal[32];
+        memcpy(level_pal, g_cur_map.palette_a, 32 * sizeof(UWORD));
+        level_pal[2] = 0x000; /* copper COLOR02 override: forced black */
+        level_pal[3] = 0x000; /* copper COLOR03 override: forced black */
 
-    /* Set map overview flag if player has supply */
-    /* (handled when player collects SUPPLY_MAP_OVERVIEW) */
+        UWORD cur_black[32];
+        memset(cur_black, 0, sizeof(cur_black));
+        palette_prep_fade_in(level_pal, cur_black, 32);
+    }
 
     /*
      * Arm alarm system for level 3 only.
@@ -577,7 +587,7 @@ void level_run(int level_idx)
 
     /* Initialise subsystems */
     level_init_variables();
-    player_init_variables();
+    player_reset_for_level();
     player_set_starting_positions();
     alien_init_variables();
     alien_spawn_from_map();
