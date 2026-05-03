@@ -505,8 +505,6 @@ void level_finalize(void)
     if (g_cur_map.valid) {
         UWORD level_pal[32];
         memcpy(level_pal, g_cur_map.palette_a, 32 * sizeof(UWORD));
-        level_pal[2] = 0x000; /* copper COLOR02 override: forced black */
-        level_pal[3] = 0x000; /* copper COLOR03 override: forced black */
         palette_set_immediate(level_pal, 32);
     }
 
