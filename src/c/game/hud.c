@@ -58,29 +58,40 @@ void hud_quit(void)
 }
 
 /*
- * Layout of the 304×8 pixel status bar.
- * Derived from ASM lbW00FF66 table and lbL00FE00/lbL00FE04/... positions.
+ * Layout of the 304×8 pixel status bar (pixel positions from ASM lbW00FF66).
+ * The bar renders at BAR_X=0, spanning x=0..303; x=304..319 filled black.
  *
  *  Bar offset  Width   Element
  *    0          24     Static background ("1UP"/"2UP" text from .lo2 image)
  *   24          64     Health bar  (64 px = PLAYER_MAX_HEALTH=64)
  *   88          40     Static background gap
- *  128           8     Lives indicator: 4 dots at x+0,+4,+8,+12 (2 px each)
- *  144          40     Static background ("LIVES" label)
- *  184          12     Ammo packs: 4 dots at x+0,+3,+6,+9 (2 px each)
+ *  128           8     Lives: 4 × (2px lit + 2px gap) at x=128,132,136,140
+ *  136          48     Static background (includes lives label area)
+ *  184          12     Ammo packs: 4 × (2px lit + 1px gap) at x=184,187,190,193
+ *  196           4     Static gap
  *  200          32     Ammo bar    (32 px = PLAYER_MAX_AMMO=32)
- *  232          31     Static background (weapon area)
- *  263          24     Keys: up to 6 dots; start offsets from ASM lbL00FE8C:
- *                        {263,266,270,274,278,282} → widths {2,3,3,3,3,3}
- *  287          17     Static background to end of bar
+ *  232          31     Static background (weapon icon, etc.)
+ *  263          24     Keys: 6 × 2-px independent bars (lbW00FF66 derived):
+ *                        fills at x=264,268,272,276,280,284 (width 2 each)
+ *                        border pixels 263,266,270,274,278,282,287 left to BG
+ *                        '+' cross at x=288..292 (rows 1-5) if keys > 6
+ *  287          17     Static background to end of bar (304)
+ * 304          16     Filled black to reach 320-px screen edge
  */
 
-#define BAR_X            8    /* left edge of bar on screen */
+/*
+ * The bar image is 304 pixels wide; the screen is 320 pixels wide.
+ * BAR_X = 0: bar starts at the left edge of the screen.
+ * Rows are explicitly filled to x=319 so the full width is covered.
+ */
+#define SCREEN_W        320    /* full screen width */
+#define BAR_X            0    /* left edge of bar on screen */
+#define BAR_W          304    /* bar image pixel width */
 #define BAR_P1_Y         0    /* Player 1 bar: top of screen */
 #define BAR_P2_Y       248    /* Player 2 bar: bottom of screen */
 #define BAR_H            8    /* bar height (full 8 scan lines) */
 
-/* Pixel offsets within the 304-px bar */
+/* Pixel offsets within the 304-px bar (match lbW00FF66 table in main.asm) */
 #define BAR_HEALTH_OFF    24
 #define BAR_HEALTH_W      64
 #define BAR_LIVES_OFF    128
@@ -88,9 +99,21 @@ void hud_quit(void)
 #define BAR_AMMO_OFF     200
 #define BAR_AMMO_W        32
 
-/* Key dot start positions (from ASM lbL00FE8C = {$107,$10A,$10E,$112,$116,$11A}) */
-static const int k_key_off[6] = { 263, 266, 270, 274, 278, 282 };
-static const int k_key_end    = 287;
+/*
+ * 2-pixel fill positions for each key slot, derived from lbW00FF66 table:
+ *   slot 0: pixels 264-265  (3-px slot at 263-265: 1px border + 2px fill)
+ *   slots 1-5: pixels slot_base+2..slot_base+3  (4/5-px slot: 2px border + 2px fill)
+ * Positions from lbL00FE8C: {263,266,270,274,278,282,287}.
+ * '+' sign (keys > 6): 5×1 horizontal at row 3, x=288..292;
+ *                       1×1 vertical at x=290, rows 1,2,4,5.
+ */
+static const int k_key_fill_x[6] = { 264, 268, 272, 276, 280, 284 };
+#define KEY_PLUS_CX        290   /* centre column of '+' sign */
+#define KEY_PLUS_LX        288   /* left  column of horizontal bar */
+#define KEY_PLUS_W           5   /* width of horizontal bar */
+#define KEY_PLUS_TOP_ROW     1   /* first bar row showing '+' (ASM rows 1-5) */
+#define KEY_PLUS_BOT_ROW     5   /* last  bar row showing '+' */
+#define KEY_PLUS_HBAR_ROW    3   /* row where horizontal bar of '+' is drawn */
 
 /*
  * Per-row overlay palette for the 8 scan lines of each status bar.
@@ -135,24 +158,40 @@ static const BarRGB k_bar_pal[BAR_H][4] = {
 
 /*
  * Blit one scanline row of the static bar image as an overlay.
+ * The bar image is BAR_W (304) pixels wide starting at BAR_X (0).
+ * After blitting the image the remaining pixels to the right edge of the
+ * 320-pixel screen (x = BAR_W .. 319) are filled with the background colour
+ * (palette index 0 = black) so that the bar spans the full screen width.
  * Consecutive pixels sharing the same colour index are merged into a
  * single fill_rect call to keep the overlay draw call count low.
  */
 static void bar_blit_row(const GfxImage *bg, int row, int bar_y)
 {
-    if (!bg || !bg->pixels || row < 0 || row >= bg->h) return;
-    const UBYTE  *src = bg->pixels + (size_t)row * (size_t)bg->w;
+    if (row < 0 || row >= BAR_H) return;
     const BarRGB *pal = k_bar_pal[row];
-    int x = 0;
-    while (x < bg->w) {
-        UBYTE c = src[x] & 3u;
-        int   rx = x;
-        while (x < bg->w && (src[x] & 3u) == c) x++;
-        const BarRGB *col = &pal[c];
-        video_overlay_fill_rect(BAR_X + rx, bar_y + row,
-                                x - rx, 1,
-                                col->r, col->g, col->b, 255);
+    int sy = bar_y + row;
+
+    /* --- static image (304 px) --- */
+    if (bg && bg->pixels && row < bg->h) {
+        const UBYTE *src = bg->pixels + (size_t)row * (size_t)bg->w;
+        int x = 0;
+        while (x < bg->w) {
+            UBYTE c = src[x] & 3u;
+            int   rx = x;
+            while (x < bg->w && (src[x] & 3u) == c) x++;
+            const BarRGB *col = &pal[c];
+            video_overlay_fill_rect(BAR_X + rx, sy, x - rx, 1,
+                                    col->r, col->g, col->b, 255);
+        }
+    } else {
+        /* No image: fill the row with the dark shade */
+        video_overlay_fill_rect(BAR_X, sy, BAR_W, 1,
+                                pal[1].r, pal[1].g, pal[1].b, 255);
     }
+
+    /* --- fill the remaining pixels to reach full screen width --- */
+    video_overlay_fill_rect(BAR_X + BAR_W, sy, SCREEN_W - BAR_W, 1,
+                            pal[0].r, pal[0].g, pal[0].b, 255);
 }
 
 /*
@@ -161,10 +200,16 @@ static void bar_blit_row(const GfxImage *bg, int row, int bar_y)
  *
  * The function:
  *   1. Blits the static 304×8 background image row by row, applying the
- *      copper-derived per-scanline RGBA palette (the "gradient effect").
+ *      copper-derived per-scanline RGBA palette (the "gradient effect"),
+ *      then fills x=304..319 with black so the bar spans the full 320 px.
  *   2. Draws the dynamic elements (health, lives, ammo, keys) on top using
  *      the same per-row palette, mirroring what the Amiga CPU wrote into the
  *      bar bitplane buffer each frame before display.
+ *
+ * Key rendering (from ASM lbW00FF66 pixel table + lbL00FE8C positions):
+ *   Each of the 6 key slots has exactly 2 lit pixels within it.  When the
+ *   player holds more than 6 keys a '+' cross is drawn at x=288..292 for
+ *   bar rows 1-5 (rows 0, 6, 7 are blank), matching print_more_6_keys_sign.
  */
 static void render_bar_overlay(const GfxImage *bg, int bar_y, const Player *p)
 {
@@ -172,14 +217,8 @@ static void render_bar_overlay(const GfxImage *bg, int bar_y, const Player *p)
         const BarRGB *pal = k_bar_pal[row];
         int           sy  = bar_y + row;
 
-        /* 1. Static background (text labels, decorative frame) */
-        if (bg && bg->pixels) {
-            bar_blit_row(bg, row, bar_y);
-        } else {
-            /* No image: fill the row with the dark shade */
-            video_overlay_fill_rect(BAR_X, sy, 304, 1,
-                                    pal[1].r, pal[1].g, pal[1].b, 255);
-        }
+        /* 1. Static background + right margin fill */
+        bar_blit_row(bg, row, bar_y);
 
         /* 2. Health bar (pixels 24..87 in bar, 64 px wide at max health) */
         int hp = (p->health * BAR_HEALTH_W) / PLAYER_MAX_HEALTH;
@@ -193,14 +232,14 @@ static void render_bar_overlay(const GfxImage *bg, int bar_y, const Player *p)
                                     BAR_HEALTH_W - hp, 1,
                                     pal[1].r, pal[1].g, pal[1].b, 255);
 
-        /* 3. Lives indicator: up to 4 dots at offsets 128,132,136,140 (2 px each) */
+        /* 3. Lives indicator: 4 slots × 2 px lit, stride 4 (from lbW00FF66) */
         for (int i = 0; i < 4; i++) {
             const BarRGB *col = (i < p->lives) ? &pal[3] : &pal[1];
             video_overlay_fill_rect(BAR_X + BAR_LIVES_OFF + i * 4, sy, 2, 1,
                                     col->r, col->g, col->b, 255);
         }
 
-        /* 4. Ammo packs: up to 4 dots at offsets 184,187,190,193 (2 px each) */
+        /* 4. Ammo packs: 4 slots × 2 px lit at positions 184,187,190,193 */
         for (int i = 0; i < 4; i++) {
             const BarRGB *col = (i < p->ammopacks) ? &pal[3] : &pal[1];
             video_overlay_fill_rect(BAR_X + BAR_AMMO_PKS_OFF + i * 3, sy, 2, 1,
@@ -219,13 +258,27 @@ static void render_bar_overlay(const GfxImage *bg, int bar_y, const Player *p)
                                     BAR_AMMO_W - ammo, 1,
                                     pal[1].r, pal[1].g, pal[1].b, 255);
 
-        /* 6. Keys: up to 6 dots; positions from ASM lbL00FE8C */
+        /* 6. Keys: 6 independent 2-px bars (from lbW00FF66 + lbL00FE8C).
+         *    Each slot has exactly 2 lit pixels; the surrounding border pixels
+         *    are provided by the static background image and are not overwritten.
+         *    '+' sign (mirroring print_more_6_keys_sign) when keys > 6:
+         *      rows 1,2,4,5 → 1px at x=290; row 3 → 5px at x=288..292. */
+        int disp_keys = p->keys;
+        if (disp_keys > 6) disp_keys = 6;
         for (int i = 0; i < 6; i++) {
-            int next = (i < 5) ? k_key_off[i + 1] : k_key_end;
-            const BarRGB *col = (i < p->keys) ? &pal[3] : &pal[1];
-            video_overlay_fill_rect(BAR_X + k_key_off[i], sy,
-                                    next - k_key_off[i], 1,
+            const BarRGB *col = (i < disp_keys) ? &pal[3] : &pal[1];
+            video_overlay_fill_rect(BAR_X + k_key_fill_x[i], sy, 2, 1,
                                     col->r, col->g, col->b, 255);
+        }
+        /* '+' sign */
+        if (p->keys > 6) {
+            if (row == KEY_PLUS_HBAR_ROW) {
+                video_overlay_fill_rect(BAR_X + KEY_PLUS_LX, sy, KEY_PLUS_W, 1,
+                                        pal[3].r, pal[3].g, pal[3].b, 255);
+            } else if (row >= KEY_PLUS_TOP_ROW && row <= KEY_PLUS_BOT_ROW) {
+                video_overlay_fill_rect(BAR_X + KEY_PLUS_CX, sy, 1, 1,
+                                        pal[3].r, pal[3].g, pal[3].b, 255);
+            }
         }
     }
 }
