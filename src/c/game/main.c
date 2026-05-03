@@ -336,6 +336,7 @@ void level_game_loop_external(void)
 
         palette_tick();
         video_upload_framebuffer();
+        hud_render_overlay();
         if (g_debug_overlay_on && !g_map_overview_on)
             debug_render_overlay();
         video_flip();

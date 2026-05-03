@@ -59,6 +59,13 @@ const SpriteFrame *sprite_get_player_frames(int dir, int weapon_id);
 /* Draw a single timer/HUD digit (0-9) at screen position x,y. */
 void sprite_draw_digit(int digit, int x, int y);
 
+/*
+ * Draw a timer digit as a renderer overlay using the given RGB colour.
+ * Must be called after video_upload_framebuffer().
+ * Transparent pixels (index 0) are skipped.
+ */
+void sprite_draw_digit_overlay(int digit, int x, int y, UBYTE r, UBYTE g, UBYTE b);
+
 /* Draw the animated player sprite for player index p at screen position. */
 void sprite_draw_player(int player_idx, int x, int y, int facing);
 

@@ -24,8 +24,15 @@ int  hud_init(void);
 /* Free HUD resources. */
 void hud_quit(void);
 
-/* Render the full HUD for the current frame. */
+/* Render HUD elements that write to the indexed framebuffer (none currently). */
 void hud_render(void);
+
+/*
+ * Render the status bars as renderer overlays using the copper-list derived
+ * per-scanline RGBA palette.  Must be called AFTER video_upload_framebuffer()
+ * so the overlays are composited on top of the game frame.
+ */
+void hud_render_overlay(void);
 
 /* Render the pause overlay. */
 void hud_render_pause(void);
