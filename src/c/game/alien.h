@@ -37,6 +37,14 @@ typedef struct {
      * struct+46 = $14 = 20) and decremented by lbC00A568 each tick while
      * the AI is in the "hatching" state. */
     int   hatch_timer;
+    /* Face hugger flag — set to 1 when this alien is a small face hugger
+     * (spawned from TILE_ALIEN_SPAWN_SMALL (0x29) or from the facehugger
+     * hatch tile on level 12, which selects lbW009414 with size 4,4,8,8).
+     * Face huggers use 16×16 sprites from atlas x=256-304, y=0-80 rather
+     * than the 32×30 large-alien sprites.
+     * Ref: lbW009414 / lbL00969C @ main.asm#L6059-L6168; tile dispatch
+     * lbC0049D6 (tile 0x29 → lbW008FD4) and lbC004A28 (lbW009414). */
+    int   is_facehugger;
     /* Pathfinding state */
     int   target_x, target_y;
 } Alien;

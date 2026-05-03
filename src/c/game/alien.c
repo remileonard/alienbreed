@@ -312,6 +312,10 @@ typedef struct {
                               * zoom animation.  Ref: lbC0049EA @ main.asm#L2570,
                               * do_alien_hatch sets play_alien_hatching_sample=1 and
                               * alien+76 (hatch_timer) = struct+46 = $14 = 20. */
+    int  is_facehugger;      /* 1 = small face hugger (tile 0x29 or hatch on level 12):
+                              * spawns Alien with is_facehugger=1, rendered as 16×16.
+                              * Ref: lbW009414 (size 4,4,8,8) via tile 0x29 dispatch
+                              * lbC0049D6 / level-12 dispatch lbC004A28 @ main.asm. */
     int  spawned_alien_idx;  /* index of the alien last spawned from this point,
                               * or −1 if none yet.  Re-spawn is suppressed while
                               * g_aliens[spawned_alien_idx].alive != 0 so that at
@@ -345,11 +349,12 @@ static int alien_overlaps_other(int self_idx, int nx, int ny);
 
 /* -----------------------------------------------------------------------
  * Place one alien at world-pixel position (wx, wy) of the given type.
+ * is_facehugger: 1 = small 16×16 face hugger (lbW009414/lbW008FD4), 0 = large.
  * Returns the index in g_aliens[] of the newly placed alien, or -1 if
  * no slot was available.  Dead slots are recycled before appending new
  * ones so that the pool does not exhaust after many spawns/deaths.
  * ----------------------------------------------------------------------- */
-static int spawn_alien_at(int wx, int wy, int alien_type)
+static int spawn_alien_at(int wx, int wy, int alien_type, int is_facehugger)
 {
     WORD base_hp = (alien_type >= 1 && alien_type <= 7)
                    ? k_alien_type_hp[alien_type - 1]
@@ -371,14 +376,15 @@ static int spawn_alien_at(int wx, int wy, int alien_type)
      * both aliens permanently stuck.  Return -1 so the caller retries later. */
     if (alien_overlaps_other(idx, wx, wy)) return -1;
 
-    Alien *a    = &g_aliens[idx];
-    a->pos_x    = (WORD)wx;
-    a->pos_y    = (WORD)wy;
-    a->speed    = (WORD)(2 + g_global_aliens_extra_strength / 5);
-    a->strength = (WORD)(base_hp + g_global_aliens_extra_strength);
-    a->alive    = 1;
-    a->type_idx = alien_type - 1;
-    a->death_frame = 0;
+    Alien *a         = &g_aliens[idx];
+    a->pos_x         = (WORD)wx;
+    a->pos_y         = (WORD)wy;
+    a->speed         = (WORD)(2 + g_global_aliens_extra_strength / 5);
+    a->strength      = (WORD)(base_hp + g_global_aliens_extra_strength);
+    a->alive         = 1;
+    a->type_idx      = alien_type - 1;
+    a->death_frame   = 0;
+    a->is_facehugger = is_facehugger;
     return idx;
 }
 
@@ -439,6 +445,12 @@ void alien_spawn_from_map(void)
             /* Tile 0x34 (TILE_ALIEN_HOLE): alien emerges with zoom animation and
              * hatch sound, mirroring lbC0049EA → lbW008F94[52]=lbL01B6F6 in ASM. */
             sp->is_hole_spawn      = (attr == TILE_ALIEN_HOLE) ? 1 : 0;
+            /* Tile 0x29 (TILE_ALIEN_SPAWN_SMALL) always spawns small face huggers.
+             * Ref: tile dispatch lbC0049D6 → lbW008FD4 (size 4,4,8,8) for all
+             * level flags; lbC004A28 → lbW009414 for level_flag=1024 (level 12).
+             * Both data structs use the small-alien animation table (lbL0094FC /
+             * lbL00969C) which references 16×16 BOBs at atlas x=256-304. */
+            sp->is_facehugger      = (attr == TILE_ALIEN_SPAWN_SMALL) ? 1 : 0;
             sp->spawned_alien_idx  = -1;
         }
     }
@@ -469,8 +481,13 @@ void alien_spawn_near(int wx, int wy)
     sp->alien_type = alien_type_for_level();
     sp->active     = 1;
     sp->one_shot   = 1;
-    sp->is_hole_spawn      = 0;
-    sp->spawned_alien_idx  = -1;
+    sp->is_hole_spawn = 0;
+    /* On level 12 (level_flag=1024) the facehugger hatch tile selects
+     * lbW009414 (size 4,4,8,8) — a small face hugger.  All other levels
+     * where the hatch is active spawn large aliens.
+     * Ref: tile_facehuggers_hatch → lbC004A28 @ main.asm#L5414. */
+    sp->is_facehugger     = (g_cur_level == 12) ? 1 : 0;
+    sp->spawned_alien_idx = -1;
 }
 
 /*
@@ -580,7 +597,8 @@ void alien_spawn_tick(void)
         }
 
         /* Hatch an alien (ref lbC00A718 / do_alien_hatch @ main.asm#L7455). */
-        int idx = spawn_alien_at(sp->world_x, sp->world_y, sp->alien_type);
+        int idx = spawn_alien_at(sp->world_x, sp->world_y, sp->alien_type,
+                                 sp->is_facehugger);
         if (idx >= 0)
             sp->spawned_alien_idx = idx;
 

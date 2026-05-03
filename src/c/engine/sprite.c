@@ -351,6 +351,46 @@ void sprite_draw_alien(int direction, int anim_frame, int x, int y)
     video_blit(src, ALIEN_ATLAS_W, x - 16, y - 16, ALIEN_SPRITE_W, ALIEN_SPRITE_H, 0);
 }
 
+/* Draw a face hugger (small alien) walk sprite at screen position (x, y).
+ * Face huggers use 16×16 sprites from atlas x=256-304, y=0-80.
+ *
+ * Atlas layout (identical for COMPACT and LEGACY BO files):
+ *   Directions 0-3 (N/NE/E/SE): atlas_x = 256 + dir*16,       atlas_y = frame*32
+ *   Directions 4-7 (S/SW/W/NW): atlas_x = 256 + (dir-4)*16,   atlas_y = 16 + frame*32
+ *
+ * When anim_frame == ALIEN_WALK_FRAMES the hit-flash static frame is shown
+ * (frame 2 of the respective direction), mirroring lbL01BB82-lbL01BBD6 which
+ * hold the last walk frame (slot 42/45/48/51/54/57/60/63) with delay 32000.
+ *
+ * Ref: lbW009414 / lbL00969C / lbL01B982 @ main.asm#L6059,L6315,L14613;
+ *      COMPACT lbW019A8E entries 40-79 @ main.asm#L14200-L14240. */
+void sprite_draw_facehugger(int direction, int anim_frame, int x, int y)
+{
+    const UBYTE *atlas = alien_gfx_get_atlas();
+    if (!atlas) return;
+
+    if (direction  < 0) direction  = 0;
+    if (direction  >= ALIEN_DIR_COUNT) direction = ALIEN_DIR_COUNT - 1;
+    if (anim_frame < 0) anim_frame = 0;
+    /* Clamp — ALIEN_WALK_FRAMES (3) is valid as the hit-flash signal. */
+    if (anim_frame > ALIEN_WALK_FRAMES) anim_frame = ALIEN_WALK_FRAMES;
+
+    /* For the hit-flash, use the last walk frame (frame 2) for the direction.
+     * lbL01BB82-lbL01BBD6: static held frame = last entry of each direction's
+     * walk sequence (slot 42 for dir 0, 45 for dir 1, … 63 for dir 7). */
+    if (anim_frame >= ALIEN_WALK_FRAMES)
+        anim_frame = ALIEN_WALK_FRAMES - 1;  /* last normal walk frame = static */
+
+    int atlas_x = FACEHUGGER_ATLAS_X0 + (direction % 4) * FACEHUGGER_SPRITE_W;
+    int atlas_y = (direction >= 4 ? FACEHUGGER_ROW_ODD : 0)
+                  + anim_frame * FACEHUGGER_WALK_STRIDE;
+
+    const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
+    /* Centre the 16×16 sprite on the alien's world position. */
+    video_blit(src, ALIEN_ATLAS_W, x - 8, y - 8,
+               FACEHUGGER_SPRITE_W, FACEHUGGER_SPRITE_H, 0);
+}
+
 /* Draw a death/explosion frame (0-15) at screen position (x,y).
  * Frames are 32×30 px (same size as walk sprites), laid out in two rows:
  *   Row 1 (y=0xC0=192): frames  0-9,  x = frame_idx * 32
