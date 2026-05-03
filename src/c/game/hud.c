@@ -330,11 +330,14 @@ void hud_render_overlay(void)
          * Format: two raw decimal digits — matches ASM cur_timer_digit_hi:lo
          * which are decremented directly (no minutes conversion).
          * Ref: display_timer_digits @ main.asm#L1321 which writes hi then lo.
+         *
+         * Digit spacing: lbW01230C.x (23) - lbW0122F0.x (6) = 17 pixels.
          */
+#define TIMER_DIGIT_SPACING  17  /* screen_x distance: struct_x 23-6 = 17 */
         int hi = (int)g_destruction_timer / 10;
         int lo = (int)g_destruction_timer % 10;
-        sprite_draw_digit_overlay(hi, tx,      ty, tr, tg, tb);
-        sprite_draw_digit_overlay(lo, tx + 17, ty, tr, tg, tb);
+        sprite_draw_digit_overlay(hi, tx,                     ty, tr, tg, tb);
+        sprite_draw_digit_overlay(lo, tx + TIMER_DIGIT_SPACING, ty, tr, tg, tb);
     }
 }
 
