@@ -202,16 +202,18 @@ void tilemap_replace_reactor_face(LevelMap *map, UBYTE attr)
 {
     if (!map) return;
     /*
-     * Replace all tiles belonging to one reactor face (identified by `attr`
-     * in the lower 6 bits of the tile word).
+     * Replace only the four centre tiles of the destroyed reactor face.
      *
-     * The four centre tiles of every reactor (tile_idx 214/215/234/235) are
-     * replaced with their damaged-graphics counterparts (tile words 0x4100 /
-     * 0x4140 / 0x4600 / 0x4640 = tile_idx 260/261/280/281, attr=0=floor).
-     * These replacement words come directly from the W5-W8 fields of
-     * lbW01C52A entry 37 (lbL016CDA) @ main.asm#L14838, which is the BOB
-     * used by patch_dat_reactors.  All remaining reactor tiles (outer ring)
-     * are replaced with the nearest floor tile via tilemap_replace_tile().
+     * tile_idx 214/215/234/235 (the 2×2 inner dome) are replaced with their
+     * cracked/damaged counterparts using the tile words from lbW01C52A entry
+     * 37 (lbL016CDA) W5-W8 @ main.asm#L14838 (patch_dat_reactors):
+     *   0x4100 = tile 260, attr 0   0x4140 = tile 261, attr 0
+     *   0x4600 = tile 280, attr 0   0x4640 = tile 281, attr 0
+     *
+     * All other reactor tiles (the outer octagonal ring, tile_idx
+     * 194/195/196/213/216/217/233/236/237/253-257/274-276) are left
+     * completely unchanged — same tile_idx, same attribute (wall).
+     * The ASM patch_dat_reactors never touches those tiles.
      *
      * Ref: patch_dat_reactors @ main.asm#L15836; lbW01C52A entry 37 W5-W8.
      */
@@ -220,13 +222,13 @@ void tilemap_replace_reactor_face(LevelMap *map, UBYTE attr)
             UWORD w = map->tiles[row][col];
             if ((w & 0x3F) != attr)  /* lower 6 bits = attribute */
                 continue;
-            UWORD tile_idx = w >> 6;
-            switch (tile_idx) {
-            case 214: map->tiles[row][col] = 0x4100; break; /* → tile 260, floor */
-            case 215: map->tiles[row][col] = 0x4140; break; /* → tile 261, floor */
-            case 234: map->tiles[row][col] = 0x4600; break; /* → tile 280, floor */
-            case 235: map->tiles[row][col] = 0x4640; break; /* → tile 281, floor */
-            default:  tilemap_replace_tile(map, col, row);  break;
+            switch (w >> 6) {  /* tile_idx = upper 10 bits */
+            case 214: map->tiles[row][col] = 0x4100; break; /* → tile 260 */
+            case 215: map->tiles[row][col] = 0x4140; break; /* → tile 261 */
+            case 234: map->tiles[row][col] = 0x4600; break; /* → tile 280 */
+            case 235: map->tiles[row][col] = 0x4640; break; /* → tile 281 */
+            /* all other reactor ring tiles: leave untouched */
+            default:  break;
             }
         }
     }
