@@ -349,7 +349,8 @@ static int alien_overlaps_other(int self_idx, int nx, int ny);
 
 /* -----------------------------------------------------------------------
  * Place one alien at world-pixel position (wx, wy) of the given type.
- * is_facehugger: 1 = small 16×16 face hugger (lbW009414/lbW008FD4), 0 = large.
+ * is_facehugger: 1 = small 16×16 face hugger (lbW009414/lbW008FD4),
+ *                0 = large 32×30 alien (lbW008F94/lbW009094).
  * Returns the index in g_aliens[] of the newly placed alien, or -1 if
  * no slot was available.  Dead slots are recycled before appending new
  * ones so that the pool does not exhaust after many spawns/deaths.
