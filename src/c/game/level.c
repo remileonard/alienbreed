@@ -55,7 +55,7 @@ const LevelDef k_level_defs[NUM_LEVELS] = {
     /* lvl 3  */ { "L2AN", "L2BO", "L2MA",  0, "Level 3: Reactor Core",           "level", ALIEN_ATLAS_COMPACT, 0x1F,  40 },
     /* lvl 4  */ { "L3AN", "L3BO", "L3MA",  0, "Level 4: Alien Hive",             "boss",  ALIEN_ATLAS_COMPACT, 0x1F,  90 },
     /* lvl 5  */ { "L4AN", "L4BO", "L4MA",  0, "Level 5: Service Tunnels",        "level", ALIEN_ATLAS_COMPACT, 0x1F,  90 },
-    /* lvl 6  */ { "L5AN", "L5BO", "L5MA",  0, "Level 6: Weapons Bay",            "boss",  ALIEN_ATLAS_COMPACT, 0x1F,   2 },
+    /* lvl 6  */ { "L5AN", "L5BO", "L5MA",  0, "Level 6: Weapons Bay",            "boss",  ALIEN_ATLAS_COMPACT, 0x1F,   2 }, /* sf.b hi; lo=2: "the evil 1up" path in init_level_6 @ main.asm */
     /* lvl 7  */ { "L3AN", "L2BO", "L6MA",  0, "Level 7: Upper Decks",            "level", ALIEN_ATLAS_COMPACT, 0x03,  99 },
     /* lvl 8  */ { "L3AN", "L2BO", "L7MA",  0, "Level 8: Engine Room",            "boss",  ALIEN_ATLAS_COMPACT, 0x03,  60 },
     /* lvl 9  */ { "L2AN", "L2BO", "L8MA",  5, "Level 9: Alien Command",          "level", ALIEN_ATLAS_COMPACT, 0x03,  77 },
@@ -98,6 +98,24 @@ int  g_alarm_last_row           = -1;
 
 /* Internal: per-second tick counter for the destruction countdown */
 static int s_destruct_tick_ctr = 0;
+
+/*
+ * Voice IDs for the per-second countdown, indexed by remaining seconds (1–8).
+ * Mirrors the requirement: when the timer reaches 8 the voice announces each
+ * second until 1 ("lorsque le compte à rebours arrive à 8 …").
+ * Entry 0 is unused (game over is handled by the timer-expired branch).
+ */
+static const int k_countdown_voices[9] = {
+    0,           /* 0 — handled by timer-expired branch */
+    VOICE_ONE,   /* 1 */
+    VOICE_TWO,   /* 2 */
+    VOICE_THREE, /* 3 */
+    VOICE_FOUR,  /* 4 */
+    VOICE_FIVE,  /* 5 */
+    VOICE_SIX,   /* 6 */
+    VOICE_SEVEN, /* 7 */
+    VOICE_EIGHT  /* 8 */
+};
 
 void level_init_variables(void)
 {
@@ -186,22 +204,11 @@ void level_tick_timer(void)
     /*
      * Voice countdown: when the display reaches 8 the voice announces each
      * remaining second until 1 (then game over at 0).
-     * Mirrors the problem spec: "lorsque le compte à rebours arrive à 8,
+     * Mirrors the requirement: "lorsque le compte à rebours arrive à 8,
      * la même voix annonce alors un compte à rebours jusqu'a 0".
      */
-    static const int k_countdown_voices[9] = {
-        0,           /* 0 — handled by timer-expired branch above */
-        VOICE_ONE,   /* 1 */
-        VOICE_TWO,   /* 2 */
-        VOICE_THREE, /* 3 */
-        VOICE_FOUR,  /* 4 */
-        VOICE_FIVE,  /* 5 */
-        VOICE_SIX,   /* 6 */
-        VOICE_SEVEN, /* 7 */
-        VOICE_EIGHT  /* 8 */
-    };
     if (g_destruction_timer >= 1 && g_destruction_timer <= 8)
-        audio_play_sample(k_countdown_voices[g_destruction_timer]);
+        audio_play_sample(k_countdown_voices[(int)g_destruction_timer]);
 }
 
 void level_start_destruction(void)
