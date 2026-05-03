@@ -149,6 +149,27 @@ void sprite_draw_digit(int digit, int x, int y)
     video_blit(img->pixels, img->w, x, y, img->w, img->h, 0);
 }
 
+/*
+ * Draw a timer digit as a renderer overlay (call after video_upload_framebuffer).
+ * Non-transparent pixels (index != 0) are rendered with the supplied RGB colour.
+ */
+void sprite_draw_digit_overlay(int digit, int x, int y, UBYTE r, UBYTE g, UBYTE b)
+{
+    if (digit < 0 || digit > 9) return;
+    SpriteImage *img = &s_digits[digit];
+    if (!img->pixels) return;
+    for (int row = 0; row < img->h; row++) {
+        const UBYTE *src = img->pixels + (size_t)row * (size_t)img->w;
+        int col = 0;
+        while (col < img->w) {
+            if (src[col] == 0) { col++; continue; }
+            int run = col;
+            while (col < img->w && src[col] != 0) col++;
+            video_overlay_fill_rect(x + run, y + row, col - run, 1, r, g, b, 255);
+        }
+    }
+}
+
 /* Draw animated player sprite using the full ASM animation state machine.
  *
  * Sprite layout per player (40 sprites each, player 1 = 0-39, player 2 = 40-79):
