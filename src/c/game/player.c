@@ -7,6 +7,7 @@
 #include "level.h"
 #include "alien.h"
 #include "intex.h"
+#include "debug.h"
 #include "../hal/input.h"
 #include "../hal/audio.h"
 #include "../hal/video.h"
@@ -298,14 +299,15 @@ static void patch_door_tiles(int col, int row)
  * overlay animation to cover both tiles visually). */
 void open_door(Player *p)
 {
-    if (p->keys <= 0) return;
+    if (p->keys <= 0 && !g_god_mode) return;
 
     int col = tilemap_pixel_to_col(p->pos_x);
     int row = tilemap_pixel_to_row(p->pos_y);
 
     patch_door_tiles(col, row);
 
-    p->keys--;
+    if (!g_god_mode)
+        p->keys--;
     audio_play_sample(SAMPLE_OPENING_DOOR);
 }
 
@@ -316,11 +318,12 @@ void open_door(Player *p)
  * from the player's walk position. */
 void open_door_at(Player *p, int col, int row)
 {
-    if (p->keys <= 0) return;
+    if (p->keys <= 0 && !g_god_mode) return;
 
     patch_door_tiles(col, row);
 
-    p->keys--;
+    if (!g_god_mode)
+        p->keys--;
     audio_play_sample(SAMPLE_OPENING_DOOR);
 }
 
@@ -694,10 +697,12 @@ void player_update(Player *p, UWORD input_mask)
              * Ref: lbC00E14A @ main.asm#L9419. */
             if (p->shot_amount_counter <= 0) {
                 p->shot_amount_counter = p->shot_amount - 1;
-                p->ammunitions--;
-                if (p->ammunitions <= 0 && p->ammopacks > 0) {
-                    p->ammopacks--;
-                    p->ammunitions = PLAYER_MAX_AMMO;
+                if (!g_god_mode) {
+                    p->ammunitions--;
+                    if (p->ammunitions <= 0 && p->ammopacks > 0) {
+                        p->ammopacks--;
+                        p->ammunitions = PLAYER_MAX_AMMO;
+                    }
                 }
             } else {
                 p->shot_amount_counter--;
@@ -920,6 +925,7 @@ void player_update(Player *p, UWORD input_mask)
 
 void player_take_damage(Player *p, int amount)
 {
+    if (g_god_mode) return;
     int idx = p->port;
     if (g_player_invincibility[idx] > 0) return;
     if (p->death_counter > 0) return;  /* already in death animation */

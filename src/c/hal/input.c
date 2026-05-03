@@ -110,7 +110,9 @@ static UBYTE sdl_to_amiga_key(SDL_Keycode sym)
         case SDLK_RALT:    return KEY_RIGHT_ALT;
         case SDLK_d:       return KEY_D;
         case SDLK_f:       return KEY_F;
+        case SDLK_g:       return KEY_G;
         case SDLK_h:       return KEY_H;
+        case SDLK_j:       return KEY_J;
         default:           return 0;
     }
 }

@@ -28,7 +28,9 @@
 #define KEY_RIGHT_ALT   0x65
 #define KEY_D           0x22
 #define KEY_F           0x23
+#define KEY_G           0x33
 #define KEY_H           0x35
+#define KEY_J           0x17
 
 /* ----------------------------------------------------- */
 /* Player limits */

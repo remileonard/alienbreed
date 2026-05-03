@@ -25,6 +25,9 @@
 /* Non-zero when the debug overlay is active. */
 extern int g_debug_overlay_on;
 
+/* Non-zero when god mode is active (invincible, infinite ammo, infinite keys). */
+extern int g_god_mode;
+
 /* Draw the debug overlay.  Must be called between
  * video_upload_framebuffer() and video_flip(). */
 void debug_render_overlay(void);
@@ -40,5 +43,14 @@ void debug_render_overlay(void);
  * Triggered by pressing the F key during gameplay.
  */
 void debug_gfx_viewer_run(void);
+
+/*
+ * Full-screen scrollable palette viewer.
+ * Pauses the game and shows all 32 current palette entries as a table:
+ *   ID | R | G | B | COLOR swatch
+ * Arrow keys scroll the view; press G or ESC to return to the game.
+ * Triggered by pressing the G key during gameplay.
+ */
+void debug_palette_viewer_run(void);
 
 #endif /* AB_DEBUG_H */

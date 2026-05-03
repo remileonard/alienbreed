@@ -185,9 +185,24 @@ void level_game_loop_external(void)
         if (g_key_pressed == KEY_F) {
             debug_gfx_viewer_run();
         }
+        if (g_key_pressed == KEY_G) {
+            debug_palette_viewer_run();
+        }
         if (g_key_pressed == KEY_H) {
             /* Debug: skip to next level */
             g_flag_end_level = 1;
+        }
+        if (g_key_pressed == KEY_J) {
+            /* Debug: toggle god mode (invincible, infinite ammo, infinite keys) */
+            g_god_mode = !g_god_mode;
+            if (g_god_mode) {
+                for (int i = 0; i < g_number_players; i++) {
+                    g_players[i].ammunitions = PLAYER_MAX_AMMO;
+                    g_players[i].ammopacks   = PLAYER_MAX_AMMOPCKS;
+                    if (g_players[i].keys < 1)
+                        g_players[i].keys = 1;
+                }
+            }
         }
 
         /* --- Update logic --------------------------------------------- */
