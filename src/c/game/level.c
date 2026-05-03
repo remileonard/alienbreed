@@ -270,8 +270,8 @@ void level_start_destruction(void)
 
 typedef struct {
     int active;
-    int sx;         /* screen X (world - camera) */
-    int sy;         /* screen Y (world - camera) */
+    int sx;         /* world X of explosion centre */
+    int sy;         /* world Y of explosion centre */
     int frame;      /* 0 … EXPLOSION_FRAMES-1   */
     int tick;       /* tick counter within frame */
 } ExplosionEntry;
@@ -408,11 +408,11 @@ void level_do_final_explosion(void)
             for (int t = 0; t < EXPLOSION_POOL_SIZE; t++) {
                 int idx = (pool_idx + t) % EXPLOSION_POOL_SIZE;
                 if (!s_explosion_pool[idx].active) {
-                    s_explosion_pool[idx].active = 1;
-                    s_explosion_pool[idx].sx     = world_x;
-                    s_explosion_pool[idx].sy     = world_y;
                     s_explosion_pool[idx].frame  = 0;
                     s_explosion_pool[idx].tick   = 0;
+                    s_explosion_pool[idx].sx     = world_x;
+                    s_explosion_pool[idx].sy     = world_y;
+                    s_explosion_pool[idx].active = 1;  /* mark active last */
                     pool_idx = (idx + 1) % EXPLOSION_POOL_SIZE;
                     break;
                 }
