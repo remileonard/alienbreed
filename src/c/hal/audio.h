@@ -37,6 +37,17 @@ void audio_play_sample(int sample_id);
 /* Stop all currently playing sound effects. */
 void audio_stop_samples(void);
 
+/*
+ * Play a sample in a continuous loop on a dedicated channel.
+ * Only one looping sample can be active at a time.
+ * Designed for the self-destruct alarm: plays until audio_stop_looping() is
+ * called.  The loop is automatically stopped by audio_stop_samples().
+ */
+void audio_play_looping(int sample_id);
+
+/* Stop the currently looping sample. Safe to call when nothing is looping. */
+void audio_stop_looping(void);
+
 /* Start playing a music track by filename (without path or extension).
  *   name: "title", "level", "boss"
  * Loops indefinitely. */

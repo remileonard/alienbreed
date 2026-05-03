@@ -49,19 +49,19 @@
  *                                        (bra.w none for tile 0x19)
  */
 const LevelDef k_level_defs[NUM_LEVELS] = {
-    /*          map_an  map_bo  map_ma  str  briefing_text                         music    atlas_type          engine_tile_mask */
-    /* lvl 1  */ { "L0AN", "L0BO", "L0MA",  0, "Level 1: Research Base",          "level", ALIEN_ATLAS_LEGACY,  0x1F },
-    /* lvl 2  */ { "L1AN", "L1BO", "L1MA",  0, "Level 2: Bio-Containment",        "level", ALIEN_ATLAS_COMPACT, 0x17 },
-    /* lvl 3  */ { "L2AN", "L2BO", "L2MA",  0, "Level 3: Reactor Core",           "level", ALIEN_ATLAS_COMPACT, 0x1F },
-    /* lvl 4  */ { "L3AN", "L3BO", "L3MA",  0, "Level 4: Alien Hive",             "boss",  ALIEN_ATLAS_COMPACT, 0x1F },
-    /* lvl 5  */ { "L4AN", "L4BO", "L4MA",  0, "Level 5: Service Tunnels",        "level", ALIEN_ATLAS_COMPACT, 0x1F },
-    /* lvl 6  */ { "L5AN", "L5BO", "L5MA",  0, "Level 6: Weapons Bay",            "boss",  ALIEN_ATLAS_COMPACT, 0x1F },
-    /* lvl 7  */ { "L3AN", "L2BO", "L6MA",  0, "Level 7: Upper Decks",            "level", ALIEN_ATLAS_COMPACT, 0x03 },
-    /* lvl 8  */ { "L3AN", "L2BO", "L7MA",  0, "Level 8: Engine Room",            "boss",  ALIEN_ATLAS_COMPACT, 0x03 },
-    /* lvl 9  */ { "L2AN", "L2BO", "L8MA",  5, "Level 9: Alien Command",          "level", ALIEN_ATLAS_COMPACT, 0x03 },
-    /* lvl10  */ { "L1AN", "L1BO", "L9MA", 10, "Level 10: Central Hive",          "boss",  ALIEN_ATLAS_LEGACY,  0x17 },
-    /* lvl11  */ { "L1AN", "L2BO", "LAMA", 15, "Level 11: Breeding Grounds",      "level", ALIEN_ATLAS_LEGACY,  0x17 },
-    /* lvl12  */ { "L5AN", "L5BO", "LBMA", 20, "Level 12: Final Confrontation",   "boss",  ALIEN_ATLAS_COMPACT, 0x1D },
+    /*          map_an  map_bo  map_ma  str  briefing_text                         music    atlas_type          engine_tile_mask  timer_s */
+    /* lvl 1  */ { "L0AN", "L0BO", "L0MA",  0, "Level 1: Research Base",          "level", ALIEN_ATLAS_LEGACY,  0x1F,  60 },
+    /* lvl 2  */ { "L1AN", "L1BO", "L1MA",  0, "Level 2: Bio-Containment",        "level", ALIEN_ATLAS_COMPACT, 0x17,  60 },
+    /* lvl 3  */ { "L2AN", "L2BO", "L2MA",  0, "Level 3: Reactor Core",           "level", ALIEN_ATLAS_COMPACT, 0x1F,  40 },
+    /* lvl 4  */ { "L3AN", "L3BO", "L3MA",  0, "Level 4: Alien Hive",             "boss",  ALIEN_ATLAS_COMPACT, 0x1F,  90 },
+    /* lvl 5  */ { "L4AN", "L4BO", "L4MA",  0, "Level 5: Service Tunnels",        "level", ALIEN_ATLAS_COMPACT, 0x1F,  90 },
+    /* lvl 6  */ { "L5AN", "L5BO", "L5MA",  0, "Level 6: Weapons Bay",            "boss",  ALIEN_ATLAS_COMPACT, 0x1F,   2 },
+    /* lvl 7  */ { "L3AN", "L2BO", "L6MA",  0, "Level 7: Upper Decks",            "level", ALIEN_ATLAS_COMPACT, 0x03,  99 },
+    /* lvl 8  */ { "L3AN", "L2BO", "L7MA",  0, "Level 8: Engine Room",            "boss",  ALIEN_ATLAS_COMPACT, 0x03,  60 },
+    /* lvl 9  */ { "L2AN", "L2BO", "L8MA",  5, "Level 9: Alien Command",          "level", ALIEN_ATLAS_COMPACT, 0x03,  77 },
+    /* lvl10  */ { "L1AN", "L1BO", "L9MA", 10, "Level 10: Central Hive",          "boss",  ALIEN_ATLAS_LEGACY,  0x17,  80 },
+    /* lvl11  */ { "L1AN", "L2BO", "LAMA", 15, "Level 11: Breeding Grounds",      "level", ALIEN_ATLAS_LEGACY,  0x17,  60 },
+    /* lvl12  */ { "L5AN", "L5BO", "LBMA", 20, "Level 12: Final Confrontation",   "boss",  ALIEN_ATLAS_COMPACT, 0x1D,  14 },
 };
 
 /* ------------------------------------------------------------------ */
@@ -93,8 +93,11 @@ int  g_alarm_buttons_pressed    = 0;
 int  g_alarm_last_col           = -1;
 int  g_alarm_last_row           = -1;
 
-/* Internal: frames per second = 50, timer displayed in M:SS */
-#define TIMER_FRAMES_PER_SECOND 50
+/* Internal: game tick rate for timer = 25 Hz (called every other display frame) */
+#define TIMER_TICKS_PER_SECOND 25
+
+/* Internal: per-second tick counter for the destruction countdown */
+static int s_destruct_tick_ctr = 0;
 
 void level_init_variables(void)
 {
@@ -110,8 +113,10 @@ void level_init_variables(void)
      * completes, sending the player back to the menu instead of the next
      * level. */
     g_boss_active             = 0;
-    /* Timer set by level_finalize based on level def */
-    g_destruction_timer = (LONG)DESTRUCTION_TIMER_SECONDS * TIMER_FRAMES_PER_SECOND;
+    /* Timer is inactive until level_start_destruction() is called.
+     * g_destruction_timer holds the remaining seconds (0 = not active). */
+    g_destruction_timer       = 0;
+    s_destruct_tick_ctr       = 0;
 
     /* Reactor state — reset in init_level_variables @ main.asm#L747-L750 */
     g_reactor_up_done         = 0;
@@ -136,7 +141,7 @@ void level_init_variables(void)
 
 void level_get_timer_digits(int *minutes, int *seconds_hi, int *seconds_lo)
 {
-    int total_secs = (int)(g_destruction_timer / TIMER_FRAMES_PER_SECOND);
+    int total_secs = (int)g_destruction_timer;
     if (total_secs < 0) total_secs = 0;
     int m  = total_secs / 60;
     int s  = total_secs % 60;
@@ -145,37 +150,58 @@ void level_get_timer_digits(int *minutes, int *seconds_hi, int *seconds_lo)
     *seconds_lo = s % 10;
 }
 
+void level_tick_counter_reset(void)
+{
+    s_destruct_tick_ctr = 0;
+}
+
 void level_tick_timer(void)
 {
     if (!g_self_destruct_initiated) return;
     if (g_destruction_timer <= 0) return;
 
+    /*
+     * Count 25Hz ticks: when TIMER_TICKS_PER_SECOND ticks have accumulated
+     * one second has elapsed (mirrors lbW002FE0 counter in destruction_sequence
+     * @ main.asm#L1288-L1293: addq.w #1 / cmp.w #25 / bne void / clr.w).
+     */
+    s_destruct_tick_ctr++;
+    if (s_destruct_tick_ctr < TIMER_TICKS_PER_SECOND) return;
+    s_destruct_tick_ctr = 0;
+
+    /* Alarm tick each second (Ref: main.asm#L1293: move.w #14,sample_to_play). */
+    audio_play_sample(SAMPLE_CARET_MOVE);
+
     g_destruction_timer--;
 
-    /* Every 25 frames (~0.5 s) play the destruction sample (Ref: main.asm#L1275) */
-    if (g_destruction_timer % 25 == 0)
-        audio_play_sample(SAMPLE_DESTRUCT_IMM);
-
-    /* Last second: warning bip (Ref: main.asm#L1275) */
-    if (g_destruction_timer == TIMER_FRAMES_PER_SECOND)
-        audio_play_sample(SAMPLE_CARET_MOVE);
-
-    /* Switch palette to destruction colors when sequence starts */
-    if (g_destruction_timer == (LONG)DESTRUCTION_TIMER_SECONDS * TIMER_FRAMES_PER_SECOND - 1) {
-        palette_set_immediate(g_cur_map.palette_b, 32);
-        /* Replicate copper override: at beam line 51 the copper forces COLOR02
-         * and COLOR03 to black for the main 5-bitplane play area regardless of
-         * the loaded palette (Ref: lbW09A20C dc.w COLOR02,0,COLOR03,0
-         * @ main.asm#L18513). */
-        video_set_palette_entry(2, 0x000);
-        video_set_palette_entry(3, 0x000);
-    }
-
-    /* Timer expired: game over */
-    if (g_destruction_timer == 0) {
+    if (g_destruction_timer <= 0) {
+        /* Timer expired: level explodes → game over */
+        g_destruction_timer     = 0;
         g_flag_destruct_level   = 1;
         g_flag_jump_to_gameover = 1;
+        audio_stop_looping();
+        return;
     }
+
+    /*
+     * Voice countdown: when the display reaches 8 the voice announces each
+     * remaining second until 1 (then game over at 0).
+     * Mirrors the problem spec: "lorsque le compte à rebours arrive à 8,
+     * la même voix annonce alors un compte à rebours jusqu'a 0".
+     */
+    static const int k_countdown_voices[9] = {
+        0,           /* 0 — handled by timer-expired branch above */
+        VOICE_ONE,   /* 1 */
+        VOICE_TWO,   /* 2 */
+        VOICE_THREE, /* 3 */
+        VOICE_FOUR,  /* 4 */
+        VOICE_FIVE,  /* 5 */
+        VOICE_SIX,   /* 6 */
+        VOICE_SEVEN, /* 7 */
+        VOICE_EIGHT  /* 8 */
+    };
+    if (g_destruction_timer >= 1 && g_destruction_timer <= 8)
+        audio_play_sample(k_countdown_voices[g_destruction_timer]);
 }
 
 void level_start_destruction(void)
@@ -185,8 +211,42 @@ void level_start_destruction(void)
     g_in_destruction_sequence = 1;
     /* Exit becomes passable once destruction starts (Ref: tile_exit @ main.asm#L5191) */
     g_exit_unlocked = 1;
+
+    /*
+     * Set the per-level countdown timer in seconds.
+     * Mirrors set_destruction_timer @ main.asm#L1257 which loads timer_digit_hi:lo
+     * into cur_timer_digit_hi:lo — values are defined per-level in init_level_N.
+     */
+    g_destruction_timer = (LONG)k_level_defs[g_cur_level].timer_seconds;
+    s_destruct_tick_ctr = 0;
+
+    /*
+     * Switch to the destruction palette (palette_b = red-tinted palette).
+     * Mirrors the palette fade in destruction_sequence @ main.asm#L1282:
+     *   lea.l level_palette2,a1 / jsr prep_fade_speeds_fade_to_rgb
+     * We use an immediate switch for clarity; the red tint appears instantly.
+     */
+    if (g_cur_map.valid) {
+        palette_set_immediate(g_cur_map.palette_b, 32);
+        /* Replicate copper override: COLOR02/COLOR03 forced to black in the
+         * main play area (Ref: lbW09A20C @ main.asm#L18513). */
+        video_set_palette_entry(2, 0x000);
+        video_set_palette_entry(3, 0x000);
+    }
+
+    /*
+     * Voice announcement: "Warning … destruction imminent"
+     * Mirrors voice 6 + voice 23 played in destruction_sequence init block
+     * (lbC0111C4 / lbC011272 @ main.asm#L1270-L1278).
+     */
+    audio_play_sample(VOICE_WARNING);
     audio_play_sample(VOICE_DESTRUCT_IMM);
-    audio_play_sample(SAMPLE_DESTRUCT_IMM);
+
+    /*
+     * Start continuous alarm loop (mirrors lbW02316A looping sample struct
+     * set in destruction_sequence @ main.asm#L1289).
+     */
+    audio_play_looping(SAMPLE_DESTRUCT_IMM);
 }
 
 void level_check_destruction(void)
@@ -223,6 +283,8 @@ void level_check_gameover(void)
 void level_trigger_end(void)
 {
     g_flag_end_level = 1;
+    /* Stop the looping alarm when the player successfully escapes. */
+    audio_stop_looping();
     audio_play_sample(SAMPLE_DESCENT);
 }
 

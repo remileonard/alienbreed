@@ -304,18 +304,20 @@ void hud_render_overlay(void)
     /* ---- Player 2 status bar: bottom of screen (y=248) ---- */
     render_bar_overlay(&s_p2_bar, BAR_P2_Y, &g_players[1]);
 
-    /* ---- Destruction timer: centred just inside the top bar ---- */
-    int mins, sh, sl;
-    level_get_timer_digits(&mins, &sh, &sl);
+    /* ---- Destruction timer: displayed only during the self-destruct sequence ---- */
+    if (g_self_destruct_initiated) {
+        int mins, sh, sl;
+        level_get_timer_digits(&mins, &sh, &sl);
 
-    /* Timer x=148 centres the "M:SS" display (≈20 px) in 320-px screen */
-    int tx = 148;
-    int ty = BAR_P1_Y;
-    sprite_draw_digit_overlay(mins, tx,      ty, 221, 221, 221);
-    /* colon dots */
-    video_overlay_fill_rect(tx + 9, ty + 2, 1, 1, 221, 221, 221, 255);
-    video_overlay_fill_rect(tx + 9, ty + 5, 1, 1, 221, 221, 221, 255);
-    draw_two_digits_overlay(sh, sl, tx + 11, ty);
+        /* Timer x=148 centres the "M:SS" display (≈20 px) in 320-px screen */
+        int tx = 148;
+        int ty = BAR_P1_Y;
+        sprite_draw_digit_overlay(mins, tx,      ty, 221, 221, 221);
+        /* colon dots */
+        video_overlay_fill_rect(tx + 9, ty + 2, 1, 1, 221, 221, 221, 255);
+        video_overlay_fill_rect(tx + 9, ty + 5, 1, 1, 221, 221, 221, 255);
+        draw_two_digits_overlay(sh, sl, tx + 11, ty);
+    }
 }
 
 void hud_render_pause(void)

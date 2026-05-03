@@ -151,6 +151,7 @@ void level_game_loop_external(void)
     g_self_destruct_initiated = 0;
     g_destruction_timer   = 0;
     g_map_overview_on     = 0;
+    level_tick_counter_reset();
 
     while (!g_flag_end_level && !g_flag_jump_to_gameover && !g_quit_requested) {
         timer_begin_frame();
@@ -341,5 +342,9 @@ void level_game_loop_external(void)
             debug_render_overlay();
         video_flip();
     }
-end_loop:;
+end_loop:
+    /* Stop the looping alarm that may have been started by the self-destruct
+     * sequence (level_start_destruction → audio_play_looping).  Safe to call
+     * even if no loop is active (audio_stop_looping is a no-op in that case). */
+    audio_stop_looping();
 }

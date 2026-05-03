@@ -17,9 +17,6 @@
 /* Total number of levels */
 #define NUM_LEVELS 12
 
-/* Destruction timer initial value in seconds */
-#define DESTRUCTION_TIMER_SECONDS 300
-
 /* Level map filenames for each sub-map type */
 typedef struct {
     const char *map_an;   /* aliens normal */
@@ -43,6 +40,14 @@ typedef struct {
      *   bit 3 → tile 0x1B   bit 4 → tile 0x1C
      */
     int   engine_tile_mask;
+    /*
+     * Self-destruct countdown duration in seconds, initialised from
+     * timer_digit_hi:timer_digit_lo in each init_level_N in main.asm
+     * (e.g. hi=6,lo=0 → 60 s).  0 means no countdown is defined for this
+     * level (the exit is open from the start and self-destruct is never
+     * triggered via the normal path).
+     */
+    int   timer_seconds;
 } LevelDef;
 
 extern const LevelDef k_level_defs[NUM_LEVELS];
@@ -130,7 +135,10 @@ void level_trigger_end(void);
 /* Tick the destruction countdown timer. */
 void level_tick_timer(void);
 
-/* Returns the displayed timer value (minutes/seconds). */
+/* Reset the internal per-second tick counter (call when starting a level). */
+void level_tick_counter_reset(void);
+
+/* Returns the displayed timer value (seconds split into M, SS digits). */
 void level_get_timer_digits(int *minutes, int *seconds_hi, int *seconds_lo);
 
 /* Finalize level (set copper, initial camera, etc.). */
