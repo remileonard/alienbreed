@@ -11,10 +11,14 @@
 #include "../engine/alien_gfx.h"
 #include "../engine/anim_gfx.h"
 #include "../engine/tile_anim.h"
+#include "../engine/sprite.h"
 #include "../hal/audio.h"
 #include "../hal/video.h"
+#include "../hal/input.h"
+#include "../hal/timer.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 /* ------------------------------------------------------------------ */
 /* Level definitions — map filenames and settings                     */
@@ -49,19 +53,19 @@
  *                                        (bra.w none for tile 0x19)
  */
 const LevelDef k_level_defs[NUM_LEVELS] = {
-    /*          map_an  map_bo  map_ma  str  briefing_text                         music    atlas_type          engine_tile_mask */
-    /* lvl 1  */ { "L0AN", "L0BO", "L0MA",  0, "Level 1: Research Base",          "level", ALIEN_ATLAS_LEGACY,  0x1F },
-    /* lvl 2  */ { "L1AN", "L1BO", "L1MA",  0, "Level 2: Bio-Containment",        "level", ALIEN_ATLAS_COMPACT, 0x17 },
-    /* lvl 3  */ { "L2AN", "L2BO", "L2MA",  0, "Level 3: Reactor Core",           "level", ALIEN_ATLAS_COMPACT, 0x1F },
-    /* lvl 4  */ { "L3AN", "L3BO", "L3MA",  0, "Level 4: Alien Hive",             "boss",  ALIEN_ATLAS_COMPACT, 0x1F },
-    /* lvl 5  */ { "L4AN", "L4BO", "L4MA",  0, "Level 5: Service Tunnels",        "level", ALIEN_ATLAS_COMPACT, 0x1F },
-    /* lvl 6  */ { "L5AN", "L5BO", "L5MA",  0, "Level 6: Weapons Bay",            "boss",  ALIEN_ATLAS_COMPACT, 0x1F },
-    /* lvl 7  */ { "L3AN", "L2BO", "L6MA",  0, "Level 7: Upper Decks",            "level", ALIEN_ATLAS_COMPACT, 0x03 },
-    /* lvl 8  */ { "L3AN", "L2BO", "L7MA",  0, "Level 8: Engine Room",            "boss",  ALIEN_ATLAS_COMPACT, 0x03 },
-    /* lvl 9  */ { "L2AN", "L2BO", "L8MA",  5, "Level 9: Alien Command",          "level", ALIEN_ATLAS_COMPACT, 0x03 },
-    /* lvl10  */ { "L1AN", "L1BO", "L9MA", 10, "Level 10: Central Hive",          "boss",  ALIEN_ATLAS_LEGACY,  0x17 },
-    /* lvl11  */ { "L1AN", "L2BO", "LAMA", 15, "Level 11: Breeding Grounds",      "level", ALIEN_ATLAS_LEGACY,  0x17 },
-    /* lvl12  */ { "L5AN", "L5BO", "LBMA", 20, "Level 12: Final Confrontation",   "boss",  ALIEN_ATLAS_COMPACT, 0x1D },
+    /*          map_an  map_bo  map_ma  str  briefing_text                         music    atlas_type          engine_tile_mask  timer_s */
+    /* lvl 1  */ { "L0AN", "L0BO", "L0MA",  0, "Level 1: Research Base",          "level", ALIEN_ATLAS_LEGACY,  0x1F,  60 },
+    /* lvl 2  */ { "L1AN", "L1BO", "L1MA",  0, "Level 2: Bio-Containment",        "level", ALIEN_ATLAS_COMPACT, 0x17,  60 },
+    /* lvl 3  */ { "L2AN", "L2BO", "L2MA",  0, "Level 3: Reactor Core",           "level", ALIEN_ATLAS_COMPACT, 0x1F,  40 },
+    /* lvl 4  */ { "L3AN", "L3BO", "L3MA",  0, "Level 4: Alien Hive",             "boss",  ALIEN_ATLAS_COMPACT, 0x1F,  90 },
+    /* lvl 5  */ { "L4AN", "L4BO", "L4MA",  0, "Level 5: Service Tunnels",        "level", ALIEN_ATLAS_COMPACT, 0x1F,  90 },
+    /* lvl 6  */ { "L5AN", "L5BO", "L5MA",  0, "Level 6: Weapons Bay",            "boss",  ALIEN_ATLAS_COMPACT, 0x1F,   2 }, /* sf.b hi; lo=2: "the evil 1up" path in init_level_6 @ main.asm */
+    /* lvl 7  */ { "L3AN", "L2BO", "L6MA",  0, "Level 7: Upper Decks",            "level", ALIEN_ATLAS_COMPACT, 0x03,  99 },
+    /* lvl 8  */ { "L3AN", "L2BO", "L7MA",  0, "Level 8: Engine Room",            "boss",  ALIEN_ATLAS_COMPACT, 0x03,  60 },
+    /* lvl 9  */ { "L2AN", "L2BO", "L8MA",  5, "Level 9: Alien Command",          "level", ALIEN_ATLAS_COMPACT, 0x03,  77 },
+    /* lvl10  */ { "L1AN", "L1BO", "L9MA", 10, "Level 10: Central Hive",          "boss",  ALIEN_ATLAS_LEGACY,  0x17,  80 },
+    /* lvl11  */ { "L1AN", "L2BO", "LAMA", 15, "Level 11: Breeding Grounds",      "level", ALIEN_ATLAS_LEGACY,  0x17,  60 },
+    /* lvl12  */ { "L5AN", "L5BO", "LBMA", 20, "Level 12: Final Confrontation",   "boss",  ALIEN_ATLAS_COMPACT, 0x1D,  14 },
 };
 
 /* ------------------------------------------------------------------ */
@@ -93,8 +97,29 @@ int  g_alarm_buttons_pressed    = 0;
 int  g_alarm_last_col           = -1;
 int  g_alarm_last_row           = -1;
 
-/* Internal: frames per second = 50, timer displayed in M:SS */
-#define TIMER_FRAMES_PER_SECOND 50
+/* Internal: game tick rate for timer = 25 Hz (called every other display frame) */
+#define TIMER_TICKS_PER_SECOND 25
+
+/* Internal: per-second tick counter for the destruction countdown */
+static int s_destruct_tick_ctr = 0;
+
+/*
+ * Voice IDs for the per-second countdown, indexed by remaining seconds (1–8).
+ * Mirrors the requirement: when the timer reaches 8 the voice announces each
+ * second until 1 ("lorsque le compte à rebours arrive à 8 …").
+ * Entry 0 is unused (game over is handled by the timer-expired branch).
+ */
+static const int k_countdown_voices[9] = {
+    0,           /* 0 — handled by timer-expired branch */
+    VOICE_ONE,   /* 1 */
+    VOICE_TWO,   /* 2 */
+    VOICE_THREE, /* 3 */
+    VOICE_FOUR,  /* 4 */
+    VOICE_FIVE,  /* 5 */
+    VOICE_SIX,   /* 6 */
+    VOICE_SEVEN, /* 7 */
+    VOICE_EIGHT  /* 8 */
+};
 
 void level_init_variables(void)
 {
@@ -110,8 +135,10 @@ void level_init_variables(void)
      * completes, sending the player back to the menu instead of the next
      * level. */
     g_boss_active             = 0;
-    /* Timer set by level_finalize based on level def */
-    g_destruction_timer = (LONG)DESTRUCTION_TIMER_SECONDS * TIMER_FRAMES_PER_SECOND;
+    /* Timer is inactive until level_start_destruction() is called.
+     * g_destruction_timer holds the remaining seconds (0 = not active). */
+    g_destruction_timer       = 0;
+    s_destruct_tick_ctr       = 0;
 
     /* Reactor state — reset in init_level_variables @ main.asm#L747-L750 */
     g_reactor_up_done         = 0;
@@ -136,7 +163,7 @@ void level_init_variables(void)
 
 void level_get_timer_digits(int *minutes, int *seconds_hi, int *seconds_lo)
 {
-    int total_secs = (int)(g_destruction_timer / TIMER_FRAMES_PER_SECOND);
+    int total_secs = (int)g_destruction_timer;
     if (total_secs < 0) total_secs = 0;
     int m  = total_secs / 60;
     int s  = total_secs % 60;
@@ -145,37 +172,47 @@ void level_get_timer_digits(int *minutes, int *seconds_hi, int *seconds_lo)
     *seconds_lo = s % 10;
 }
 
+void level_tick_counter_reset(void)
+{
+    s_destruct_tick_ctr = 0;
+}
+
 void level_tick_timer(void)
 {
     if (!g_self_destruct_initiated) return;
     if (g_destruction_timer <= 0) return;
 
+    /*
+     * Count 25Hz ticks: when TIMER_TICKS_PER_SECOND ticks have accumulated
+     * one second has elapsed (mirrors lbW002FE0 counter in destruction_sequence
+     * @ main.asm#L1288-L1293: addq.w #1 / cmp.w #25 / bne void / clr.w).
+     */
+    s_destruct_tick_ctr++;
+    if (s_destruct_tick_ctr < TIMER_TICKS_PER_SECOND) return;
+    s_destruct_tick_ctr = 0;
+
+    /* Alarm tick each second (Ref: main.asm#L1293: move.w #14,sample_to_play). */
+    audio_play_sample(SAMPLE_CARET_MOVE);
+
     g_destruction_timer--;
 
-    /* Every 25 frames (~0.5 s) play the destruction sample (Ref: main.asm#L1275) */
-    if (g_destruction_timer % 25 == 0)
-        audio_play_sample(SAMPLE_DESTRUCT_IMM);
-
-    /* Last second: warning bip (Ref: main.asm#L1275) */
-    if (g_destruction_timer == TIMER_FRAMES_PER_SECOND)
-        audio_play_sample(SAMPLE_CARET_MOVE);
-
-    /* Switch palette to destruction colors when sequence starts */
-    if (g_destruction_timer == (LONG)DESTRUCTION_TIMER_SECONDS * TIMER_FRAMES_PER_SECOND - 1) {
-        palette_set_immediate(g_cur_map.palette_b, 32);
-        /* Replicate copper override: at beam line 51 the copper forces COLOR02
-         * and COLOR03 to black for the main 5-bitplane play area regardless of
-         * the loaded palette (Ref: lbW09A20C dc.w COLOR02,0,COLOR03,0
-         * @ main.asm#L18513). */
-        video_set_palette_entry(2, 0x000);
-        video_set_palette_entry(3, 0x000);
-    }
-
-    /* Timer expired: game over */
-    if (g_destruction_timer == 0) {
+    if (g_destruction_timer <= 0) {
+        /* Timer expired: level explodes → game over */
+        g_destruction_timer     = 0;
         g_flag_destruct_level   = 1;
         g_flag_jump_to_gameover = 1;
+        audio_stop_looping();
+        return;
     }
+
+    /*
+     * Voice countdown: when the display reaches 8 the voice announces each
+     * remaining second until 1 (then game over at 0).
+     * Mirrors the requirement: "lorsque le compte à rebours arrive à 8,
+     * la même voix annonce alors un compte à rebours jusqu'a 0".
+     */
+    if (g_destruction_timer >= 1 && g_destruction_timer <= 8)
+        audio_play_sample(k_countdown_voices[(int)g_destruction_timer]);
 }
 
 void level_start_destruction(void)
@@ -185,14 +222,240 @@ void level_start_destruction(void)
     g_in_destruction_sequence = 1;
     /* Exit becomes passable once destruction starts (Ref: tile_exit @ main.asm#L5191) */
     g_exit_unlocked = 1;
+
+    /*
+     * Set the per-level countdown timer in seconds.
+     * Mirrors set_destruction_timer @ main.asm#L1257 which loads timer_digit_hi:lo
+     * into cur_timer_digit_hi:lo — values are defined per-level in init_level_N.
+     */
+    g_destruction_timer = (LONG)k_level_defs[g_cur_level].timer_seconds;
+    s_destruct_tick_ctr = 0;
+
+    /*
+     * Switch to the destruction palette (palette_b = red-tinted palette).
+     * Mirrors the palette fade in destruction_sequence @ main.asm#L1282:
+     *   lea.l level_palette2,a1 / jsr prep_fade_speeds_fade_to_rgb
+     * We use an immediate switch for clarity; the red tint appears instantly.
+     */
+    if (g_cur_map.valid) {
+        palette_set_immediate(g_cur_map.palette_b, 32);
+        /* Replicate copper override: COLOR02/COLOR03 forced to black in the
+         * main play area (Ref: lbW09A20C @ main.asm#L18513). */
+        video_set_palette_entry(2, 0x000);
+        video_set_palette_entry(3, 0x000);
+    }
+
+    /*
+     * Voice announcement: "Warning … destruction imminent"
+     * Mirrors voice 6 + voice 23 played in destruction_sequence init block
+     * (lbC0111C4 / lbC011272 @ main.asm#L1270-L1278).
+     */
+    audio_play_sample(VOICE_WARNING);
     audio_play_sample(VOICE_DESTRUCT_IMM);
-    audio_play_sample(SAMPLE_DESTRUCT_IMM);
+
+    /*
+     * Start continuous alarm loop (mirrors lbW02316A looping sample struct
+     * set in destruction_sequence @ main.asm#L1289).
+     */
+    audio_play_looping(SAMPLE_DESTRUCT_IMM);
+}
+
+/* ------------------------------------------------------------------
+ * Explosion sprite pool — up to 7 simultaneous explosions.
+ * Each entry tracks a screen-space position and the current frame.
+ * ------------------------------------------------------------------ */
+#define EXPLOSION_POOL_SIZE  7
+#define EXPLOSION_FRAMES    16  /* frames in lbL018C2E: 16 BOB frames + fade */
+#define EXPLOSION_TICKS      1  /* delay=0 in lbL018C2E → 1 tick / frame     */
+
+typedef struct {
+    int active;
+    int sx;         /* world X of explosion centre */
+    int sy;         /* world Y of explosion centre */
+    int frame;      /* 0 … EXPLOSION_FRAMES-1   */
+    int tick;       /* tick counter within frame */
+} ExplosionEntry;
+
+static ExplosionEntry s_explosion_pool[EXPLOSION_POOL_SIZE];
+
+/* Render one frame of the explosion sequence, then present it.
+ * camera_dx/dy are added to g_camera_x/g_camera_y for shake.
+ * Returns 0 if the user quit.
+ */
+static int explosion_render_frame(int camera_dx, int camera_dy)
+{
+    timer_begin_frame();
+    input_poll();
+    if (g_quit_requested) return 0;
+
+    video_clear();
+    g_camera_x += camera_dx;
+    g_camera_y += camera_dy;
+    tilemap_render(&g_cur_map, &g_tileset);
+
+    /* Advance and draw each active explosion */
+    for (int i = 0; i < EXPLOSION_POOL_SIZE; i++) {
+        if (!s_explosion_pool[i].active) continue;
+        sprite_draw_alien_death(s_explosion_pool[i].frame,
+                                s_explosion_pool[i].sx - g_camera_x,
+                                s_explosion_pool[i].sy - g_camera_y);
+        s_explosion_pool[i].tick++;
+        if (s_explosion_pool[i].tick >= EXPLOSION_TICKS) {
+            s_explosion_pool[i].tick = 0;
+            s_explosion_pool[i].frame++;
+            if (s_explosion_pool[i].frame >= EXPLOSION_FRAMES)
+                s_explosion_pool[i].active = 0;
+        }
+    }
+
+    g_camera_x -= camera_dx;
+    g_camera_y -= camera_dy;
+
+    palette_tick();
+    video_upload_framebuffer();
+    video_flip();
+    return 1;
+}
+
+/*
+ * Final level-destruction explosion cinematic.
+ * Mirrors do_level_destruction @ main.asm#L9155.
+ *
+ * Phase 1 – camera shake in 4 passes with increasing amplitude while
+ *            looping explosion sounds start (lbW0231BA: samples 10/11).
+ * Phase 2 – palette flash to white (nuclear flash).
+ * Phase 3 – 150 frames of random explosions scattered across the map.
+ * Phase 4 – fade to black.
+ *
+ * lbC00DDB8: for d0 frames, shift map ±d1 px each pair of rendered frames.
+ *   Pass 1: d0=16, d1=1
+ *   Pass 2: d0=14, d1=2
+ *   [start fade to white here]
+ *   Pass 3: d0=12, d1=3
+ *   Pass 4: d0=10, d1=4
+ */
+void level_do_final_explosion(void)
+{
+    /* Number of shake passes and their amplitudes.
+     * From main.asm#L9163: (16,1),(14,2),(12,3),(10,4) */
+    static const int k_shake_frames[4]    = { 16, 14, 12, 10 };
+    static const int k_shake_amp[4]       = {  1,  2,  3,  4 };
+    static const UWORD k_white[32] = {
+        0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,
+        0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,
+        0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,
+        0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF
+    };
+    static const UWORD k_black[32] = { 0 };
+
+    /* Initialise explosion pool */
+    for (int i = 0; i < EXPLOSION_POOL_SIZE; i++)
+        s_explosion_pool[i].active = 0;
+
+    /* Stop the alarm loop — the explosion sound sequence replaces it
+     * (mirrors lbC00DDB8 setting sample_struct_to_play = lbW0231BA). */
+    audio_stop_looping();
+
+    /* Phase 1 – camera shake (4 passes).
+     * Between pass 2 and 3 we start the white-fade (main.asm#L9175-9179). */
+    UWORD cur_pal[32];
+    palette_get_current(cur_pal, 32);
+
+    for (int pass = 0; pass < 4; pass++) {
+        if (pass == 2) {
+            /* Start fade to white: mirrors main.asm#L9175-9179. */
+            palette_prep_fade_to_rgb(k_white, cur_pal, 32);
+            audio_play_sample(SAMPLE_EXPLOSION_A);
+        }
+        int frames = k_shake_frames[pass];
+        int amp    = k_shake_amp[pass];
+        for (int f = 0; f < frames; f++) {
+            if (!explosion_render_frame(+amp, +amp)) goto done;
+            if (!explosion_render_frame(-amp, -amp)) goto done;
+        }
+        /* Pump the fade while shaking */
+        if (pass >= 2) {
+            palette_tick();
+        }
+    }
+
+    /* One extra frame wait (mirrors jsr wait @ main.asm#L9181). */
+    if (!explosion_render_frame(0, 0)) goto done;
+
+    /* Instantly snap to white, then begin fade white → level_palette2
+     * (mirrors main.asm#L9183-9193: palette_white → level_palette2).
+     * This fade runs during Phase 3 so the explosions become visible
+     * as the palette transitions away from white. */
+    palette_set_immediate(k_white, 32);
+    palette_get_current(cur_pal, 32);   /* cur_pal is now all white */
+    palette_prep_fade_to_rgb(g_cur_map.palette_b, cur_pal, 32);
+
+    /* Phase 3 – 150 frames of random explosions.
+     * lbW00DF2E=1, lbW00DF30=1 → trigger lbC00DE46 every frame.
+     * Each frame picks a random explosion BOB from the pool and
+     * places it at a random world position within ~256×224 px of camera.
+     * Every 4th explosion plays a random bomb sound (10 or 11).
+     * Mirrors lbC00DD6A @ main.asm#L9199-9202. */
+    {
+        int explosion_ctr = 0;   /* mirrors lbW00DC74 */
+        int pool_idx      = 0;   /* round-robin through the pool */
+        for (int frame = 0; frame < 150; frame++) {
+            /* Spawn an explosion at a random position on screen */
+            int world_x = g_camera_x + (rand() % 256);
+            int world_y = g_camera_y + (rand() % 224);
+
+            /* Find a slot in the pool */
+            for (int t = 0; t < EXPLOSION_POOL_SIZE; t++) {
+                int idx = (pool_idx + t) % EXPLOSION_POOL_SIZE;
+                if (!s_explosion_pool[idx].active) {
+                    s_explosion_pool[idx].frame  = 0;
+                    s_explosion_pool[idx].tick   = 0;
+                    s_explosion_pool[idx].sx     = world_x;
+                    s_explosion_pool[idx].sy     = world_y;
+                    s_explosion_pool[idx].active = 1;  /* mark active last */
+                    pool_idx = (idx + 1) % EXPLOSION_POOL_SIZE;
+                    break;
+                }
+            }
+
+            /* Every 4 explosions play a random bomb sound
+             * (mirrors lbW00DC74 counter / samples 10–11 @ main.asm#L9268). */
+            explosion_ctr++;
+            if (explosion_ctr >= 4) {
+                explosion_ctr = 0;
+                int rnd = rand() % 3;
+                if (rnd < 2)
+                    audio_play_sample(SAMPLE_EXPLOSION_A);
+                else
+                    audio_play_sample(SAMPLE_REACTOR_BLAST);
+            }
+
+            if (!explosion_render_frame(0, 0)) goto done;
+        }
+    }
+
+    /* Phase 4 – fade to black (mirrors lbC00DDA2 @ main.asm#L9207). */
+    {
+        /* Capture the current (faded) palette as source for the black fade. */
+        palette_get_current(cur_pal, 32);
+        palette_prep_fade_to_rgb(k_black, cur_pal, 32);
+        while (!g_done_fade && !g_quit_requested) {
+            palette_tick();
+            if (!explosion_render_frame(0, 0)) goto done;
+        }
+        palette_set_immediate(k_black, 32);
+        /* One extra blank frame */
+        explosion_render_frame(0, 0);
+    }
+
+done:
+    g_flag_jump_to_gameover = 1;
 }
 
 void level_check_destruction(void)
 {
     if (g_self_destruct_initiated && g_flag_destruct_level) {
-        g_flag_jump_to_gameover = 1;
+        level_do_final_explosion();
     }
 
     /*
@@ -223,6 +486,8 @@ void level_check_gameover(void)
 void level_trigger_end(void)
 {
     g_flag_end_level = 1;
+    /* Stop the looping alarm when the player successfully escapes. */
+    audio_stop_looping();
     audio_play_sample(SAMPLE_DESCENT);
 }
 

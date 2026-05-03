@@ -136,6 +136,21 @@ void audio_play_sample(int sample_id)
     Mix_PlayChannel(-1, s_samples[sample_id], 0);
 }
 
+/* Dedicated channel reserved for the looping self-destruct alarm. */
+#define ALARM_LOOP_CHANNEL 15
+
+void audio_play_looping(int sample_id)
+{
+    if (sample_id < 0 || sample_id >= AUDIO_MAX_SAMPLES) return;
+    if (!s_samples[sample_id]) return;
+    Mix_PlayChannel(ALARM_LOOP_CHANNEL, s_samples[sample_id], -1);
+}
+
+void audio_stop_looping(void)
+{
+    Mix_HaltChannel(ALARM_LOOP_CHANNEL);
+}
+
 void audio_stop_samples(void)
 {
     Mix_HaltChannel(-1);

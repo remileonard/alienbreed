@@ -283,13 +283,6 @@ static void render_bar_overlay(const GfxImage *bg, int bar_y, const Player *p)
     }
 }
 
-/* Draw a 2-digit decimal number using timer digit sprites as overlays */
-static void draw_two_digits_overlay(int hi, int lo, int x, int y)
-{
-    sprite_draw_digit_overlay(hi, x,     y, 221, 221, 221);
-    sprite_draw_digit_overlay(lo, x + 9, y, 221, 221, 221);
-}
-
 void hud_render(void)
 {
     /* Bars and timer are now rendered in hud_render_overlay() after framebuffer
@@ -304,18 +297,48 @@ void hud_render_overlay(void)
     /* ---- Player 2 status bar: bottom of screen (y=248) ---- */
     render_bar_overlay(&s_p2_bar, BAR_P2_Y, &g_players[1]);
 
-    /* ---- Destruction timer: centred just inside the top bar ---- */
-    int mins, sh, sl;
-    level_get_timer_digits(&mins, &sh, &sl);
+    /* ---- Destruction timer: displayed only during the self-destruct sequence ---- */
+    if (g_self_destruct_initiated) {
+        /*
+         * Position from ASM sprite structs:
+         *   lbW0122F0: dc.w 6,24,32,128  (hi digit: x_struct=6, y_struct=24)
+         *   lbW01230C: dc.w 23,24,32,128 (lo digit: x_struct=23, y_struct=24)
+         *
+         * Conversion to screen pixels (DIWSTRT=$2B8E on Amiga PAL):
+         *   screen_x = x_struct + (HSTART_offset - DIWSTRT_H)
+         *            = x_struct + (143 - 142) = x_struct + 1
+         *   screen_y = y_struct + VSTRT_offset - DIWSTRT_V
+         *            = y_struct + 35 - 43 = y_struct - 8
+         * → hi digit at screen (7, 16), lo digit at screen (24, 16)
+         */
+        int tx = 7;   /* x_struct=6:  6 + 1 = 7  */
+        int ty = 16;  /* y_struct=24: 24 - 8 = 16 */
 
-    /* Timer x=148 centres the "M:SS" display (≈20 px) in 320-px screen */
-    int tx = 148;
-    int ty = BAR_P1_Y;
-    sprite_draw_digit_overlay(mins, tx,      ty, 221, 221, 221);
-    /* colon dots */
-    video_overlay_fill_rect(tx + 9, ty + 2, 1, 1, 221, 221, 221, 255);
-    video_overlay_fill_rect(tx + 9, ty + 5, 1, 1, 221, 221, 221, 255);
-    draw_two_digits_overlay(sh, sl, tx + 11, ty);
+        /*
+         * Color: sprite COLOR17 = g_palette[17] (first color for Amiga sprite
+         * pair 0/1, set to a red shade by the destruction palette palette_b).
+         * Fallback to bright red when the palette is not loaded.
+         * Ref: copper_main_palette COLOR17 entry @ main.asm#L18444;
+         *      palette_set_immediate(g_cur_map.palette_b, 32) in level_start_destruction().
+         */
+        UBYTE tr = (UBYTE)((g_palette[17] >> 16) & 0xFF);
+        UBYTE tg = (UBYTE)((g_palette[17] >>  8) & 0xFF);
+        UBYTE tb = (UBYTE)((g_palette[17] >>  0) & 0xFF);
+        if (tr == 0 && tg == 0 && tb == 0) { tr = 0xCC; tg = 0x00; tb = 0x00; }
+
+        /*
+         * Format: two raw decimal digits — matches ASM cur_timer_digit_hi:lo
+         * which are decremented directly (no minutes conversion).
+         * Ref: display_timer_digits @ main.asm#L1321 which writes hi then lo.
+         *
+         * Digit spacing: lbW01230C.x (23) - lbW0122F0.x (6) = 17 pixels.
+         */
+#define TIMER_DIGIT_SPACING  17  /* screen_x distance: struct_x 23-6 = 17 */
+        int hi = (int)g_destruction_timer / 10;
+        int lo = (int)g_destruction_timer % 10;
+        sprite_draw_digit_overlay(hi, tx,                     ty, tr, tg, tb);
+        sprite_draw_digit_overlay(lo, tx + TIMER_DIGIT_SPACING, ty, tr, tg, tb);
+    }
 }
 
 void hud_render_pause(void)
