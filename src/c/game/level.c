@@ -383,8 +383,12 @@ void level_do_final_explosion(void)
     if (!explosion_render_frame(0, 0)) goto done;
 
     /* Instantly snap to white, then begin fade white → level_palette2
-     * (mirrors main.asm#L9183-9193: palette_white → level_palette2). */
+     * (mirrors main.asm#L9183-9193: palette_white → level_palette2).
+     * This fade runs during Phase 3 so the explosions become visible
+     * as the palette transitions away from white. */
     palette_set_immediate(k_white, 32);
+    palette_get_current(cur_pal, 32);   /* cur_pal is now all white */
+    palette_prep_fade_to_rgb(g_cur_map.palette_b, cur_pal, 32);
 
     /* Phase 3 – 150 frames of random explosions.
      * lbW00DF2E=1, lbW00DF30=1 → trigger lbC00DE46 every frame.
@@ -425,9 +429,6 @@ void level_do_final_explosion(void)
                 else
                     audio_play_sample(SAMPLE_REACTOR_BLAST);
             }
-
-            /* Tick the white→level_palette2 fade during this phase. */
-            palette_tick();
 
             if (!explosion_render_frame(0, 0)) goto done;
         }
