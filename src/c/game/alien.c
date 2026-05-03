@@ -1017,7 +1017,13 @@ void alien_update_all(void)
                 }
                 (*hit_count)++;
                 if (*hit_count == 6) {
-                    tilemap_replace_tile(&g_cur_map, col, row);
+                    /*
+                     * Replace the entire reactor face (all tiles sharing this
+                     * attribute) with floor tiles, mirroring patch_dat_reactors
+                     * / patch_tiles @ main.asm#L9651-L9657 which patches the
+                     * whole face rather than just the one projectile-hit tile.
+                     */
+                    tilemap_replace_reactor_face(&g_cur_map, attr);
                     audio_play_sample(SAMPLE_REACTOR_BLAST);
                     /*
                      * check_reactors: all 4 faces done (all counters != 0)?

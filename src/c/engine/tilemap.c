@@ -198,6 +198,42 @@ void tilemap_replace_tile(LevelMap *map, int col, int row)
     map->tiles[row][col] = floor_word;
 }
 
+void tilemap_replace_reactor_face(LevelMap *map, UBYTE attr)
+{
+    if (!map) return;
+    /*
+     * Replace only the four centre tiles of the destroyed reactor face.
+     *
+     * tile_idx 214/215/234/235 (the 2×2 inner dome) are replaced with their
+     * cracked/damaged counterparts using the tile words from lbW01C52A entry
+     * 37 (lbL016CDA) W5-W8 @ main.asm#L14838 (patch_dat_reactors):
+     *   0x4100 = tile 260, attr 0   0x4140 = tile 261, attr 0
+     *   0x4600 = tile 280, attr 0   0x4640 = tile 281, attr 0
+     *
+     * All other reactor tiles (the outer octagonal ring, tile_idx
+     * 194/195/196/213/216/217/233/236/237/253-257/274-276) are left
+     * completely unchanged — same tile_idx, same attribute (wall).
+     * The ASM patch_dat_reactors never touches those tiles.
+     *
+     * Ref: patch_dat_reactors @ main.asm#L15836; lbW01C52A entry 37 W5-W8.
+     */
+    for (int row = 0; row < MAP_ROWS; row++) {
+        for (int col = 0; col < MAP_COLS; col++) {
+            UWORD w = map->tiles[row][col];
+            if ((w & 0x3F) != attr)  /* lower 6 bits = attribute */
+                continue;
+            switch (w >> 6) {  /* tile_idx = upper 10 bits */
+            case 214: map->tiles[row][col] = 0x4100; break; /* → tile 260 */
+            case 215: map->tiles[row][col] = 0x4140; break; /* → tile 261 */
+            case 234: map->tiles[row][col] = 0x4600; break; /* → tile 280 */
+            case 235: map->tiles[row][col] = 0x4640; break; /* → tile 281 */
+            /* all other reactor ring tiles: leave untouched */
+            default:  break;
+            }
+        }
+    }
+}
+
 void tilemap_render(const LevelMap *map, const Tileset *ts)
 {
     if (!map->valid || !ts->pixels) return;
