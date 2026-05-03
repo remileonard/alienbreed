@@ -138,6 +138,17 @@ void level_tick_timer(void);
 /* Reset the internal per-second tick counter (call when starting a level). */
 void level_tick_counter_reset(void);
 
+/*
+ * Run the final level-destruction explosion cinematic.
+ * Mirrors do_level_destruction @ main.asm#L9155:
+ *   – camera shake (4 passes with increasing amplitude)
+ *   – palette flash to white
+ *   – 150 frames of random explosion sprites across the map
+ *   – fade to black
+ * Leaves g_flag_jump_to_gameover = 1 when finished.
+ */
+void level_do_final_explosion(void);
+
 /* Returns the displayed timer value (seconds split into M, SS digits). */
 void level_get_timer_digits(int *minutes, int *seconds_hi, int *seconds_lo);
 

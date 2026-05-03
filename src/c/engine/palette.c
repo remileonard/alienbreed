@@ -193,3 +193,9 @@ void palette_set_immediate(const UWORD *palette, int count)
     g_done_fade      = 1;
     video_set_palette(palette, count);
 }
+
+void palette_get_current(UWORD *out, int count)
+{
+    if (count > 32) count = 32;
+    memcpy(out, s_cur_palette, (size_t)count * sizeof(UWORD));
+}

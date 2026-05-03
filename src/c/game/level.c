@@ -11,10 +11,14 @@
 #include "../engine/alien_gfx.h"
 #include "../engine/anim_gfx.h"
 #include "../engine/tile_anim.h"
+#include "../engine/sprite.h"
 #include "../hal/audio.h"
 #include "../hal/video.h"
+#include "../hal/input.h"
+#include "../hal/timer.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 /* ------------------------------------------------------------------ */
 /* Level definitions — map filenames and settings                     */
@@ -256,10 +260,201 @@ void level_start_destruction(void)
     audio_play_looping(SAMPLE_DESTRUCT_IMM);
 }
 
+/* ------------------------------------------------------------------
+ * Explosion sprite pool — up to 7 simultaneous explosions.
+ * Each entry tracks a screen-space position and the current frame.
+ * ------------------------------------------------------------------ */
+#define EXPLOSION_POOL_SIZE  7
+#define EXPLOSION_FRAMES    16  /* frames in lbL018C2E: 16 BOB frames + fade */
+#define EXPLOSION_TICKS      1  /* delay=0 in lbL018C2E → 1 tick / frame     */
+
+typedef struct {
+    int active;
+    int sx;         /* screen X (world - camera) */
+    int sy;         /* screen Y (world - camera) */
+    int frame;      /* 0 … EXPLOSION_FRAMES-1   */
+    int tick;       /* tick counter within frame */
+} ExplosionEntry;
+
+static ExplosionEntry s_explosion_pool[EXPLOSION_POOL_SIZE];
+
+/* Render one frame of the explosion sequence, then present it.
+ * camera_dx/dy are added to g_camera_x/g_camera_y for shake.
+ * Returns 0 if the user quit.
+ */
+static int explosion_render_frame(int camera_dx, int camera_dy)
+{
+    timer_begin_frame();
+    input_poll();
+    if (g_quit_requested) return 0;
+
+    video_clear();
+    g_camera_x += camera_dx;
+    g_camera_y += camera_dy;
+    tilemap_render(&g_cur_map, &g_tileset);
+
+    /* Advance and draw each active explosion */
+    for (int i = 0; i < EXPLOSION_POOL_SIZE; i++) {
+        if (!s_explosion_pool[i].active) continue;
+        sprite_draw_alien_death(s_explosion_pool[i].frame,
+                                s_explosion_pool[i].sx - g_camera_x,
+                                s_explosion_pool[i].sy - g_camera_y);
+        s_explosion_pool[i].tick++;
+        if (s_explosion_pool[i].tick >= EXPLOSION_TICKS) {
+            s_explosion_pool[i].tick = 0;
+            s_explosion_pool[i].frame++;
+            if (s_explosion_pool[i].frame >= EXPLOSION_FRAMES)
+                s_explosion_pool[i].active = 0;
+        }
+    }
+
+    g_camera_x -= camera_dx;
+    g_camera_y -= camera_dy;
+
+    palette_tick();
+    video_upload_framebuffer();
+    video_flip();
+    return 1;
+}
+
+/*
+ * Final level-destruction explosion cinematic.
+ * Mirrors do_level_destruction @ main.asm#L9155.
+ *
+ * Phase 1 – camera shake in 4 passes with increasing amplitude while
+ *            looping explosion sounds start (lbW0231BA: samples 10/11).
+ * Phase 2 – palette flash to white (nuclear flash).
+ * Phase 3 – 150 frames of random explosions scattered across the map.
+ * Phase 4 – fade to black.
+ *
+ * lbC00DDB8: for d0 frames, shift map ±d1 px each pair of rendered frames.
+ *   Pass 1: d0=16, d1=1
+ *   Pass 2: d0=14, d1=2
+ *   [start fade to white here]
+ *   Pass 3: d0=12, d1=3
+ *   Pass 4: d0=10, d1=4
+ */
+void level_do_final_explosion(void)
+{
+    /* Number of shake passes and their amplitudes.
+     * From main.asm#L9163: (16,1),(14,2),(12,3),(10,4) */
+    static const int k_shake_frames[4]    = { 16, 14, 12, 10 };
+    static const int k_shake_amp[4]       = {  1,  2,  3,  4 };
+    static const UWORD k_white[32] = {
+        0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,
+        0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,
+        0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,
+        0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF,0x0FFF
+    };
+    static const UWORD k_black[32] = { 0 };
+
+    /* Initialise explosion pool */
+    for (int i = 0; i < EXPLOSION_POOL_SIZE; i++)
+        s_explosion_pool[i].active = 0;
+
+    /* Stop the alarm loop — the explosion sound sequence replaces it
+     * (mirrors lbC00DDB8 setting sample_struct_to_play = lbW0231BA). */
+    audio_stop_looping();
+
+    /* Phase 1 – camera shake (4 passes).
+     * Between pass 2 and 3 we start the white-fade (main.asm#L9175-9179). */
+    UWORD cur_pal[32];
+    palette_get_current(cur_pal, 32);
+
+    for (int pass = 0; pass < 4; pass++) {
+        if (pass == 2) {
+            /* Start fade to white: mirrors main.asm#L9175-9179. */
+            palette_prep_fade_to_rgb(k_white, cur_pal, 32);
+            audio_play_sample(SAMPLE_EXPLOSION_A);
+        }
+        int frames = k_shake_frames[pass];
+        int amp    = k_shake_amp[pass];
+        for (int f = 0; f < frames; f++) {
+            if (!explosion_render_frame(+amp, +amp)) goto done;
+            if (!explosion_render_frame(-amp, -amp)) goto done;
+        }
+        /* Pump the fade while shaking */
+        if (pass >= 2) {
+            palette_tick();
+        }
+    }
+
+    /* One extra frame wait (mirrors jsr wait @ main.asm#L9181). */
+    if (!explosion_render_frame(0, 0)) goto done;
+
+    /* Instantly snap to white, then begin fade white → level_palette2
+     * (mirrors main.asm#L9183-9193: palette_white → level_palette2). */
+    palette_set_immediate(k_white, 32);
+
+    /* Phase 3 – 150 frames of random explosions.
+     * lbW00DF2E=1, lbW00DF30=1 → trigger lbC00DE46 every frame.
+     * Each frame picks a random explosion BOB from the pool and
+     * places it at a random world position within ~256×224 px of camera.
+     * Every 4th explosion plays a random bomb sound (10 or 11).
+     * Mirrors lbC00DD6A @ main.asm#L9199-9202. */
+    {
+        int explosion_ctr = 0;   /* mirrors lbW00DC74 */
+        int pool_idx      = 0;   /* round-robin through the pool */
+        for (int frame = 0; frame < 150; frame++) {
+            /* Spawn an explosion at a random position on screen */
+            int world_x = g_camera_x + (rand() % 256);
+            int world_y = g_camera_y + (rand() % 224);
+
+            /* Find a slot in the pool */
+            for (int t = 0; t < EXPLOSION_POOL_SIZE; t++) {
+                int idx = (pool_idx + t) % EXPLOSION_POOL_SIZE;
+                if (!s_explosion_pool[idx].active) {
+                    s_explosion_pool[idx].active = 1;
+                    s_explosion_pool[idx].sx     = world_x;
+                    s_explosion_pool[idx].sy     = world_y;
+                    s_explosion_pool[idx].frame  = 0;
+                    s_explosion_pool[idx].tick   = 0;
+                    pool_idx = (idx + 1) % EXPLOSION_POOL_SIZE;
+                    break;
+                }
+            }
+
+            /* Every 4 explosions play a random bomb sound
+             * (mirrors lbW00DC74 counter / samples 10–11 @ main.asm#L9268). */
+            explosion_ctr++;
+            if (explosion_ctr >= 4) {
+                explosion_ctr = 0;
+                int rnd = rand() % 3;
+                if (rnd < 2)
+                    audio_play_sample(SAMPLE_EXPLOSION_A);
+                else
+                    audio_play_sample(SAMPLE_REACTOR_BLAST);
+            }
+
+            /* Tick the white→level_palette2 fade during this phase. */
+            palette_tick();
+
+            if (!explosion_render_frame(0, 0)) goto done;
+        }
+    }
+
+    /* Phase 4 – fade to black (mirrors lbC00DDA2 @ main.asm#L9207). */
+    {
+        /* Capture the current (faded) palette as source for the black fade. */
+        palette_get_current(cur_pal, 32);
+        palette_prep_fade_to_rgb(k_black, cur_pal, 32);
+        while (!g_done_fade && !g_quit_requested) {
+            palette_tick();
+            if (!explosion_render_frame(0, 0)) goto done;
+        }
+        palette_set_immediate(k_black, 32);
+        /* One extra blank frame */
+        explosion_render_frame(0, 0);
+    }
+
+done:
+    g_flag_jump_to_gameover = 1;
+}
+
 void level_check_destruction(void)
 {
     if (g_self_destruct_initiated && g_flag_destruct_level) {
-        g_flag_jump_to_gameover = 1;
+        level_do_final_explosion();
     }
 
     /*

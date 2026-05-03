@@ -66,4 +66,10 @@ void palette_tick(void);
  */
 void palette_set_immediate(const UWORD *palette, int count);
 
+/*
+ * Copy the current palette (32 Amiga UWORD values) into `out`.
+ * Useful for capturing the current state before starting a new fade.
+ */
+void palette_get_current(UWORD *out, int count);
+
 #endif /* AB_PALETTE_H */
