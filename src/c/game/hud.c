@@ -140,7 +140,7 @@ static const BarRGB k_bar_pal[BAR_H][4] = {
  */
 static void bar_blit_row(const GfxImage *bg, int row, int bar_y)
 {
-    if (!bg || !bg->pixels || row >= bg->h) return;
+    if (!bg || !bg->pixels || row < 0 || row >= bg->h) return;
     const UBYTE  *src = bg->pixels + (size_t)row * (size_t)bg->w;
     const BarRGB *pal = k_bar_pal[row];
     int x = 0;
