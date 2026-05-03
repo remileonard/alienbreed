@@ -1965,11 +1965,14 @@ void intex_run(int player_idx)
         }
     }
 
-    /* Restore game palette, preserving the copper COLOR02/COLOR03 override */
+    /* Restore game palette — mirrors level_finalize: apply PALA immediately
+     * with the copper COLOR02/COLOR03 forced-black override pre-applied. */
     if (g_cur_map.valid) {
-        palette_set_immediate(g_cur_map.palette_a, 32);
-        video_set_palette_entry(2, 0x000);
-        video_set_palette_entry(3, 0x000);
+        UWORD level_pal[32];
+        memcpy(level_pal, g_cur_map.palette_a, 32 * sizeof(UWORD));
+        level_pal[2] = 0x000;
+        level_pal[3] = 0x000;
+        palette_set_immediate(level_pal, 32);
     }
 
     audio_resume_music();

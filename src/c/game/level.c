@@ -56,10 +56,10 @@ const LevelDef k_level_defs[NUM_LEVELS] = {
     /*          map_an  map_bo  map_ma  str  briefing_text                         music    atlas_type          engine_tile_mask  timer_s */
     /* lvl 1  */ { "L0AN", "L0BO", "L0MA",  0, "Level 1: Research Base",          "level", ALIEN_ATLAS_LEGACY,  0x1F,  60 },
     /* lvl 2  */ { "L1AN", "L1BO", "L1MA",  0, "Level 2: Bio-Containment",        "level", ALIEN_ATLAS_COMPACT, 0x17,  60 },
-    /* lvl 3  */ { "L2AN", "L2BO", "L2MA",  0, "Level 3: Reactor Core",           "level", ALIEN_ATLAS_COMPACT, 0x1F,  40 },
-    /* lvl 4  */ { "L3AN", "L3BO", "L3MA",  0, "Level 4: Alien Hive",             "boss",  ALIEN_ATLAS_COMPACT, 0x1F,  90 },
+    /* lvl 3  */ { "L3AN", "L3BO", "L2MA",  0, "Level 3: Reactor Core",           "level", ALIEN_ATLAS_COMPACT, 0x1F,  40 },
+    /* lvl 4  */ { "L4AN", "L4BO", "L3MA",  0, "Level 4: Alien Hive",             "boss",  ALIEN_ATLAS_COMPACT, 0x1F,  90 },
     /* lvl 5  */ { "L4AN", "L4BO", "L4MA",  0, "Level 5: Service Tunnels",        "level", ALIEN_ATLAS_COMPACT, 0x1F,  90 },
-    /* lvl 6  */ { "L5AN", "L5BO", "L5MA",  0, "Level 6: Weapons Bay",            "boss",  ALIEN_ATLAS_COMPACT, 0x1F,   2 }, /* sf.b hi; lo=2: "the evil 1up" path in init_level_6 @ main.asm */
+    /* lvl 6  */ { "L3AN", "L3BO", "L5MA",  0, "Level 6: Weapons Bay",            "boss",  ALIEN_ATLAS_COMPACT, 0x1F,   2 }, /* sf.b hi; lo=2: "the evil 1up" path in init_level_6 @ main.asm */
     /* lvl 7  */ { "L3AN", "L2BO", "L6MA",  0, "Level 7: Upper Decks",            "level", ALIEN_ATLAS_COMPACT, 0x03,  99 },
     /* lvl 8  */ { "L3AN", "L2BO", "L7MA",  0, "Level 8: Engine Room",            "boss",  ALIEN_ATLAS_COMPACT, 0x03,  60 },
     /* lvl 9  */ { "L2AN", "L2BO", "L8MA",  5, "Level 9: Alien Command",          "level", ALIEN_ATLAS_COMPACT, 0x03,  77 },
@@ -493,28 +493,21 @@ void level_trigger_end(void)
 
 void level_finalize(void)
 {
-    /* Apply level palette with fade-in from black.
-     * The briefing ends with a black palette (palette_set_immediate(s_black))
-     * so we set up a fade from black to the level's PALA palette here.
-     * The game loop's palette_tick() advances the fade each frame.
+    /* Apply level palette immediately.
+     * Mirrors ASM finalize_level (main.asm#L1635-L1643) which sets up a fast
+     * palette transition using level_palette1 (the PALA chunk values).
+     * We apply the palette instantly so that the correct colours appear on the
+     * very first rendered frame, which matches what the INTEX restore does.
      *
-     * Replicate copper override: COLOR02 and COLOR03 must be black during
-     * the main play area (Ref: lbW09A20C dc.w COLOR02,0,COLOR03,0
-     * @ main.asm#L18513), so force entries 2 and 3 to 0 in the target
-     * palette before starting the fade.
-     *
-     * Original ASM finalize_level fades from palette_white to level_palette1
-     * (Ref: main.asm#L1635-L1643).  The C port transitions from black
-     * (briefing end state) to keep the palette fade visually coherent. */
+     * Replicate copper override: at raster line 51, lbW09A20C in the Amiga
+     * copper list forces COLOR02 and COLOR03 to black in the main play area
+     * (Ref: main.asm#L18513).  Force entries 2 and 3 to zero here. */
     if (g_cur_map.valid) {
         UWORD level_pal[32];
         memcpy(level_pal, g_cur_map.palette_a, 32 * sizeof(UWORD));
         level_pal[2] = 0x000; /* copper COLOR02 override: forced black */
         level_pal[3] = 0x000; /* copper COLOR03 override: forced black */
-
-        UWORD cur_black[32];
-        memset(cur_black, 0, sizeof(cur_black));
-        palette_prep_fade_in(level_pal, cur_black, 32);
+        palette_set_immediate(level_pal, 32);
     }
 
     /*
