@@ -59,6 +59,31 @@ typedef struct {
     int   is_boss;
     /* Pathfinding state */
     int   target_x, target_y;
+    /*
+     * Stuck / evasion state — mirrors ASM offsets 78/80/82/88 in lbC00987E.
+     *
+     * evade_x (ASM 78(a0)): X-axis evasion timer.  Set to 50 by the stuck
+     *   logic when Y was physically blocked.  Decremented by 2 every game
+     *   tick (double-decrement at lbC009912).  While > 0 the alien reverses
+     *   its intended X direction (right→left / left→right).
+     *
+     * evade_y (ASM 80(a0)): Y-axis evasion timer.  Set to 50 by the stuck
+     *   logic when X was physically blocked.  Never decremented; stays until
+     *   the stuck counter fires again and toggles it back to 0.  While > 0
+     *   the alien reverses its intended Y direction (down→up / up→down).
+     *
+     * blocked_axis (ASM 82(a0)): last axis blocked by a wall collision.
+     *   0 = X movement was blocked (set by aliens_collision_stop when X speed
+     *       is zeroed).  1 = Y movement was blocked.
+     *
+     * stuck_counter (ASM 88(a0)): counts consecutive ticks with no movement
+     *   (dir_bits == 0).  When it reaches 25 it resets to 0 and toggles the
+     *   evasion timer for the blocked axis (lbC009A16–lbC009A60).
+     */
+    int   evade_x;
+    int   evade_y;
+    int   blocked_axis;
+    int   stuck_counter;
 } Alien;
 
 extern Alien g_aliens[MAX_ALIENS];

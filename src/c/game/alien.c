@@ -841,27 +841,68 @@ static void alien_move(int self_idx, Alien *a)
     /*    3 probes along the leading edge of the proposed bbox, matching   */
     /*    lbW00A2D6 (right) and lbW00A2CA (left) at main.asm#L7089-7090.  */
     /*    Offsets are ASM values − 16 (centre-based pos_x/pos_y).         */
+    /*                                                                      */
+    /*    evade_x (ASM 78(a0)): decremented by 2 per tick via the ASM      */
+    /*    double-decrement pattern at lbC009912 (main.asm#L6489-L6494).    */
+    /*    While > 0 the intended X direction is reversed (right↔left).     */
     /* ------------------------------------------------------------------ */
+
+    /* Double-decrement of X evasion timer, clamped at 0 (lbC009912). */
+    if (a->evade_x > 0) a->evade_x--;
+    if (a->evade_x > 0) a->evade_x--;
+
     int dx = tx - ax;
     if (dx > 4) {
-        /* Move right: 3 probes at right edge (nx+14), y = -22, 0, -12 */
-        int nx = ax + spd;
-        if (!alien_solid_at(nx + 14, ay - 22) &&
-            !alien_solid_at(nx + 14, ay +  0) &&
-            !alien_solid_at(nx + 14, ay - 12) &&
-            !alien_overlaps_other(self_idx, nx, ay)) {
-            ax = nx;
-            dir_bits |= 4;  /* right */
+        if (a->evade_x != 0) {
+            /* Evasion active: reverse direction — try LEFT (lbC009956 path). */
+            int nx = ax - spd;
+            if (!alien_solid_at(nx - 20, ay - 22) &&
+                !alien_solid_at(nx - 20, ay +  0) &&
+                !alien_solid_at(nx - 20, ay - 12) &&
+                !alien_overlaps_other(self_idx, nx, ay)) {
+                ax = nx;
+                dir_bits |= 8;  /* left */
+            } else {
+                a->blocked_axis = 0;  /* X blocked */
+            }
+        } else {
+            /* Normal: move right (lbC009938 path). */
+            int nx = ax + spd;
+            if (!alien_solid_at(nx + 14, ay - 22) &&
+                !alien_solid_at(nx + 14, ay +  0) &&
+                !alien_solid_at(nx + 14, ay - 12) &&
+                !alien_overlaps_other(self_idx, nx, ay)) {
+                ax = nx;
+                dir_bits |= 4;  /* right */
+            } else {
+                a->blocked_axis = 0;  /* X blocked */
+            }
         }
     } else if (dx < -4) {
-        /* Move left: 3 probes at left edge (nx-20), y = -22, 0, -12 */
-        int nx = ax - spd;
-        if (!alien_solid_at(nx - 20, ay - 22) &&
-            !alien_solid_at(nx - 20, ay +  0) &&
-            !alien_solid_at(nx - 20, ay - 12) &&
-            !alien_overlaps_other(self_idx, nx, ay)) {
-            ax = nx;
-            dir_bits |= 8;  /* left */
+        if (a->evade_x != 0) {
+            /* Evasion active: reverse direction — try RIGHT (lbC009938 path). */
+            int nx = ax + spd;
+            if (!alien_solid_at(nx + 14, ay - 22) &&
+                !alien_solid_at(nx + 14, ay +  0) &&
+                !alien_solid_at(nx + 14, ay - 12) &&
+                !alien_overlaps_other(self_idx, nx, ay)) {
+                ax = nx;
+                dir_bits |= 4;  /* right */
+            } else {
+                a->blocked_axis = 0;  /* X blocked */
+            }
+        } else {
+            /* Normal: move left (lbC009956 path). */
+            int nx = ax - spd;
+            if (!alien_solid_at(nx - 20, ay - 22) &&
+                !alien_solid_at(nx - 20, ay +  0) &&
+                !alien_solid_at(nx - 20, ay - 12) &&
+                !alien_overlaps_other(self_idx, nx, ay)) {
+                ax = nx;
+                dir_bits |= 8;  /* left */
+            } else {
+                a->blocked_axis = 0;  /* X blocked */
+            }
         }
     }
 
@@ -870,27 +911,63 @@ static void alien_move(int self_idx, Alien *a)
     /*    3 probes along the leading edge of the proposed bbox, matching   */
     /*    lbW00A2EE (down) and lbW00A2E2 (up) at main.asm#L7087-7088.     */
     /*    Offsets are ASM values − 16 (centre-based pos_x/pos_y).         */
+    /*                                                                      */
+    /*    evade_y (ASM 80(a0)): NOT decremented here (unlike evade_x).     */
+    /*    It is toggled between 50 and 0 by the stuck counter.  While > 0  */
+    /*    the intended Y direction is reversed (down↔up).                  */
     /* ------------------------------------------------------------------ */
     int dy = ty - ay;
     if (dy > 4) {
-        /* Move down: 3 probes at bottom edge (ny+4), x = -16, +6, -6 */
-        int ny = ay + spd;
-        if (!alien_solid_at(ax - 16, ny + 4) &&
-            !alien_solid_at(ax +  6, ny + 4) &&
-            !alien_solid_at(ax -  6, ny + 4) &&
-            !alien_overlaps_other(self_idx, ax, ny)) {
-            ay = ny;
-            dir_bits |= 1;  /* down */
+        if (a->evade_y != 0) {
+            /* Evasion active: reverse direction — try UP. */
+            int ny = ay - spd;
+            if (!alien_solid_at(ax - 16, ny - 26) &&
+                !alien_solid_at(ax +  6, ny - 26) &&
+                !alien_solid_at(ax -  6, ny - 26) &&
+                !alien_overlaps_other(self_idx, ax, ny)) {
+                ay = ny;
+                dir_bits |= 2;  /* up */
+            } else {
+                a->blocked_axis = 1;  /* Y blocked */
+            }
+        } else {
+            /* Normal: move down. */
+            int ny = ay + spd;
+            if (!alien_solid_at(ax - 16, ny + 4) &&
+                !alien_solid_at(ax +  6, ny + 4) &&
+                !alien_solid_at(ax -  6, ny + 4) &&
+                !alien_overlaps_other(self_idx, ax, ny)) {
+                ay = ny;
+                dir_bits |= 1;  /* down */
+            } else {
+                a->blocked_axis = 1;  /* Y blocked */
+            }
         }
     } else if (dy < -4) {
-        /* Move up: 3 probes at top edge (ny-26), x = -16, +6, -6 */
-        int ny = ay - spd;
-        if (!alien_solid_at(ax - 16, ny - 26) &&
-            !alien_solid_at(ax +  6, ny - 26) &&
-            !alien_solid_at(ax -  6, ny - 26) &&
-            !alien_overlaps_other(self_idx, ax, ny)) {
-            ay = ny;
-            dir_bits |= 2;  /* up */
+        if (a->evade_y != 0) {
+            /* Evasion active: reverse direction — try DOWN. */
+            int ny = ay + spd;
+            if (!alien_solid_at(ax - 16, ny + 4) &&
+                !alien_solid_at(ax +  6, ny + 4) &&
+                !alien_solid_at(ax -  6, ny + 4) &&
+                !alien_overlaps_other(self_idx, ax, ny)) {
+                ay = ny;
+                dir_bits |= 1;  /* down */
+            } else {
+                a->blocked_axis = 1;  /* Y blocked */
+            }
+        } else {
+            /* Normal: move up. */
+            int ny = ay - spd;
+            if (!alien_solid_at(ax - 16, ny - 26) &&
+                !alien_solid_at(ax +  6, ny - 26) &&
+                !alien_solid_at(ax -  6, ny - 26) &&
+                !alien_overlaps_other(self_idx, ax, ny)) {
+                ay = ny;
+                dir_bits |= 2;  /* up */
+            } else {
+                a->blocked_axis = 1;  /* Y blocked */
+            }
         }
     }
 
@@ -918,7 +995,31 @@ static void alien_move(int self_idx, Alien *a)
     };
     if (dir_bits > 0 && dir_bits < 16 && k_dir_table[dir_bits] >= 0)
         a->direction = k_dir_table[dir_bits];
-    /* If dir_bits == 0 (no movement), keep the current direction. */
+
+    /* ------------------------------------------------------------------ */
+    /* 5. Stuck counter and evasion timer toggle (ASM lbC009A16-lbC009A60) */
+    /*                                                                      */
+    /*    When the alien can't move at all (dir_bits == 0), a stuck counter */
+    /*    increments.  After 25 consecutive stuck ticks the counter resets  */
+    /*    and the evasion timer for the blocked axis is toggled:            */
+    /*      blocked_axis == 0 (X was blocked) → toggle evade_y             */
+    /*      blocked_axis != 0 (Y was blocked) → toggle evade_x             */
+    /*    "Toggle" means: if the timer is already set (≠ 0) clear it,      */
+    /*    otherwise set it to 50 so the alien evades for ~25 ticks.         */
+    /* ------------------------------------------------------------------ */
+    if (dir_bits == 0) {
+        a->stuck_counter++;
+        if (a->stuck_counter >= 25) {
+            a->stuck_counter = 0;
+            if (a->blocked_axis == 0) {
+                /* X was blocked → evade on Y (lbC009A4A) */
+                a->evade_y = (a->evade_y != 0) ? 0 : 50;
+            } else {
+                /* Y was blocked → evade on X (lbC009A40) */
+                a->evade_x = (a->evade_x != 0) ? 0 : 50;
+            }
+        }
+    }
 }
 
 void alien_update_all(void)
