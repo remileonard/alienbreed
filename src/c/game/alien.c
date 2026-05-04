@@ -30,16 +30,65 @@ static int s_cached_player_y[MAX_PLAYERS];
 static int s_cached_player_alive[MAX_PLAYERS];
 static int s_target_refresh_countdown = 0;
 
-/* Alien type table: HP base values (Ref: alien1_struct–alien7_struct @ main.asm#L5918-L5967) */
+/*
+ * Per-class alien combat stats — sourced from the spawning data structs in main.asm.
+ *
+ * The original ASM stores per-class stats in the alien data struct at fixed offsets:
+ *   32(a1) = max speed   (random speed = rand(max)+1 for normal/facehugger; exact for bosses)
+ *   34(a1) = base HP     (global_aliens_extra_strength is added on top at spawn time)
+ * Source: lbC00A872 / set_alien_random_speed @ main.asm#L7463-L7490.
+ *
+ * --- Normal large alien (is_facehugger=0, is_boss=0) ---
+ *   Primary struct: lbW008F94 @ main.asm#L6001 (tile 0x0A, level_flag=0)
+ *     32(a1)=2  → NORMAL_MAX_SPEED = 2
+ *     34(a1)=$14=20
+ *   Secondary:     lbW009094 @ main.asm#L6046 (tile 0x0A, level_flag=$100)
+ *     34(a1)=$1E=30
+ *   The C port uses k_alien_type_hp[] (below) for level-progressive HP rather than
+ *   the flat struct value.  The 7 entries scale from 100 (early levels) to 292
+ *   (level 12), which keeps normal alien challenge proportional across the game.
+ *   NOTE: these values do NOT come from a specific ASM HP field; they are C-port
+ *   design values chosen to give ~10-30 machinegun hits per alien at weapon damage 9.
+ *
+ * --- Face hugger (is_facehugger=1) ---
+ *   Primary struct: lbW009414 @ main.asm#L6148 (tile 0x0A level 12, or tile 0x29)
+ *     32(a1)=4  → FACEHUGGER_MAX_SPEED = 4
+ *     34(a1)=8
+ *   Secondary:     lbW0090D4 @ main.asm#L6060 (tile 0x29 small spawn)
+ *     32(a1)=3, 34(a1)=8
+ *   Face huggers do NOT vary by alien_type — all use the same base HP.
+ *   C-port scaling: ASM normal hp=20, face hugger hp=8 → ratio ≈ 0.4.
+ *   FACEHUGGER_BASE_HP = 40  (0.4 × k_alien_type_hp[0]=100; gives ~4 machinegun hits).
+ *
+ * --- Boss (is_boss=1) ---
+ *   Primary struct: lbW009114 @ main.asm#L6114 (boss_nbr=1, lvl5; AI lbC009CE2)
+ *     32(a1)=4  → BOSS_SPEED = 4
+ *     34(a1)=$100=256
+ *   Subordinate bosses: lbW009254 hp=$100, lbW009314 hp=$140=320, lbW009014 hp=$40=64.
+ *   C-port scaling: ASM normal hp=20, boss hp=256 → ratio ≈ 12.8.
+ *   BOSS_BASE_HP = 1280  (12.8 × 100; gives ~80-140 machinegun hits — deliberately tough).
+ *   Bosses use the exact speed from the struct (select_speed_boss=1 path), not random.
+ */
+
+/* --- Normal large alien (one entry per alien_type 1..7) --- */
 static const WORD k_alien_type_hp[7] = {
-    100,  /* type 1 */
-    132,  /* type 2 */
-    164,  /* type 3 */
-    196,  /* type 4 */
-    228,  /* type 5 */
-    260,  /* type 6 */
-    292   /* type 7 */
+    100,  /* type 1  (levels 1-5) */
+    132,  /* type 2  (level 6)    */
+    164,  /* type 3  (level 7)    */
+    196,  /* type 4  (level 8)    */
+    228,  /* type 5  (level 9)    */
+    260,  /* type 6  (level 10)   */
+    292   /* type 7  (level 12)   */
 };
+static const WORD NORMAL_MAX_SPEED   =  2;  /* lbW008F94+32 */
+
+/* --- Face hugger (is_facehugger=1) --- */
+static const WORD FACEHUGGER_BASE_HP   =  40;  /* lbW009414+34 = 8, scaled ×5 for C weapon damage */
+static const WORD FACEHUGGER_MAX_SPEED =   4;  /* lbW009414+32 */
+
+/* --- Boss (is_boss=1) --- */
+static const WORD BOSS_BASE_HP =  1280;  /* lbW009114+34 = $100=256, scaled ×5 for C weapon damage */
+static const WORD BOSS_SPEED   =     4;  /* lbW009114+32 */
 
 /*
  * Projectile struct — extends simple position/velocity with weapon-specific
@@ -312,6 +361,17 @@ typedef struct {
                               * zoom animation.  Ref: lbC0049EA @ main.asm#L2570,
                               * do_alien_hatch sets play_alien_hatching_sample=1 and
                               * alien+76 (hatch_timer) = struct+46 = $14 = 20. */
+    int  is_facehugger;      /* 1 = small face hugger (tile 0x29 or hatch on level 12):
+                              * spawns Alien with is_facehugger=1, rendered as 16×16.
+                              * Ref: lbW009414 (size 4,4,8,8) via tile 0x29 dispatch
+                              * lbC0049D6 / level-12 dispatch lbC004A28 @ main.asm. */
+    int  is_boss;            /* reserved for future boss implementation.
+                              * Actual bosses are spawned via tile_boss_trigger
+                              * (boss_nbr 1-4, structs lbW009114/lbW009254/
+                              * lbW009374/lbW009014, AI lbC009CE2/lbC009AFC).
+                              * The large aliens from tile 0x0A are regular
+                              * aliens; this field is always 0 for those.
+                              * Ref: tile_boss_trigger @ main.asm#L5632. */
     int  spawned_alien_idx;  /* index of the alien last spawned from this point,
                               * or −1 if none yet.  Re-spawn is suppressed while
                               * g_aliens[spawned_alien_idx].alive != 0 so that at
@@ -345,16 +405,29 @@ static int alien_overlaps_other(int self_idx, int nx, int ny);
 
 /* -----------------------------------------------------------------------
  * Place one alien at world-pixel position (wx, wy) of the given type.
+ *
+ * Three mutually-exclusive classes, each with distinct stats sourced from
+ * the ASM data structs (offsets 32/34 from each lbWxxxxxx struct):
+ *
+ *   Normal large alien (is_facehugger=0, is_boss=0):
+ *     speed    = NORMAL_MAX_SPEED (2) — lbW008F94+32
+ *     strength = k_alien_type_hp[alien_type-1] + g_global_aliens_extra_strength
+ *
+ *   Face hugger (is_facehugger=1):
+ *     speed    = FACEHUGGER_MAX_SPEED (4) — lbW009414+32
+ *     strength = FACEHUGGER_BASE_HP + g_global_aliens_extra_strength
+ *
+ *   Boss (is_boss=1):
+ *     speed    = BOSS_SPEED (4) — lbW009114+32
+ *     strength = BOSS_BASE_HP + g_global_aliens_extra_strength
+ *
  * Returns the index in g_aliens[] of the newly placed alien, or -1 if
  * no slot was available.  Dead slots are recycled before appending new
  * ones so that the pool does not exhaust after many spawns/deaths.
  * ----------------------------------------------------------------------- */
-static int spawn_alien_at(int wx, int wy, int alien_type)
+static int spawn_alien_at(int wx, int wy, int alien_type,
+                          int is_facehugger, int is_boss)
 {
-    WORD base_hp = (alien_type >= 1 && alien_type <= 7)
-                   ? k_alien_type_hp[alien_type - 1]
-                   : k_alien_type_hp[0];
-
     /* Recycle the first dead slot before falling back to appending. */
     int idx = -1;
     for (int i = 0; i < g_alien_count; i++) {
@@ -371,14 +444,48 @@ static int spawn_alien_at(int wx, int wy, int alien_type)
      * both aliens permanently stuck.  Return -1 so the caller retries later. */
     if (alien_overlaps_other(idx, wx, wy)) return -1;
 
-    Alien *a    = &g_aliens[idx];
-    a->pos_x    = (WORD)wx;
-    a->pos_y    = (WORD)wy;
-    a->speed    = (WORD)(2 + g_global_aliens_extra_strength / 5);
-    a->strength = (WORD)(base_hp + g_global_aliens_extra_strength);
-    a->alive    = 1;
-    a->type_idx = alien_type - 1;
-    a->death_frame = 0;
+    Alien *a         = &g_aliens[idx];
+    a->pos_x         = (WORD)wx;
+    a->pos_y         = (WORD)wy;
+    a->alive         = 1;
+    a->type_idx      = alien_type - 1;
+    a->death_frame   = 0;
+    a->is_facehugger = is_facehugger;
+    a->is_boss       = is_boss;
+
+    /*
+     * Per-class speed and HP initialisation — mirrors the three code paths
+     * in the ASM spawning routine (lbC00A872 / set_alien_random_speed
+     * @ main.asm#L7463-L7490):
+     *
+     *   Normal alien  (is_facehugger=0, is_boss=0):
+     *     speed    = NORMAL_MAX_SPEED (= lbW008F94+32 = 2)
+     *     strength = k_alien_type_hp[type-1] + g_global_aliens_extra_strength
+     *                (C-port level-scaling; ASM uses flat value 34(a1))
+     *
+     *   Face hugger   (is_facehugger=1):
+     *     speed    = FACEHUGGER_MAX_SPEED (= lbW009414+32 = 4)
+     *     strength = FACEHUGGER_BASE_HP + g_global_aliens_extra_strength
+     *                (no alien_type variation; ASM lbW009414+34 = 8, scaled ×5)
+     *
+     *   Boss          (is_boss=1):
+     *     speed    = BOSS_SPEED (= lbW009114+32 = 4; exact — no random in ASM)
+     *     strength = BOSS_BASE_HP + g_global_aliens_extra_strength
+     *                (ASM lbW009114+34 = $100=256, scaled ×5)
+     */
+    if (is_facehugger) {
+        a->speed    = FACEHUGGER_MAX_SPEED;
+        a->strength = (WORD)(FACEHUGGER_BASE_HP + g_global_aliens_extra_strength);
+    } else if (is_boss) {
+        a->speed    = BOSS_SPEED;
+        a->strength = (WORD)(BOSS_BASE_HP + g_global_aliens_extra_strength);
+    } else {
+        WORD base_hp = (alien_type >= 1 && alien_type <= 7)
+                       ? k_alien_type_hp[alien_type - 1]
+                       : k_alien_type_hp[0];
+        a->speed    = NORMAL_MAX_SPEED;
+        a->strength = (WORD)(base_hp + g_global_aliens_extra_strength);
+    }
     return idx;
 }
 
@@ -439,6 +546,16 @@ void alien_spawn_from_map(void)
             /* Tile 0x34 (TILE_ALIEN_HOLE): alien emerges with zoom animation and
              * hatch sound, mirroring lbC0049EA → lbW008F94[52]=lbL01B6F6 in ASM. */
             sp->is_hole_spawn      = (attr == TILE_ALIEN_HOLE) ? 1 : 0;
+            /* Tile 0x29 (TILE_ALIEN_SPAWN_SMALL) always spawns small face huggers.
+             * Ref: tile dispatch lbC0049D6 → lbW008FD4 (size 4,4,8,8) for all
+             * level flags; lbC004A28 → lbW009414 for level_flag=1024 (level 12).
+             * Both data structs use the small-alien animation table (lbL0094FC /
+             * lbL00969C) which references 16×16 BOBs at atlas x=256-304. */
+            sp->is_facehugger      = (attr == TILE_ALIEN_SPAWN_SMALL) ? 1 : 0;
+            /* Map-scanned tiles (0x28, 0x29, 0x34) are never bosses.
+             * Bosses are only spawned by TILE_FACEHUGGER_HATCH (0x0A) on
+             * non-level-12 levels via alien_spawn_near(). */
+            sp->is_boss            = 0;
             sp->spawned_alien_idx  = -1;
         }
     }
@@ -469,8 +586,18 @@ void alien_spawn_near(int wx, int wy)
     sp->alien_type = alien_type_for_level();
     sp->active     = 1;
     sp->one_shot   = 1;
-    sp->is_hole_spawn      = 0;
-    sp->spawned_alien_idx  = -1;
+    sp->is_hole_spawn = 0;
+    /* tile_facehuggers_hatch (tile 0x0A) behaviour depends on level_flag:
+     *   level_flag=1024 (level 12)         → lbW009414 (4,4,8,8)  = face hugger
+     *   level_flag=0    (levels 2, 10, 11) → lbW008F94 (10,10,20,20) = regular large alien
+     *   level_flag=256  (levels 7, 8, 9)   → lbW009094 (10,10,20,20) = regular large alien
+     *   other level_flags (1,3,4,5,6)      → rts, nothing spawned
+     * All three struct types use the standard AI (lbC00987E). Actual bosses are
+     * spawned by the separate tile_boss_trigger mechanism (not tile 0x0A).
+     * Ref: tile_facehuggers_hatch lbC0082C0/CE/8302 @ main.asm#L5428-L5441. */
+    sp->is_facehugger     = (g_cur_level == 12) ? 1 : 0;
+    sp->is_boss           = 0;
+    sp->spawned_alien_idx = -1;
 }
 
 /*
@@ -580,7 +707,8 @@ void alien_spawn_tick(void)
         }
 
         /* Hatch an alien (ref lbC00A718 / do_alien_hatch @ main.asm#L7455). */
-        int idx = spawn_alien_at(sp->world_x, sp->world_y, sp->alien_type);
+        int idx = spawn_alien_at(sp->world_x, sp->world_y, sp->alien_type,
+                                 sp->is_facehugger, sp->is_boss);
         if (idx >= 0)
             sp->spawned_alien_idx = idx;
 
@@ -713,27 +841,68 @@ static void alien_move(int self_idx, Alien *a)
     /*    3 probes along the leading edge of the proposed bbox, matching   */
     /*    lbW00A2D6 (right) and lbW00A2CA (left) at main.asm#L7089-7090.  */
     /*    Offsets are ASM values − 16 (centre-based pos_x/pos_y).         */
+    /*                                                                      */
+    /*    evade_x (ASM 78(a0)): decremented by 2 per tick via the ASM      */
+    /*    double-decrement pattern at lbC009912 (main.asm#L6489-L6494).    */
+    /*    While > 0 the intended X direction is reversed (right↔left).     */
     /* ------------------------------------------------------------------ */
+
+    /* Double-decrement of X evasion timer, clamped at 0 (lbC009912). */
+    if (a->evade_x > 0) a->evade_x--;
+    if (a->evade_x > 0) a->evade_x--;
+
     int dx = tx - ax;
     if (dx > 4) {
-        /* Move right: 3 probes at right edge (nx+14), y = -22, 0, -12 */
-        int nx = ax + spd;
-        if (!alien_solid_at(nx + 14, ay - 22) &&
-            !alien_solid_at(nx + 14, ay +  0) &&
-            !alien_solid_at(nx + 14, ay - 12) &&
-            !alien_overlaps_other(self_idx, nx, ay)) {
-            ax = nx;
-            dir_bits |= 4;  /* right */
+        if (a->evade_x != 0) {
+            /* Evasion active: reverse direction — try LEFT (lbC009956 path). */
+            int nx = ax - spd;
+            if (!alien_solid_at(nx - 20, ay - 22) &&
+                !alien_solid_at(nx - 20, ay +  0) &&
+                !alien_solid_at(nx - 20, ay - 12) &&
+                !alien_overlaps_other(self_idx, nx, ay)) {
+                ax = nx;
+                dir_bits |= 8;  /* left */
+            } else {
+                a->blocked_axis = 0;  /* X blocked */
+            }
+        } else {
+            /* Normal: move right (lbC009938 path). */
+            int nx = ax + spd;
+            if (!alien_solid_at(nx + 14, ay - 22) &&
+                !alien_solid_at(nx + 14, ay +  0) &&
+                !alien_solid_at(nx + 14, ay - 12) &&
+                !alien_overlaps_other(self_idx, nx, ay)) {
+                ax = nx;
+                dir_bits |= 4;  /* right */
+            } else {
+                a->blocked_axis = 0;  /* X blocked */
+            }
         }
     } else if (dx < -4) {
-        /* Move left: 3 probes at left edge (nx-20), y = -22, 0, -12 */
-        int nx = ax - spd;
-        if (!alien_solid_at(nx - 20, ay - 22) &&
-            !alien_solid_at(nx - 20, ay +  0) &&
-            !alien_solid_at(nx - 20, ay - 12) &&
-            !alien_overlaps_other(self_idx, nx, ay)) {
-            ax = nx;
-            dir_bits |= 8;  /* left */
+        if (a->evade_x != 0) {
+            /* Evasion active: reverse direction — try RIGHT (lbC009938 path). */
+            int nx = ax + spd;
+            if (!alien_solid_at(nx + 14, ay - 22) &&
+                !alien_solid_at(nx + 14, ay +  0) &&
+                !alien_solid_at(nx + 14, ay - 12) &&
+                !alien_overlaps_other(self_idx, nx, ay)) {
+                ax = nx;
+                dir_bits |= 4;  /* right */
+            } else {
+                a->blocked_axis = 0;  /* X blocked */
+            }
+        } else {
+            /* Normal: move left (lbC009956 path). */
+            int nx = ax - spd;
+            if (!alien_solid_at(nx - 20, ay - 22) &&
+                !alien_solid_at(nx - 20, ay +  0) &&
+                !alien_solid_at(nx - 20, ay - 12) &&
+                !alien_overlaps_other(self_idx, nx, ay)) {
+                ax = nx;
+                dir_bits |= 8;  /* left */
+            } else {
+                a->blocked_axis = 0;  /* X blocked */
+            }
         }
     }
 
@@ -742,27 +911,63 @@ static void alien_move(int self_idx, Alien *a)
     /*    3 probes along the leading edge of the proposed bbox, matching   */
     /*    lbW00A2EE (down) and lbW00A2E2 (up) at main.asm#L7087-7088.     */
     /*    Offsets are ASM values − 16 (centre-based pos_x/pos_y).         */
+    /*                                                                      */
+    /*    evade_y (ASM 80(a0)): NOT decremented here (unlike evade_x).     */
+    /*    It is toggled between 50 and 0 by the stuck counter.  While > 0  */
+    /*    the intended Y direction is reversed (down↔up).                  */
     /* ------------------------------------------------------------------ */
     int dy = ty - ay;
     if (dy > 4) {
-        /* Move down: 3 probes at bottom edge (ny+4), x = -16, +6, -6 */
-        int ny = ay + spd;
-        if (!alien_solid_at(ax - 16, ny + 4) &&
-            !alien_solid_at(ax +  6, ny + 4) &&
-            !alien_solid_at(ax -  6, ny + 4) &&
-            !alien_overlaps_other(self_idx, ax, ny)) {
-            ay = ny;
-            dir_bits |= 1;  /* down */
+        if (a->evade_y != 0) {
+            /* Evasion active: reverse direction — try UP. */
+            int ny = ay - spd;
+            if (!alien_solid_at(ax - 16, ny - 26) &&
+                !alien_solid_at(ax +  6, ny - 26) &&
+                !alien_solid_at(ax -  6, ny - 26) &&
+                !alien_overlaps_other(self_idx, ax, ny)) {
+                ay = ny;
+                dir_bits |= 2;  /* up */
+            } else {
+                a->blocked_axis = 1;  /* Y blocked */
+            }
+        } else {
+            /* Normal: move down. */
+            int ny = ay + spd;
+            if (!alien_solid_at(ax - 16, ny + 4) &&
+                !alien_solid_at(ax +  6, ny + 4) &&
+                !alien_solid_at(ax -  6, ny + 4) &&
+                !alien_overlaps_other(self_idx, ax, ny)) {
+                ay = ny;
+                dir_bits |= 1;  /* down */
+            } else {
+                a->blocked_axis = 1;  /* Y blocked */
+            }
         }
     } else if (dy < -4) {
-        /* Move up: 3 probes at top edge (ny-26), x = -16, +6, -6 */
-        int ny = ay - spd;
-        if (!alien_solid_at(ax - 16, ny - 26) &&
-            !alien_solid_at(ax +  6, ny - 26) &&
-            !alien_solid_at(ax -  6, ny - 26) &&
-            !alien_overlaps_other(self_idx, ax, ny)) {
-            ay = ny;
-            dir_bits |= 2;  /* up */
+        if (a->evade_y != 0) {
+            /* Evasion active: reverse direction — try DOWN. */
+            int ny = ay + spd;
+            if (!alien_solid_at(ax - 16, ny + 4) &&
+                !alien_solid_at(ax +  6, ny + 4) &&
+                !alien_solid_at(ax -  6, ny + 4) &&
+                !alien_overlaps_other(self_idx, ax, ny)) {
+                ay = ny;
+                dir_bits |= 1;  /* down */
+            } else {
+                a->blocked_axis = 1;  /* Y blocked */
+            }
+        } else {
+            /* Normal: move up. */
+            int ny = ay - spd;
+            if (!alien_solid_at(ax - 16, ny - 26) &&
+                !alien_solid_at(ax +  6, ny - 26) &&
+                !alien_solid_at(ax -  6, ny - 26) &&
+                !alien_overlaps_other(self_idx, ax, ny)) {
+                ay = ny;
+                dir_bits |= 2;  /* up */
+            } else {
+                a->blocked_axis = 1;  /* Y blocked */
+            }
         }
     }
 
@@ -790,7 +995,35 @@ static void alien_move(int self_idx, Alien *a)
     };
     if (dir_bits > 0 && dir_bits < 16 && k_dir_table[dir_bits] >= 0)
         a->direction = k_dir_table[dir_bits];
-    /* If dir_bits == 0 (no movement), keep the current direction. */
+
+    /* ------------------------------------------------------------------ */
+    /* 5. Stuck counter and evasion timer toggle (ASM lbC009A16-lbC009A60) */
+    /*                                                                      */
+    /*    When the alien can't move at all (dir_bits == 0), a stuck counter */
+    /*    increments.  After 25 consecutive stuck ticks the counter resets  */
+    /*    to 0 (ASM `clr.w 88(a0)`) and the evasion timer for the blocked  */
+    /*    axis is toggled:                                                   */
+    /*      blocked_axis == 0 (X was blocked) → toggle evade_y             */
+    /*      blocked_axis != 0 (Y was blocked) → toggle evade_x             */
+    /*    "Toggle" means: if the timer is already set (≠ 0) clear it,      */
+    /*    otherwise set it to 50 so the alien evades for ~25 ticks.         */
+    /*    The counter resets to 0 and re-fires every 25 more stuck ticks   */
+    /*    to keep toggling the evasion timer until the alien finds a free   */
+    /*    path.  This exactly mirrors main.asm#L6575-L6578.                */
+    /* ------------------------------------------------------------------ */
+    if (dir_bits == 0) {
+        a->stuck_counter++;
+        if (a->stuck_counter >= 25) {
+            a->stuck_counter = 0;
+            if (a->blocked_axis == 0) {
+                /* X was blocked → evade on Y (lbC009A4A) */
+                a->evade_y = (a->evade_y != 0) ? 0 : 50;
+            } else {
+                /* Y was blocked → evade on X (lbC009A40) */
+                a->evade_x = (a->evade_x != 0) ? 0 : 50;
+            }
+        }
+    }
 }
 
 void alien_update_all(void)

@@ -351,6 +351,51 @@ void sprite_draw_alien(int direction, int anim_frame, int x, int y)
     video_blit(src, ALIEN_ATLAS_W, x - 16, y - 16, ALIEN_SPRITE_W, ALIEN_SPRITE_H, 0);
 }
 
+/* Draw a face hugger (small alien) walk sprite at screen position (x, y).
+ * Face huggers use 16×16 sprites from atlas x=256-304, y=0-144.
+ *
+ * Atlas layout (identical for COMPACT and LEGACY BO files):
+ *   Directions 0-3 (N/NE/E/SE): atlas_x = 256 + dir*16,       atlas_y = frame*32
+ *   Directions 4-7 (S/SW/W/NW): atlas_x = 256 + (dir-4)*16,   atlas_y = 16 + frame*32
+ *
+ * When anim_frame == ALIEN_WALK_FRAMES the hit-flash orange/red sprites are
+ * used.  These occupy a DEDICATED region in the atlas (COMPACT lbW019A8E
+ * entries 64-79, BOBs lbL0159EA-lbL015CBA) below the normal walk rows:
+ *   Directions 0-3: atlas_y = FACEHUGGER_HIT_ROW_EVEN (96)
+ *   Directions 4-7: atlas_y = FACEHUGGER_HIT_ROW_ODD  (112)
+ * The hit-flash sequences (lbL01BAA2-lbL01BB66 @ main.asm#L14663-L14680, via
+ * lbC00987E offset+32 path @ main.asm#L6601-L6610) use these 2-frame BOBs;
+ * the x column layout is identical to the normal walk (256 + (dir%4)*16).
+ *
+ * Ref: lbW009414 / lbL00969C @ main.asm#L6059,L6315;
+ *      COMPACT lbW019A8E entries 40-79 @ main.asm#L14200-L14240. */
+void sprite_draw_facehugger(int direction, int anim_frame, int x, int y)
+{
+    const UBYTE *atlas = alien_gfx_get_atlas();
+    if (!atlas) return;
+
+    if (direction  < 0) direction  = 0;
+    if (direction  >= ALIEN_DIR_COUNT) direction = ALIEN_DIR_COUNT - 1;
+    if (anim_frame < 0) anim_frame = 0;
+    /* Clamp — ALIEN_WALK_FRAMES (3) is valid as the hit-flash signal. */
+    if (anim_frame > ALIEN_WALK_FRAMES) anim_frame = ALIEN_WALK_FRAMES;
+
+    int atlas_x = FACEHUGGER_ATLAS_X0 + (direction % 4) * FACEHUGGER_SPRITE_W;
+    int atlas_y;
+    if (anim_frame >= ALIEN_WALK_FRAMES) {
+        /* Hit-flash: use the dedicated orange/red sprite rows at y=96/112. */
+        atlas_y = (direction >= 4 ? FACEHUGGER_HIT_ROW_ODD : FACEHUGGER_HIT_ROW_EVEN);
+    } else {
+        atlas_y = (direction >= 4 ? FACEHUGGER_ROW_ODD : 0)
+                  + anim_frame * FACEHUGGER_WALK_STRIDE;
+    }
+
+    const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
+    /* Centre the 16×16 sprite on the alien's world position. */
+    video_blit(src, ALIEN_ATLAS_W, x - 8, y - 8,
+               FACEHUGGER_SPRITE_W, FACEHUGGER_SPRITE_H, 0);
+}
+
 /* Draw a death/explosion frame (0-15) at screen position (x,y).
  * Frames are 32×30 px (same size as walk sprites), laid out in two rows:
  *   Row 1 (y=0xC0=192): frames  0-9,  x = frame_idx * 32

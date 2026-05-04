@@ -107,6 +107,23 @@ void sprite_draw_alien_death(int death_frame, int x, int y);
  */
 void sprite_draw_alien_hatch(int hatch_frame, int x, int y);
 
+/*
+ * Draw a face hugger (small alien) walk sprite at screen position (x, y).
+ * Face huggers use 16×16 sprites from atlas x=256-304, y=0-144 rather than
+ * the 32×30 large-alien sprites.
+ *
+ * direction : 0=N 1=NE 2=E 3=SE 4=S 5=SW 6=W 7=NW (same encoding as large alien)
+ * anim_frame: 0, 1, or 2 — index into the 3-frame walk cycle.
+ *             Pass ALIEN_WALK_FRAMES (3) for the hit-flash orange/red variant
+ *             (uses dedicated atlas rows y=96 for dirs 0-3, y=112 for dirs 4-7).
+ *
+ * Atlas layout (identical for all BO atlas types):
+ *   dirs 0-3: atlas_x = 256 + (dir   )*16, atlas_y = frame*32
+ *   dirs 4-7: atlas_x = 256 + (dir-4 )*16, atlas_y = 16 + frame*32
+ * (Ref: lbW009414 / lbL00969C / lbL01B982 @ main.asm#L6059,L6315,L14613)
+ */
+void sprite_draw_facehugger(int direction, int anim_frame, int x, int y);
+
 /* Total number of player sprites available (both players, 1-based in game = 1-80) */
 #define PLAYER_SPRITE_TOTAL 80
 
