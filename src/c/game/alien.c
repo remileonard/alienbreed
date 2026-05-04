@@ -1001,11 +1001,15 @@ static void alien_move(int self_idx, Alien *a)
     /*                                                                      */
     /*    When the alien can't move at all (dir_bits == 0), a stuck counter */
     /*    increments.  After 25 consecutive stuck ticks the counter resets  */
-    /*    and the evasion timer for the blocked axis is toggled:            */
+    /*    to 0 (ASM `clr.w 88(a0)`) and the evasion timer for the blocked  */
+    /*    axis is toggled:                                                   */
     /*      blocked_axis == 0 (X was blocked) → toggle evade_y             */
     /*      blocked_axis != 0 (Y was blocked) → toggle evade_x             */
     /*    "Toggle" means: if the timer is already set (≠ 0) clear it,      */
     /*    otherwise set it to 50 so the alien evades for ~25 ticks.         */
+    /*    The counter resets to 0 and re-fires every 25 more stuck ticks   */
+    /*    to keep toggling the evasion timer until the alien finds a free   */
+    /*    path.  This exactly mirrors main.asm#L6575-L6578.                */
     /* ------------------------------------------------------------------ */
     if (dir_bits == 0) {
         a->stuck_counter++;
