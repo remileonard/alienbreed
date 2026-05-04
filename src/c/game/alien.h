@@ -45,6 +45,14 @@ typedef struct {
      * Ref: lbW009414 / lbL00969C @ main.asm#L6059-L6168; tile dispatch
      * lbC0049D6 (tile 0x29 → lbW008FD4) and lbC004A28 (lbW009414). */
     int   is_facehugger;
+    /* Boss flag — set to 1 when this alien was spawned by TILE_FACEHUGGER_HATCH
+     * (0x0A) on a non-level-12 level.  On those levels the hatch selects the
+     * large alien structs lbW008F94 (level_flag=0, levels 2/10/11) and
+     * lbW009094 (level_flag=256, levels 7/8/9), which are treated as bosses by
+     * the C port even though they share the standard AI (lbC00987E).
+     * Boss behaviour (movement, AI, rendering) is handled in a dedicated issue.
+     * Ref: tile_facehuggers_hatch lbC0082C0/lbC0082CE @ main.asm#L5428-L5431. */
+    int   is_boss;
     /* Pathfinding state */
     int   target_x, target_y;
 } Alien;

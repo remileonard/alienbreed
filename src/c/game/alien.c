@@ -316,6 +316,11 @@ typedef struct {
                               * spawns Alien with is_facehugger=1, rendered as 16×16.
                               * Ref: lbW009414 (size 4,4,8,8) via tile 0x29 dispatch
                               * lbC0049D6 / level-12 dispatch lbC004A28 @ main.asm. */
+    int  is_boss;            /* 1 = boss alien (tile 0x0A on levels 2/7/8/9/10/11):
+                              * hatch selects lbW008F94 (level_flag=0) or lbW009094
+                              * (level_flag=256), both large (size 10,10,20,20).
+                              * Boss activation/management is handled separately.
+                              * Ref: lbC0082C0/lbC0082CE @ main.asm#L5428-L5431. */
     int  spawned_alien_idx;  /* index of the alien last spawned from this point,
                               * or −1 if none yet.  Re-spawn is suppressed while
                               * g_aliens[spawned_alien_idx].alive != 0 so that at
@@ -350,12 +355,16 @@ static int alien_overlaps_other(int self_idx, int nx, int ny);
 /* -----------------------------------------------------------------------
  * Place one alien at world-pixel position (wx, wy) of the given type.
  * is_facehugger: 1 = small 16×16 face hugger (lbW009414/lbW008FD4),
- *                0 = large 32×30 alien (lbW008F94/lbW009094).
+ *                0 = large 32×30 alien.
+ * is_boss      : 1 = boss alien spawned by TILE_FACEHUGGER_HATCH on levels
+ *                2/7/8/9/10/11 (uses lbW008F94 or lbW009094); 0 = regular alien.
+ *                is_facehugger and is_boss are mutually exclusive.
  * Returns the index in g_aliens[] of the newly placed alien, or -1 if
  * no slot was available.  Dead slots are recycled before appending new
  * ones so that the pool does not exhaust after many spawns/deaths.
  * ----------------------------------------------------------------------- */
-static int spawn_alien_at(int wx, int wy, int alien_type, int is_facehugger)
+static int spawn_alien_at(int wx, int wy, int alien_type,
+                          int is_facehugger, int is_boss)
 {
     WORD base_hp = (alien_type >= 1 && alien_type <= 7)
                    ? k_alien_type_hp[alien_type - 1]
@@ -386,6 +395,7 @@ static int spawn_alien_at(int wx, int wy, int alien_type, int is_facehugger)
     a->type_idx      = alien_type - 1;
     a->death_frame   = 0;
     a->is_facehugger = is_facehugger;
+    a->is_boss       = is_boss;
     return idx;
 }
 
@@ -452,6 +462,10 @@ void alien_spawn_from_map(void)
              * Both data structs use the small-alien animation table (lbL0094FC /
              * lbL00969C) which references 16×16 BOBs at atlas x=256-304. */
             sp->is_facehugger      = (attr == TILE_ALIEN_SPAWN_SMALL) ? 1 : 0;
+            /* Map-scanned tiles (0x28, 0x29, 0x34) are never bosses.
+             * Bosses are only spawned by TILE_FACEHUGGER_HATCH (0x0A) on
+             * non-level-12 levels via alien_spawn_near(). */
+            sp->is_boss            = 0;
             sp->spawned_alien_idx  = -1;
         }
     }
@@ -483,11 +497,13 @@ void alien_spawn_near(int wx, int wy)
     sp->active     = 1;
     sp->one_shot   = 1;
     sp->is_hole_spawn = 0;
-    /* On level 12 (level_flag=1024) the facehugger hatch tile selects
-     * lbW009414 (size 4,4,8,8) — a small face hugger.  All other levels
-     * where the hatch is active spawn large aliens.
-     * Ref: tile_facehuggers_hatch → lbC004A28 @ main.asm#L5414. */
+    /* tile_facehuggers_hatch (tile 0x0A) behaviour depends on the level:
+     *   level_flag=1024 (level 12)  → lbW009414 (size 4,4,8,8) = face hugger
+     *   level_flag=0    (levels 2/10/11) → lbW008F94 (size 10,10,20,20) = boss
+     *   level_flag=256  (levels 7/8/9)   → lbW009094 (size 10,10,20,20) = boss
+     * Ref: tile_facehuggers_hatch lbC0082C0/CE/8302 @ main.asm#L5428-L5441. */
     sp->is_facehugger     = (g_cur_level == 12) ? 1 : 0;
+    sp->is_boss           = (g_cur_level != 12) ? 1 : 0;
     sp->spawned_alien_idx = -1;
 }
 
@@ -599,7 +615,7 @@ void alien_spawn_tick(void)
 
         /* Hatch an alien (ref lbC00A718 / do_alien_hatch @ main.asm#L7455). */
         int idx = spawn_alien_at(sp->world_x, sp->world_y, sp->alien_type,
-                                 sp->is_facehugger);
+                                 sp->is_facehugger, sp->is_boss);
         if (idx >= 0)
             sp->spawned_alien_idx = idx;
 
