@@ -352,17 +352,22 @@ void sprite_draw_alien(int direction, int anim_frame, int x, int y)
 }
 
 /* Draw a face hugger (small alien) walk sprite at screen position (x, y).
- * Face huggers use 16×16 sprites from atlas x=256-304, y=0-80.
+ * Face huggers use 16×16 sprites from atlas x=256-304, y=0-144.
  *
  * Atlas layout (identical for COMPACT and LEGACY BO files):
  *   Directions 0-3 (N/NE/E/SE): atlas_x = 256 + dir*16,       atlas_y = frame*32
  *   Directions 4-7 (S/SW/W/NW): atlas_x = 256 + (dir-4)*16,   atlas_y = 16 + frame*32
  *
- * When anim_frame == ALIEN_WALK_FRAMES the hit-flash static frame is shown
- * (frame 2 of the respective direction), mirroring lbL01BB82-lbL01BBD6 which
- * hold the last walk frame (slot 42/45/48/51/54/57/60/63) with delay 32000.
+ * When anim_frame == ALIEN_WALK_FRAMES the hit-flash orange/red sprites are
+ * used.  These occupy a DEDICATED region in the atlas (COMPACT lbW019A8E
+ * entries 64-79, BOBs lbL0159EA-lbL015CBA) below the normal walk rows:
+ *   Directions 0-3: atlas_y = FACEHUGGER_HIT_ROW_EVEN (96)
+ *   Directions 4-7: atlas_y = FACEHUGGER_HIT_ROW_ODD  (112)
+ * The hit-flash sequences (lbL01BAA2-lbL01BB66 @ main.asm#L14663-L14680, via
+ * lbC00987E offset+32 path @ main.asm#L6601-L6610) use these 2-frame BOBs;
+ * the x column layout is identical to the normal walk (256 + (dir%4)*16).
  *
- * Ref: lbW009414 / lbL00969C / lbL01B982 @ main.asm#L6059,L6315,L14613;
+ * Ref: lbW009414 / lbL00969C @ main.asm#L6059,L6315;
  *      COMPACT lbW019A8E entries 40-79 @ main.asm#L14200-L14240. */
 void sprite_draw_facehugger(int direction, int anim_frame, int x, int y)
 {
@@ -375,15 +380,15 @@ void sprite_draw_facehugger(int direction, int anim_frame, int x, int y)
     /* Clamp — ALIEN_WALK_FRAMES (3) is valid as the hit-flash signal. */
     if (anim_frame > ALIEN_WALK_FRAMES) anim_frame = ALIEN_WALK_FRAMES;
 
-    /* For the hit-flash, use the last walk frame (frame 2) for the direction.
-     * lbL01BB82-lbL01BBD6: static held frame = last entry of each direction's
-     * walk sequence (slot 42 for dir 0, 45 for dir 1, … 63 for dir 7). */
-    if (anim_frame >= ALIEN_WALK_FRAMES)
-        anim_frame = ALIEN_WALK_FRAMES - 1;  /* last normal walk frame = static */
-
     int atlas_x = FACEHUGGER_ATLAS_X0 + (direction % 4) * FACEHUGGER_SPRITE_W;
-    int atlas_y = (direction >= 4 ? FACEHUGGER_ROW_ODD : 0)
+    int atlas_y;
+    if (anim_frame >= ALIEN_WALK_FRAMES) {
+        /* Hit-flash: use the dedicated orange/red sprite rows at y=96/112. */
+        atlas_y = (direction >= 4 ? FACEHUGGER_HIT_ROW_ODD : FACEHUGGER_HIT_ROW_EVEN);
+    } else {
+        atlas_y = (direction >= 4 ? FACEHUGGER_ROW_ODD : 0)
                   + anim_frame * FACEHUGGER_WALK_STRIDE;
+    }
 
     const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
     /* Centre the 16×16 sprite on the alien's world position. */

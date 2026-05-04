@@ -100,17 +100,27 @@
  * Three walk frames per direction (frame 0, 1, 2) are stored at y-offsets
  * 0, 32, 64 (dirs 0-3) or 16, 48, 80 (dirs 4-7) respectively.
  *
+ * Hit-flash (orange/red) sprites occupy a DEDICATED region in the atlas
+ * immediately below the walk rows, with 2 frames per direction:
+ *
+ *   Directions 0-3:  atlas_y = 96  + hit_frame*32  (y=96, 128)
+ *   Directions 4-7:  atlas_y = 112 + hit_frame*32  (y=112, 144)
+ *
  * Source references:
- *   COMPACT lbW019A8E entries 40-79 @ main.asm#L14200-L14240
+ *   COMPACT lbW019A8E entries 40-63 (walk) and 64-79 (hit-flash)
+ *     @ main.asm#L14200-L14240
  *   LEGACY  lbW01945E entries 50-89 @ main.asm#L14085-L14124
- *   Animation table lbL00969C → lbL01B982 / lbL01B9A6 / … @ main.asm#L6315
+ *   Animation table lbL00969C offset+32 → lbL01BAA2…lbL01BB66 (hit-flash)
+ *     @ main.asm#L6315,L6328-L6333; lbC00987E hit logic @ main.asm#L6601-L6610
  *   Alien data struct lbW009414 (size 4,4,8,8) @ main.asm#L6059
  */
-#define FACEHUGGER_SPRITE_W     16   /* pixels wide  */
-#define FACEHUGGER_SPRITE_H     16   /* pixels tall  */
-#define FACEHUGGER_ATLAS_X0    256   /* first column x (= 0x100) */
-#define FACEHUGGER_WALK_STRIDE  32   /* y-stride between walk frames (same as large alien) */
-#define FACEHUGGER_ROW_ODD      16   /* extra y offset for directions 4-7 */
+#define FACEHUGGER_SPRITE_W      16   /* pixels wide  */
+#define FACEHUGGER_SPRITE_H      16   /* pixels tall  */
+#define FACEHUGGER_ATLAS_X0     256   /* first column x (= 0x100) */
+#define FACEHUGGER_WALK_STRIDE   32   /* y-stride between walk/hit-flash frames */
+#define FACEHUGGER_ROW_ODD       16   /* extra y offset for walk dirs 4-7 */
+#define FACEHUGGER_HIT_ROW_EVEN  96   /* y origin of hit-flash sprites, dirs 0-3 */
+#define FACEHUGGER_HIT_ROW_ODD  112   /* y origin of hit-flash sprites, dirs 4-7 */
 
 /* Death/explosion sprite dimensions and atlas position */
 #define ALIEN_DEATH_FRAMES      16  /* 16 explosion frames total */
