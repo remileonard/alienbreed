@@ -45,13 +45,17 @@ typedef struct {
      * Ref: lbW009414 / lbL00969C @ main.asm#L6059-L6168; tile dispatch
      * lbC0049D6 (tile 0x29 → lbW008FD4) and lbC004A28 (lbW009414). */
     int   is_facehugger;
-    /* Boss flag — set to 1 when this alien was spawned by TILE_FACEHUGGER_HATCH
-     * (0x0A) on a non-level-12 level.  On those levels the hatch selects the
-     * large alien structs lbW008F94 (level_flag=0, levels 2/10/11) and
-     * lbW009094 (level_flag=256, levels 7/8/9), which are treated as bosses by
-     * the C port even though they share the standard AI (lbC00987E).
-     * Boss behaviour (movement, AI, rendering) is handled in a dedicated issue.
-     * Ref: tile_facehuggers_hatch lbC0082C0/lbC0082CE @ main.asm#L5428-L5431. */
+    /* Boss flag — reserved for the dedicated boss issue.
+     * Actual bosses are spawned exclusively by tile_boss_trigger (a separate
+     * tile from tile 0x0A) using dedicated ASM structs with special AI:
+     *   boss_nbr 1 → lbW009114 (AI lbC009CE2, level 5)
+     *   boss_nbr 2 → lbW009254 (AI lbC009CE2, levels 7/8)
+     *   boss_nbr 3 → lbW009374 (level 12)
+     *   boss_nbr 4 → lbW009014 (AI lbC009AFC, level 10)
+     * The large aliens spawned by tile 0x0A (TILE_FACEHUGGER_HATCH) on
+     * non-level-12 levels (lbW008F94 / lbW009094) are regular large aliens
+     * sharing the standard AI (lbC00987E) — they are NOT bosses.
+     * Ref: tile_boss_trigger @ main.asm#L5632, boss_nbr_1..4 handlers. */
     int   is_boss;
     /* Pathfinding state */
     int   target_x, target_y;

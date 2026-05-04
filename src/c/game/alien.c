@@ -316,11 +316,13 @@ typedef struct {
                               * spawns Alien with is_facehugger=1, rendered as 16×16.
                               * Ref: lbW009414 (size 4,4,8,8) via tile 0x29 dispatch
                               * lbC0049D6 / level-12 dispatch lbC004A28 @ main.asm. */
-    int  is_boss;            /* 1 = boss alien (tile 0x0A on levels 2/7/8/9/10/11):
-                              * hatch selects lbW008F94 (level_flag=0) or lbW009094
-                              * (level_flag=256), both large (size 10,10,20,20).
-                              * Boss activation/management is handled separately.
-                              * Ref: lbC0082C0/lbC0082CE @ main.asm#L5428-L5431. */
+    int  is_boss;            /* reserved for future boss implementation.
+                              * Actual bosses are spawned via tile_boss_trigger
+                              * (boss_nbr 1-4, structs lbW009114/lbW009254/
+                              * lbW009374/lbW009014, AI lbC009CE2/lbC009AFC).
+                              * The large aliens from tile 0x0A are regular
+                              * aliens; this field is always 0 for those.
+                              * Ref: tile_boss_trigger @ main.asm#L5632. */
     int  spawned_alien_idx;  /* index of the alien last spawned from this point,
                               * or −1 if none yet.  Re-spawn is suppressed while
                               * g_aliens[spawned_alien_idx].alive != 0 so that at
@@ -497,13 +499,16 @@ void alien_spawn_near(int wx, int wy)
     sp->active     = 1;
     sp->one_shot   = 1;
     sp->is_hole_spawn = 0;
-    /* tile_facehuggers_hatch (tile 0x0A) behaviour depends on the level:
-     *   level_flag=1024 (level 12)  → lbW009414 (size 4,4,8,8) = face hugger
-     *   level_flag=0    (levels 2/10/11) → lbW008F94 (size 10,10,20,20) = boss
-     *   level_flag=256  (levels 7/8/9)   → lbW009094 (size 10,10,20,20) = boss
+    /* tile_facehuggers_hatch (tile 0x0A) behaviour depends on level_flag:
+     *   level_flag=1024 (level 12)         → lbW009414 (4,4,8,8)  = face hugger
+     *   level_flag=0    (levels 2, 10, 11) → lbW008F94 (10,10,20,20) = regular large alien
+     *   level_flag=256  (levels 7, 8, 9)   → lbW009094 (10,10,20,20) = regular large alien
+     *   other level_flags (1,3,4,5,6)      → rts, nothing spawned
+     * All three struct types use the standard AI (lbC00987E). Actual bosses are
+     * spawned by the separate tile_boss_trigger mechanism (not tile 0x0A).
      * Ref: tile_facehuggers_hatch lbC0082C0/CE/8302 @ main.asm#L5428-L5441. */
     sp->is_facehugger     = (g_cur_level == 12) ? 1 : 0;
-    sp->is_boss           = (g_cur_level != 12) ? 1 : 0;
+    sp->is_boss           = 0;
     sp->spawned_alien_idx = -1;
 }
 
