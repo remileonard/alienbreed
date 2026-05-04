@@ -30,16 +30,65 @@ static int s_cached_player_y[MAX_PLAYERS];
 static int s_cached_player_alive[MAX_PLAYERS];
 static int s_target_refresh_countdown = 0;
 
-/* Alien type table: HP base values (Ref: alien1_struct–alien7_struct @ main.asm#L5918-L5967) */
+/*
+ * Per-class alien combat stats — sourced from the spawning data structs in main.asm.
+ *
+ * The original ASM stores per-class stats in the alien data struct at fixed offsets:
+ *   32(a1) = max speed   (random speed = rand(max)+1 for normal/facehugger; exact for bosses)
+ *   34(a1) = base HP     (global_aliens_extra_strength is added on top at spawn time)
+ * Source: lbC00A872 / set_alien_random_speed @ main.asm#L7463-L7490.
+ *
+ * --- Normal large alien (is_facehugger=0, is_boss=0) ---
+ *   Primary struct: lbW008F94 @ main.asm#L6001 (tile 0x0A, level_flag=0)
+ *     32(a1)=2  → NORMAL_MAX_SPEED = 2
+ *     34(a1)=$14=20
+ *   Secondary:     lbW009094 @ main.asm#L6046 (tile 0x0A, level_flag=$100)
+ *     34(a1)=$1E=30
+ *   The C port uses k_alien_type_hp[] (below) for level-progressive HP rather than
+ *   the flat struct value.  The 7 entries scale from 100 (early levels) to 292
+ *   (level 12), which keeps normal alien challenge proportional across the game.
+ *   NOTE: these values do NOT come from a specific ASM HP field; they are C-port
+ *   design values chosen to give ~10-30 machinegun hits per alien at weapon damage 9.
+ *
+ * --- Face hugger (is_facehugger=1) ---
+ *   Primary struct: lbW009414 @ main.asm#L6148 (tile 0x0A level 12, or tile 0x29)
+ *     32(a1)=4  → FACEHUGGER_MAX_SPEED = 4
+ *     34(a1)=8
+ *   Secondary:     lbW0090D4 @ main.asm#L6060 (tile 0x29 small spawn)
+ *     32(a1)=3, 34(a1)=8
+ *   Face huggers do NOT vary by alien_type — all use the same base HP.
+ *   C-port scaling: ASM normal hp=20, face hugger hp=8 → ratio ≈ 0.4.
+ *   FACEHUGGER_BASE_HP = 40  (0.4 × k_alien_type_hp[0]=100; gives ~4 machinegun hits).
+ *
+ * --- Boss (is_boss=1) ---
+ *   Primary struct: lbW009114 @ main.asm#L6114 (boss_nbr=1, lvl5; AI lbC009CE2)
+ *     32(a1)=4  → BOSS_SPEED = 4
+ *     34(a1)=$100=256
+ *   Subordinate bosses: lbW009254 hp=$100, lbW009314 hp=$140=320, lbW009014 hp=$40=64.
+ *   C-port scaling: ASM normal hp=20, boss hp=256 → ratio ≈ 12.8.
+ *   BOSS_BASE_HP = 1280  (12.8 × 100; gives ~80-140 machinegun hits — deliberately tough).
+ *   Bosses use the exact speed from the struct (select_speed_boss=1 path), not random.
+ */
+
+/* --- Normal large alien (one entry per alien_type 1..7) --- */
 static const WORD k_alien_type_hp[7] = {
-    100,  /* type 1 */
-    132,  /* type 2 */
-    164,  /* type 3 */
-    196,  /* type 4 */
-    228,  /* type 5 */
-    260,  /* type 6 */
-    292   /* type 7 */
+    100,  /* type 1  (levels 1-5) */
+    132,  /* type 2  (level 6)    */
+    164,  /* type 3  (level 7)    */
+    196,  /* type 4  (level 8)    */
+    228,  /* type 5  (level 9)    */
+    260,  /* type 6  (level 10)   */
+    292   /* type 7  (level 12)   */
 };
+static const WORD NORMAL_MAX_SPEED   =  2;  /* lbW008F94+32 */
+
+/* --- Face hugger (is_facehugger=1) --- */
+static const WORD FACEHUGGER_BASE_HP   =  40;  /* lbW009414+34 = 8, scaled ×5 for C weapon damage */
+static const WORD FACEHUGGER_MAX_SPEED =   4;  /* lbW009414+32 */
+
+/* --- Boss (is_boss=1) --- */
+static const WORD BOSS_BASE_HP =  1280;  /* lbW009114+34 = $100=256, scaled ×5 for C weapon damage */
+static const WORD BOSS_SPEED   =     4;  /* lbW009114+32 */
 
 /*
  * Projectile struct — extends simple position/velocity with weapon-specific
@@ -356,11 +405,22 @@ static int alien_overlaps_other(int self_idx, int nx, int ny);
 
 /* -----------------------------------------------------------------------
  * Place one alien at world-pixel position (wx, wy) of the given type.
- * is_facehugger: 1 = small 16×16 face hugger (lbW009414/lbW008FD4),
- *                0 = large 32×30 alien.
- * is_boss      : 1 = boss alien spawned by TILE_FACEHUGGER_HATCH on levels
- *                2/7/8/9/10/11 (uses lbW008F94 or lbW009094); 0 = regular alien.
- *                is_facehugger and is_boss are mutually exclusive.
+ *
+ * Three mutually-exclusive classes, each with distinct stats sourced from
+ * the ASM data structs (offsets 32/34 from each lbWxxxxxx struct):
+ *
+ *   Normal large alien (is_facehugger=0, is_boss=0):
+ *     speed    = NORMAL_MAX_SPEED (2) — lbW008F94+32
+ *     strength = k_alien_type_hp[alien_type-1] + g_global_aliens_extra_strength
+ *
+ *   Face hugger (is_facehugger=1):
+ *     speed    = FACEHUGGER_MAX_SPEED (4) — lbW009414+32
+ *     strength = FACEHUGGER_BASE_HP + g_global_aliens_extra_strength
+ *
+ *   Boss (is_boss=1):
+ *     speed    = BOSS_SPEED (4) — lbW009114+32
+ *     strength = BOSS_BASE_HP + g_global_aliens_extra_strength
+ *
  * Returns the index in g_aliens[] of the newly placed alien, or -1 if
  * no slot was available.  Dead slots are recycled before appending new
  * ones so that the pool does not exhaust after many spawns/deaths.
@@ -368,10 +428,6 @@ static int alien_overlaps_other(int self_idx, int nx, int ny);
 static int spawn_alien_at(int wx, int wy, int alien_type,
                           int is_facehugger, int is_boss)
 {
-    WORD base_hp = (alien_type >= 1 && alien_type <= 7)
-                   ? k_alien_type_hp[alien_type - 1]
-                   : k_alien_type_hp[0];
-
     /* Recycle the first dead slot before falling back to appending. */
     int idx = -1;
     for (int i = 0; i < g_alien_count; i++) {
@@ -391,13 +447,45 @@ static int spawn_alien_at(int wx, int wy, int alien_type,
     Alien *a         = &g_aliens[idx];
     a->pos_x         = (WORD)wx;
     a->pos_y         = (WORD)wy;
-    a->speed         = (WORD)(2 + g_global_aliens_extra_strength / 5);
-    a->strength      = (WORD)(base_hp + g_global_aliens_extra_strength);
     a->alive         = 1;
     a->type_idx      = alien_type - 1;
     a->death_frame   = 0;
     a->is_facehugger = is_facehugger;
     a->is_boss       = is_boss;
+
+    /*
+     * Per-class speed and HP initialisation — mirrors the three code paths
+     * in the ASM spawning routine (lbC00A872 / set_alien_random_speed
+     * @ main.asm#L7463-L7490):
+     *
+     *   Normal alien  (is_facehugger=0, is_boss=0):
+     *     speed    = NORMAL_MAX_SPEED (= lbW008F94+32 = 2)
+     *     strength = k_alien_type_hp[type-1] + g_global_aliens_extra_strength
+     *                (C-port level-scaling; ASM uses flat value 34(a1))
+     *
+     *   Face hugger   (is_facehugger=1):
+     *     speed    = FACEHUGGER_MAX_SPEED (= lbW009414+32 = 4)
+     *     strength = FACEHUGGER_BASE_HP + g_global_aliens_extra_strength
+     *                (no alien_type variation; ASM lbW009414+34 = 8, scaled ×5)
+     *
+     *   Boss          (is_boss=1):
+     *     speed    = BOSS_SPEED (= lbW009114+32 = 4; exact — no random in ASM)
+     *     strength = BOSS_BASE_HP + g_global_aliens_extra_strength
+     *                (ASM lbW009114+34 = $100=256, scaled ×5)
+     */
+    if (is_facehugger) {
+        a->speed    = FACEHUGGER_MAX_SPEED;
+        a->strength = (WORD)(FACEHUGGER_BASE_HP + g_global_aliens_extra_strength);
+    } else if (is_boss) {
+        a->speed    = BOSS_SPEED;
+        a->strength = (WORD)(BOSS_BASE_HP + g_global_aliens_extra_strength);
+    } else {
+        WORD base_hp = (alien_type >= 1 && alien_type <= 7)
+                       ? k_alien_type_hp[alien_type - 1]
+                       : k_alien_type_hp[0];
+        a->speed    = NORMAL_MAX_SPEED;
+        a->strength = (WORD)(base_hp + g_global_aliens_extra_strength);
+    }
     return idx;
 }
 
