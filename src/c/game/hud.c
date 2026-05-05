@@ -386,18 +386,21 @@ static const UWORD k_overmap_pal[32] = {
  *
  * Mirrors plot_map_overview_data + get_players_position @ main.asm#L8739-L8917.
  *
- * Coordinate derivation (from ASM reverse-engineering):
- *   - The 6-bitplane display section starts at Amiga screen line 52 = C screen y=8.
- *   - Bitplane row r → C screen y = 8 + r.
- *   - plot_map_overview_data places tile (map_row, map_col) at bitplane row
- *       d1 = 8 + 2*map_row  and  bitplane col d0 = 2 + 2*map_col.
- *   → C screen position: x = 2 + 2*col,  y = (8 + d1) = 16 + 2*row.
+ * Coordinate derivation (from ASM copper list copperlist_overmap @ main.asm#L18611):
+ *   - DIWSTRT = $2B8E → first visible Amiga line = $2B = 43 ↔ C screen y = 0.
+ *   - Top status bar: copper wait $2901 (line 41) → displayed Amiga lines 43–50
+ *       = C lines 0–7 (8 scanlines = BAR_H).
+ *   - Gap: $3301,$FF00,BPLCON0,$200 at Amiga line 51 = C line 8 (no bitplanes).
+ *   - Background (6 bitplanes): $3401,$FF00,BPLCON0,$6200 at Amiga line 52
+ *       = C screen y = 52 − 43 = 9.  This is OVERMAP_BG_Y.
+ *   - Bitplane row r → C screen y = OVERMAP_BG_Y + r.
  *
  * Map centering:
  *   Rendered map pixel size = MAP_COLS×2 × MAP_ROWS×2 = 240×192 px.
- *   Origin is centred on the background image:
- *     map_ox = (bg_w - 240) / 2,  map_oy = (bg_h - 192) / 2.
- *   For a 320×256 background this gives (40, 32).
+ *   Origin is centred on the background image, then shifted by OVERMAP_BG_Y:
+ *     map_ox = (bg_w - 240) / 2
+ *     map_oy = OVERMAP_BG_Y + (bg_h - 192) / 2
+ *   For a 320×256 background this gives (40, 41).
  *
  *   Wall   (attr==1) → colour = bg_pixel + 16  (plane-5 overlay, mirrors Amiga
  *                       6-bitplane colour index combining background + plane 5).
@@ -411,15 +414,25 @@ static const UWORD k_overmap_pal[32] = {
 #define OVERMAP_PAL_MAX      ((int)(sizeof(k_overmap_pal)/sizeof(k_overmap_pal[0])) - 1)
 #define OVERMAP_WALL_OFFSET  16   /* plane-5 colour offset: bg_col + 16 = wall colour */
 #define OVERMAP_DOOR_OFFSET  20   /* door plane colour offset (EHB simulation) */
+/* Amiga line 52 (6-plane background) − DIWSTRT line 43 = 9.
+ * The top status bar occupies C lines 0–7 (BAR_H=8) plus one gap line. */
+#define OVERMAP_BG_Y          9
 void hud_render_map_overview(void)
 {
     /* Apply the dedicated map-overview palette (background + overlay). */
     palette_set_immediate(k_overmap_pal, (int)(sizeof(k_overmap_pal)/sizeof(k_overmap_pal[0])));
 
-    /* Blit the background image at (0, 0) so the decorative frame is visible. */
-    if (s_mapbkgnd.pixels)
-        video_blit(s_mapbkgnd.pixels, s_mapbkgnd.w, 0, 0,
-                   s_mapbkgnd.w, s_mapbkgnd.h, -1);
+    /* Blit the background image below the top status bar.
+     * On the Amiga the 6-bitplane background starts at Amiga line 52 = C y=9
+     * (see copperlist_overmap: $3401,$FF00,BPLCON0,$6200 @ main.asm#L18682).
+     * Clip the blit height so it does not exceed the screen. */
+    if (s_mapbkgnd.pixels) {
+        int blit_h = s_mapbkgnd.h;
+        if (blit_h > SCREEN_H - OVERMAP_BG_Y)
+            blit_h = SCREEN_H - OVERMAP_BG_Y;
+        video_blit(s_mapbkgnd.pixels, s_mapbkgnd.w, 0, OVERMAP_BG_Y,
+                   s_mapbkgnd.w, blit_h, -1);
+    }
 
     if (!g_cur_map.valid) return;
 
@@ -431,7 +444,9 @@ void hud_render_map_overview(void)
     const int bg_w = s_mapbkgnd.pixels ? s_mapbkgnd.w : SCREEN_W;
     const int bg_h = s_mapbkgnd.pixels ? s_mapbkgnd.h : SCREEN_H;
     const int map_ox = (bg_w - map_pixel_w) / 2;
-    const int map_oy = (bg_h - map_pixel_h) / 2;
+    /* map_oy: centre within the background image, then shift down by OVERMAP_BG_Y
+     * so the map appears in the correct screen position below the top status bar. */
+    const int map_oy = OVERMAP_BG_Y + (bg_h - map_pixel_h) / 2;
 
     /* Plot 2×2 pixel blocks for solid tiles (walls and doors).
      * Only attr==1 (TILE_WALL) and attr==3 (TILE_DOOR) are drawn, mirroring
@@ -445,18 +460,15 @@ void hud_render_map_overview(void)
             int py = map_oy + row * 2;
             if (px < 0 || px + 1 >= SCREEN_W || py < 0 || py + 1 >= SCREEN_H) continue;
 
-            /* Wall colour: bg_pixel + OVERMAP_WALL_OFFSET exactly replicates
-             * Amiga plane-5 overlay (6-bitplane colour index = background bits
-             * + plane-5 bit).
-             * Door colour: use bg_pixel + OVERMAP_DOOR_OFFSET (a different band
-             * of the overlay palette) to give a visually distinct appearance
-             * from walls, since doors used EHB (plane 6) in the original
-             * hardware which produced a half-brightness tint not reproducible
-             * as a simple offset.                                              */
+            /* Wall/door colour: look up the background pixel at this screen
+             * position to blend with the overlay palette.  The background is
+             * blitted starting at y=OVERMAP_BG_Y, so the image row at screen y
+             * is (py - OVERMAP_BG_Y).                                          */
+            int img_y = py - OVERMAP_BG_Y;
             UBYTE bg_col = 0;
             if (s_mapbkgnd.pixels
-                    && py < s_mapbkgnd.h && px < s_mapbkgnd.w)
-                bg_col = s_mapbkgnd.pixels[py * s_mapbkgnd.w + px] & 0x0F;
+                    && img_y >= 0 && img_y < s_mapbkgnd.h && px < s_mapbkgnd.w)
+                bg_col = s_mapbkgnd.pixels[img_y * s_mapbkgnd.w + px] & 0x0F;
             int offset = (attr == TILE_DOOR) ? OVERMAP_DOOR_OFFSET
                                              : OVERMAP_WALL_OFFSET;
             UBYTE color = (UBYTE)(bg_col + offset);
