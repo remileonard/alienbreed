@@ -171,12 +171,14 @@
       display: flex;
       flex-direction: column;
       align-items: flex-end;
-      gap: 8px;
+      gap: 6px;
     }
 
     #action-top-row {
       display: flex;
-      gap: 8px;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
     }
 
     .action-btn {
@@ -194,7 +196,7 @@
       -webkit-tap-highlight-color: transparent;
       touch-action: none;
       transition: background 0.05s;
-      min-width: 56px;
+      min-width: 48px;
       height: 44px;
     }
 
@@ -272,6 +274,10 @@
     <!-- Right: action buttons -->
     <div id="action-btns">
       <div id="action-top-row">
+        <button class="action-btn" id="btn-map"
+                data-key="m" data-code="KeyM" data-keycode="77">MAP</button>
+        <button class="action-btn" id="btn-intex"
+                data-key="Escape" data-code="Escape" data-keycode="27">INTEX</button>
         <button class="action-btn" id="btn-nextwpn"
                 data-key="x" data-code="KeyX" data-keycode="88">WPN</button>
         <button class="action-btn" id="btn-pause"
@@ -367,13 +373,87 @@
         }));
       }
 
-      /* Wire every touch button ----------------------------------------- */
-      var btns = document.querySelectorAll('#touch-controls [data-key]');
-      btns.forEach(function (btn) {
+      /* ---- Unified D-pad handler (supports diagonals and slide gestures) --
+       * We attach all touch events to the #dpad container so that a finger
+       * sliding between buttons — or two fingers pressing simultaneously —
+       * correctly fires keydown/keyup for every direction involved.
+       * -------------------------------------------------------------------- */
+      var dpad      = document.getElementById('dpad');
+      var dpadState = {};   /* touchIdentifier → { btn, key, code, keyCode } */
+
+      function dpadBtnAt(x, y) {
+        var el = document.elementFromPoint(x, y);
+        while (el) {
+          if (el.classList && el.classList.contains('dpad-btn')) return el;
+          el = el.parentElement;
+        }
+        return null;
+      }
+
+      function dpadUpdate(changedTouches) {
+        for (var i = 0; i < changedTouches.length; i++) {
+          var t   = changedTouches[i];
+          var id  = t.identifier;
+          var el  = dpadBtnAt(t.clientX, t.clientY);
+          var cur = dpadState[id];
+          var curKey = cur ? cur.key : null;
+          var newKey = el ? el.dataset.key : null;
+
+          if (curKey === newKey) continue;   /* nothing changed for this touch */
+
+          /* Release the old direction */
+          if (cur) {
+            cur.btn.classList.remove('pressed');
+            sendKey(cur.key, cur.code, cur.keyCode, false);
+            delete dpadState[id];
+          }
+          /* Press the new direction */
+          if (el && newKey) {
+            var kc = parseInt(el.dataset.keycode, 10);
+            if (isNaN(kc)) continue;
+            dpadState[id] = { btn: el, key: newKey, code: el.dataset.code, keyCode: kc };
+            el.classList.add('pressed');
+            sendKey(newKey, el.dataset.code, kc, true);
+          }
+        }
+      }
+
+      function dpadRelease(changedTouches) {
+        for (var i = 0; i < changedTouches.length; i++) {
+          var id  = changedTouches[i].identifier;
+          var cur = dpadState[id];
+          if (cur) {
+            cur.btn.classList.remove('pressed');
+            sendKey(cur.key, cur.code, cur.keyCode, false);
+            delete dpadState[id];
+          }
+        }
+      }
+
+      dpad.addEventListener('touchstart', function (e) {
+        e.preventDefault();
+        dpadUpdate(e.changedTouches);
+      }, { passive: false });
+
+      dpad.addEventListener('touchmove', function (e) {
+        e.preventDefault();
+        dpadUpdate(e.changedTouches);
+      }, { passive: false });
+
+      ['touchend', 'touchcancel'].forEach(function (evtype) {
+        dpad.addEventListener(evtype, function (e) {
+          e.preventDefault();
+          dpadRelease(e.changedTouches);
+        }, { passive: false });
+      });
+
+      /* ---- Action buttons (simple press/release — no sliding needed) ----- */
+      var actionBtns = document.querySelectorAll('#action-btns [data-key]');
+      actionBtns.forEach(function (btn) {
         var key     = btn.dataset.key;
         var code    = btn.dataset.code;
         var keyCode = parseInt(btn.dataset.keycode, 10);
-        if (!key || !code || isNaN(keyCode)) return; /* skip misconfigured buttons */
+        if (!key || !code || isNaN(keyCode)) return;
 
         btn.addEventListener('touchstart', function (e) {
           e.preventDefault();
