@@ -387,10 +387,11 @@ static const UWORD k_overmap_pal[32] = {
  *       d1 = 8 + 2*map_row  and  bitplane col d0 = 2 + 2*map_col.
  *   → C screen position: x = 2 + 2*col,  y = (8 + d1) = 16 + 2*row.
  *
- *   get_players_position: player_map_x = PLAYER_POS_X>>3 + 24 (bitplane x).
- *   For the C port (world coordinates differ from ASM): pos_x/8 + 2 gives the
- *   same tile-aligned position as 2+2*(pos_x/16).
- *   Similarly: pos_y/8 + 16 = 16 + 2*(pos_y/16) for map-aligned y.
+ * Map centering:
+ *   Rendered map pixel size = MAP_COLS×2 × MAP_ROWS×2 = 240×192 px.
+ *   Origin is centred on the background image:
+ *     map_ox = (bg_w - 240) / 2,  map_oy = (bg_h - 192) / 2.
+ *   For a 320×256 background this gives (40, 32).
  *
  *   Wall   (attr==1) → colour = bg_pixel + 16  (plane-5 overlay, mirrors Amiga
  *                       6-bitplane colour index combining background + plane 5).
@@ -406,15 +407,22 @@ void hud_render_map_overview(void)
     /* Apply the dedicated map-overview palette (background + overlay). */
     palette_set_immediate(k_overmap_pal, (int)(sizeof(k_overmap_pal)/sizeof(k_overmap_pal[0])));
 
-    /* Blit the background image at (0, 0) so the decorative frame is visible.
-     * Background row r appears at screen y = r (blit at origin).
-     * The map-tile overlay starts at C screen y=16 (bitplane row 8), well
-     * within the textured area of the background image (rows 8+). */
+    /* Blit the background image at (0, 0) so the decorative frame is visible. */
     if (s_mapbkgnd.pixels)
         video_blit(s_mapbkgnd.pixels, s_mapbkgnd.w, 0, 0,
                    s_mapbkgnd.w, s_mapbkgnd.h, -1);
 
     if (!g_cur_map.valid) return;
+
+    /* Compute the rendered map size in pixels (2 px per tile) and centre it
+     * on the background image so the map always appears in the middle of the
+     * decorative frame regardless of map or screen dimensions. */
+    const int map_pixel_w = MAP_COLS * 2;
+    const int map_pixel_h = MAP_ROWS * 2;
+    const int bg_w = s_mapbkgnd.pixels ? s_mapbkgnd.w : SCREEN_W;
+    const int bg_h = s_mapbkgnd.pixels ? s_mapbkgnd.h : SCREEN_H;
+    const int map_ox = (bg_w - map_pixel_w) / 2;
+    const int map_oy = (bg_h - map_pixel_h) / 2;
 
     /* Plot 2×2 pixel blocks for solid tiles (walls and doors).
      * Only attr==1 (TILE_WALL) and attr==3 (TILE_DOOR) are drawn, mirroring
@@ -424,8 +432,8 @@ void hud_render_map_overview(void)
             UBYTE attr = tilemap_attr(&g_cur_map, col, row);
             if (attr != TILE_WALL && attr != TILE_DOOR) continue;
 
-            int px = 2 + col * 2;
-            int py = 16 + row * 2;
+            int px = map_ox + col * 2;
+            int py = map_oy + row * 2;
             if (px < 0 || px + 1 >= SCREEN_W || py < 0 || py + 1 >= SCREEN_H) continue;
 
             /* Wall colour: bg_pixel + OVERMAP_WALL_OFFSET exactly replicates
@@ -453,14 +461,14 @@ void hud_render_map_overview(void)
     }
 
     /* Draw 2×2 player position dots.
-     * get_players_position @ main.asm#L8890 computes bitplane coords as
-     * PLAYER_POS_X>>3 + 24, PLAYER_POS_Y>>3 + 20 (for ASM world coords).
-     * In the C port: pos_x/8 + 2 and pos_y/8 + 16 give the equivalent
-     * tile-aligned screen position using C world coordinates. */
+     * Player tile coordinates are derived from world pixel coordinates:
+     *   tile_col = pos_x / MAP_TILE_W  →  map_pixel_x = map_ox + tile_col * 2
+     *            = map_ox + (pos_x / 16) * 2 = map_ox + pos_x / 8
+     * Likewise for y. */
     for (int i = 0; i < MAX_PLAYERS; i++) {
         if (!g_players[i].alive) continue;
-        int cx = g_players[i].pos_x / 8 + 2;
-        int cy = g_players[i].pos_y / 8 + 16;
+        int cx = map_ox + g_players[i].pos_x / 8;
+        int cy = map_oy + g_players[i].pos_y / 8;
         if (cx < 0 || cx + 1 >= SCREEN_W || cy < 0 || cy + 1 >= SCREEN_H) continue;
         /* Colour OVERMAP_PAL_MAX = $0ABD = bright blueish-grey, stands out on the map. */
         g_framebuffer[ cy      * SCREEN_W + cx    ] = (UBYTE)OVERMAP_PAL_MAX;
