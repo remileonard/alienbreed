@@ -753,13 +753,16 @@ static void run_screen_tool_supplies(int pidx, Font *font,
  * reading the map backwards.  Each solid tile (attr==1) is drawn as a 2×2
  * pixel block at screen (d0+32, d1+28) in the bitplane.
  *
- * C port: MAP_COLS=120, MAP_ROWS=96, 2 px/tile (map renders as 240×192 px).
- * The map origin is centred on the background image:
- *   map_ox = (bg_w - 240) / 2,  map_oy = (bg_h - 192) / 2.
- * For a 320×256 background this gives (40, 32).
+ * C port: MAP_COLS=120, MAP_ROWS=96, 2 px/tile.
+ * Minimap at x=MINIMAP_DST_X, y=MINIMAP_DST_Y (240×192 px fits in screen).
+ *
+ * Player caret: player_pos_x>>3 + 29, player_pos_y>>3 + 24 (ref: scr_map L779-L786).
+ * In C: tile_col = pos_x/16, tile_row = pos_y/16; dot at (40+col*2, 24+row*2).
  * ----------------------------------------------------------------------- */
+#define MINIMAP_DST_X  40
+#define MINIMAP_DST_Y  24
 
-static void draw_radar_screen(Font *font, int pidx, const IntexImg *bg)
+static void draw_radar_screen(Font *font, int pidx)
 {
     /* text_map_system (y=12): header + 18 blank rows + footer at y=240 */
     static const char * const k_hdr[] = {
@@ -775,22 +778,14 @@ static void draw_radar_screen(Font *font, int pidx, const IntexImg *bg)
 
     if (!g_cur_map.valid) return;
 
-    /* Compute the rendered map pixel size and centre it on the background. */
-    const int map_pixel_w = MAP_COLS * 2;
-    const int map_pixel_h = MAP_ROWS * 2;
-    const int bg_w = (bg && bg->pixels) ? bg->w : 320;
-    const int bg_h = (bg && bg->pixels) ? bg->h : 256;
-    const int map_ox = (bg_w - map_pixel_w) / 2;
-    const int map_oy = (bg_h - map_pixel_h) / 2;
-
     /* Plot minimap tiles */
     for (int row = 0; row < MAP_ROWS; row++) {
         for (int col = 0; col < MAP_COLS; col++) {
             UBYTE attr = tilemap_attr(&g_cur_map, col, row);
             if (attr == 0) continue;
 
-            int px = map_ox + col * 2;
-            int py = map_oy + row * 2;
+            int px = MINIMAP_DST_X + col * 2;
+            int py = MINIMAP_DST_Y + row * 2;
             if (px < 0 || px + 1 >= 320 || py < 0 || py + 1 >= 256) continue;
 
             UBYTE color = (attr == 3) ? 5 : (attr == 1 ? 9 : 4);
@@ -805,8 +800,8 @@ static void draw_radar_screen(Font *font, int pidx, const IntexImg *bg)
     if (pidx >= 0 && pidx < MAX_PLAYERS) {
         int tc = g_players[pidx].pos_x / MAP_TILE_W;
         int tr = g_players[pidx].pos_y / MAP_TILE_H;
-        int cx = map_ox + tc * 2;
-        int cy = map_oy + tr * 2;
+        int cx = MINIMAP_DST_X + tc * 2;
+        int cy = MINIMAP_DST_Y + tr * 2;
         if (cx >= 0 && cx + 1 < 320 && cy >= 0 && cy + 1 < 256) {
             g_framebuffer[ cy      * 320 + cx    ] = 14;
             g_framebuffer[ cy      * 320 + cx + 1] = 14;
@@ -827,7 +822,7 @@ static void run_screen_radar(int pidx, Font *font, const IntexImg *bg)
         video_clear();
         if (bg->pixels)
             video_blit(bg->pixels, bg->w, 0, 0, bg->w, bg->h, -1);
-        draw_radar_screen(font, pidx, bg);
+        draw_radar_screen(font, pidx);
         video_present();
 
         UWORD inp = g_player1_input;
