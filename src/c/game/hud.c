@@ -9,6 +9,7 @@
 #include "../engine/sprite.h"
 #include "../engine/tilemap.h"
 #include "../engine/palette.h"
+#include "../engine/typewriter.h"
 #include "../hal/video.h"
 #include "../hal/vfs.h"
 #include <stdio.h>
@@ -24,6 +25,7 @@ static GfxImage s_p1_bar;
 static GfxImage s_p2_bar;
 static GfxImage s_paused;
 static GfxImage s_mapbkgnd;
+static Font     s_mapfont;
 
 static int load_gfx(GfxImage *img, const char *path)
 {
@@ -48,6 +50,9 @@ int hud_init(void)
     load_gfx(&s_p2_bar, "assets/gfx/main_player_2_status_304x8.raw");
     load_gfx(&s_paused, "assets/gfx/main_game_paused_96x7.raw");
     load_gfx(&s_mapbkgnd, "assets/tiles/mapbkgnd.raw");
+    /* Map-overview font: same font_pic used by on_map_font_struct (main.asm#L8879),
+     * letter_w=9, letter_h=12. */
+    font_load(&s_mapfont, "assets/fonts/font_16x504.raw", 9, 12, 0);
     sprite_load_player();
     return 0;
 }
@@ -58,6 +63,7 @@ void hud_quit(void)
     free(s_p2_bar.pixels); s_p2_bar.pixels = NULL;
     free(s_paused.pixels); s_paused.pixels = NULL;
     free(s_mapbkgnd.pixels); s_mapbkgnd.pixels = NULL;
+    font_free(&s_mapfont);
     sprite_free_all();
 }
 
@@ -387,16 +393,20 @@ static const UWORD k_overmap_pal[32] = {
  *       d1 = 8 + 2*map_row  and  bitplane col d0 = 2 + 2*map_col.
  *   → C screen position: x = 2 + 2*col,  y = (8 + d1) = 16 + 2*row.
  *
- *   get_players_position: player_map_x = PLAYER_POS_X>>3 + 24 (bitplane x).
- *   For the C port (world coordinates differ from ASM): pos_x/8 + 2 gives the
- *   same tile-aligned position as 2+2*(pos_x/16).
- *   Similarly: pos_y/8 + 16 = 16 + 2*(pos_y/16) for map-aligned y.
+ * Map centering:
+ *   Rendered map pixel size = MAP_COLS×2 × MAP_ROWS×2 = 240×192 px.
+ *   Origin is centred on the background image:
+ *     map_ox = (bg_w - 240) / 2,  map_oy = (bg_h - 192) / 2.
+ *   For a 320×256 background this gives (40, 32).
  *
  *   Wall   (attr==1) → colour = bg_pixel + 16  (plane-5 overlay, mirrors Amiga
  *                       6-bitplane colour index combining background + plane 5).
  *   Door   (attr==3) → EHB colour: bg_pixel as-is but drawn with the door plane
  *                       colour index bg_pixel + 20 (slight visual distinction).
- *   Player dot        → colour index OVERMAP_PAL_MAX ($0ABD, bright blueish-grey).
+ *   Player label      → '1'/'2' character from on_map_font_struct (font_16x504,
+ *                       letter_w=9, letter_h=12) in colour OVERMAP_PAL_MAX.
+ *                       Positioned at (dot_x+18, dot_y-16) per ASM
+ *                       print_player_pos_on_map @ main.asm#L8860-L8868.
  */
 #define OVERMAP_PAL_MAX      ((int)(sizeof(k_overmap_pal)/sizeof(k_overmap_pal[0])) - 1)
 #define OVERMAP_WALL_OFFSET  16   /* plane-5 colour offset: bg_col + 16 = wall colour */
@@ -406,15 +416,22 @@ void hud_render_map_overview(void)
     /* Apply the dedicated map-overview palette (background + overlay). */
     palette_set_immediate(k_overmap_pal, (int)(sizeof(k_overmap_pal)/sizeof(k_overmap_pal[0])));
 
-    /* Blit the background image at (0, 0) so the decorative frame is visible.
-     * Background row r appears at screen y = r (blit at origin).
-     * The map-tile overlay starts at C screen y=16 (bitplane row 8), well
-     * within the textured area of the background image (rows 8+). */
+    /* Blit the background image at (0, 0) so the decorative frame is visible. */
     if (s_mapbkgnd.pixels)
         video_blit(s_mapbkgnd.pixels, s_mapbkgnd.w, 0, 0,
                    s_mapbkgnd.w, s_mapbkgnd.h, -1);
 
     if (!g_cur_map.valid) return;
+
+    /* Compute the rendered map size in pixels (2 px per tile) and centre it
+     * on the background image so the map always appears in the middle of the
+     * decorative frame regardless of map or screen dimensions. */
+    const int map_pixel_w = MAP_COLS * 2;
+    const int map_pixel_h = MAP_ROWS * 2;
+    const int bg_w = s_mapbkgnd.pixels ? s_mapbkgnd.w : SCREEN_W;
+    const int bg_h = s_mapbkgnd.pixels ? s_mapbkgnd.h : SCREEN_H;
+    const int map_ox = (bg_w - map_pixel_w) / 2;
+    const int map_oy = (bg_h - map_pixel_h) / 2;
 
     /* Plot 2×2 pixel blocks for solid tiles (walls and doors).
      * Only attr==1 (TILE_WALL) and attr==3 (TILE_DOOR) are drawn, mirroring
@@ -424,8 +441,8 @@ void hud_render_map_overview(void)
             UBYTE attr = tilemap_attr(&g_cur_map, col, row);
             if (attr != TILE_WALL && attr != TILE_DOOR) continue;
 
-            int px = 2 + col * 2;
-            int py = 16 + row * 2;
+            int px = map_ox + col * 2;
+            int py = map_oy + row * 2;
             if (px < 0 || px + 1 >= SCREEN_W || py < 0 || py + 1 >= SCREEN_H) continue;
 
             /* Wall colour: bg_pixel + OVERMAP_WALL_OFFSET exactly replicates
@@ -452,20 +469,25 @@ void hud_render_map_overview(void)
         }
     }
 
-    /* Draw 2×2 player position dots.
-     * get_players_position @ main.asm#L8890 computes bitplane coords as
-     * PLAYER_POS_X>>3 + 24, PLAYER_POS_Y>>3 + 20 (for ASM world coords).
-     * In the C port: pos_x/8 + 2 and pos_y/8 + 16 give the equivalent
-     * tile-aligned screen position using C world coordinates. */
-    for (int i = 0; i < MAX_PLAYERS; i++) {
-        if (!g_players[i].alive) continue;
-        int cx = g_players[i].pos_x / 8 + 2;
-        int cy = g_players[i].pos_y / 8 + 16;
-        if (cx < 0 || cx + 1 >= SCREEN_W || cy < 0 || cy + 1 >= SCREEN_H) continue;
-        /* Colour OVERMAP_PAL_MAX = $0ABD = bright blueish-grey, stands out on the map. */
-        g_framebuffer[ cy      * SCREEN_W + cx    ] = (UBYTE)OVERMAP_PAL_MAX;
-        g_framebuffer[ cy      * SCREEN_W + cx + 1] = (UBYTE)OVERMAP_PAL_MAX;
-        g_framebuffer[(cy + 1) * SCREEN_W + cx    ] = (UBYTE)OVERMAP_PAL_MAX;
-        g_framebuffer[(cy + 1) * SCREEN_W + cx + 1] = (UBYTE)OVERMAP_PAL_MAX;
+    /* Draw player position as a '1'/'2' character label.
+     * Mirrors print_players_pos_on_map @ main.asm#L8850-L8868:
+     *   get_players_position computes tile pos (pos_x>>3+24, pos_y>>3+20);
+     *   print_player_pos_on_map shifts by (+18, -16) then draws '1' or '2'
+     *   with on_map_font_struct (font_pic, letter_w=9, letter_h=12).
+     * In the C port with centred map:
+     *   dot position: (map_ox + pos_x/8, map_oy + pos_y/8)
+     *   label origin: dot + (18, -16)  (same relative offsets as ASM).     */
+    if (s_mapfont.pixels) {
+        for (int i = 0; i < MAX_PLAYERS; i++) {
+            if (!g_players[i].alive) continue;
+            int dot_x = map_ox + g_players[i].pos_x / 8;
+            int dot_y = map_oy + g_players[i].pos_y / 8;
+            TextCtx ctx;
+            typewriter_init_ctx(&ctx, &s_mapfont, g_framebuffer, SCREEN_W,
+                                dot_x + 18, dot_y - 16);
+            ctx.text_color = OVERMAP_PAL_MAX;
+            char label[2] = { (char)('1' + i), '\0' };
+            typewriter_display(&ctx, label);
+        }
     }
 }
