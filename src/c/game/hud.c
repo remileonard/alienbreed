@@ -469,22 +469,37 @@ void hud_render_map_overview(void)
         }
     }
 
-    /* Draw player position as a '1'/'2' character label.
-     * Mirrors print_players_pos_on_map @ main.asm#L8850-L8868:
-     *   get_players_position computes tile pos (pos_x>>3+24, pos_y>>3+20);
-     *   print_player_pos_on_map shifts by (+18, -16) then draws '1' or '2'
-     *   with on_map_font_struct (font_pic, letter_w=9, letter_h=12).
-     * In the C port with centred map:
-     *   dot position: (map_ox + pos_x/8, map_oy + pos_y/8)
-     *   label origin: dot + (18, -16)  (same relative offsets as ASM).     */
+    /* Draw player position as a 2×2 dot marker and a '1'/'2' character label.
+     *
+     * In the C port with a static centred map (not scrolled like the Amiga
+     * original), the player's tile position maps directly to minimap pixels:
+     *   tile_col = pos_x / MAP_TILE_W
+     *   tile_row = pos_y / MAP_TILE_H
+     *   dot_x    = map_ox + tile_col * 2   (2 px per tile)
+     *   dot_y    = map_oy + tile_row * 2
+     *
+     * Only players actually in the current game session (0 … g_number_players-1)
+     * are drawn — in a solo game, player 2 must not appear on the map. */
     if (s_mapfont.pixels) {
-        for (int i = 0; i < MAX_PLAYERS; i++) {
+        for (int i = 0; i < g_number_players; i++) {
             if (!g_players[i].alive) continue;
-            int dot_x = map_ox + g_players[i].pos_x / 8;
-            int dot_y = map_oy + g_players[i].pos_y / 8;
+            int dot_x = map_ox + (g_players[i].pos_x / MAP_TILE_W) * 2;
+            int dot_y = map_oy + (g_players[i].pos_y / MAP_TILE_H) * 2;
+
+            /* 2×2 pixel marker at the player's tile */
+            if (dot_x >= 0 && dot_x + 1 < SCREEN_W
+                    && dot_y >= 0 && dot_y + 1 < SCREEN_H) {
+                g_framebuffer[ dot_y      * SCREEN_W + dot_x    ] = (UBYTE)OVERMAP_PAL_MAX;
+                g_framebuffer[ dot_y      * SCREEN_W + dot_x + 1] = (UBYTE)OVERMAP_PAL_MAX;
+                g_framebuffer[(dot_y + 1) * SCREEN_W + dot_x    ] = (UBYTE)OVERMAP_PAL_MAX;
+                g_framebuffer[(dot_y + 1) * SCREEN_W + dot_x + 1] = (UBYTE)OVERMAP_PAL_MAX;
+            }
+
+            /* '1'/'2' label just above the marker, horizontally centred */
+            int lx = dot_x - s_mapfont.letter_w / 2;
+            int ly = dot_y - s_mapfont.letter_h - 2;
             TextCtx ctx;
-            typewriter_init_ctx(&ctx, &s_mapfont, g_framebuffer, SCREEN_W,
-                                dot_x + 18, dot_y - 16);
+            typewriter_init_ctx(&ctx, &s_mapfont, g_framebuffer, SCREEN_W, lx, ly);
             ctx.text_color = OVERMAP_PAL_MAX;
             char label[2] = { (char)('1' + i), '\0' };
             typewriter_display(&ctx, label);
