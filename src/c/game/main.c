@@ -212,6 +212,9 @@ void level_game_loop_external(void)
         }
 
         /* --- Update logic --------------------------------------------- */
+        /* Game logic is suspended while the map overview is displayed so the
+         * player can safely study the map (similar to the P-key pause).    */
+        if (!g_map_overview_on) {
         /* Player input/movement runs every frame, mirroring the Amiga VBL
          * interrupt handler (lbC00152C @ main.asm) which processes players
          * at the full 50 Hz VBL rate.                                      */
@@ -250,6 +253,7 @@ void level_game_loop_external(void)
             g_flag_jump_to_gameover = 1;
             break;
         }
+        } /* end !g_map_overview_on update block */
 
         /* --- Render ---------------------------------------------------- */
         video_clear();
