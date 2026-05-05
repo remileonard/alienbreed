@@ -133,11 +133,11 @@
     #dpad {
       display: grid;
       grid-template-areas:
-        ". up ."
-        "left center right"
-        ". down .";
-      grid-template-columns: 52px 52px 52px;
-      grid-template-rows:    52px 52px 52px;
+        "nw up ne"
+        "left . right"
+        "sw down se";
+      grid-template-columns: 48px 48px 48px;
+      grid-template-rows:    48px 48px 48px;
       gap: 4px;
     }
 
@@ -165,6 +165,19 @@
     #btn-dpad-left  { grid-area: left; }
     #btn-dpad-right { grid-area: right; }
     #btn-dpad-down  { grid-area: down; }
+
+    /* Diagonal buttons — 32×32, centred inside their 48px corner cell */
+    .dpad-diag {
+      width: 32px;
+      height: 32px;
+      font-size: 14px;
+      align-self: center;
+      justify-self: center;
+    }
+    #btn-dpad-nw { grid-area: nw; }
+    #btn-dpad-ne { grid-area: ne; }
+    #btn-dpad-sw { grid-area: sw; }
+    #btn-dpad-se { grid-area: se; }
 
     /* Action buttons ------------------------------------------------------- */
     #action-btns {
@@ -261,14 +274,26 @@
   <div id="touch-controls">
     <!-- Left: D-pad -->
     <div id="dpad">
+      <button class="dpad-btn dpad-diag" id="btn-dpad-nw"
+              data-key="ArrowUp" data-code="ArrowUp" data-keycode="38"
+              data-key2="ArrowLeft" data-code2="ArrowLeft" data-keycode2="37">&#8598;</button>
       <button class="dpad-btn" id="btn-dpad-up"
               data-key="ArrowUp" data-code="ArrowUp" data-keycode="38">&#9650;</button>
+      <button class="dpad-btn dpad-diag" id="btn-dpad-ne"
+              data-key="ArrowUp" data-code="ArrowUp" data-keycode="38"
+              data-key2="ArrowRight" data-code2="ArrowRight" data-keycode2="39">&#8599;</button>
       <button class="dpad-btn" id="btn-dpad-left"
               data-key="ArrowLeft" data-code="ArrowLeft" data-keycode="37">&#9664;</button>
       <button class="dpad-btn" id="btn-dpad-right"
               data-key="ArrowRight" data-code="ArrowRight" data-keycode="39">&#9654;</button>
+      <button class="dpad-btn dpad-diag" id="btn-dpad-sw"
+              data-key="ArrowDown" data-code="ArrowDown" data-keycode="40"
+              data-key2="ArrowLeft" data-code2="ArrowLeft" data-keycode2="37">&#8601;</button>
       <button class="dpad-btn" id="btn-dpad-down"
               data-key="ArrowDown" data-code="ArrowDown" data-keycode="40">&#9660;</button>
+      <button class="dpad-btn dpad-diag" id="btn-dpad-se"
+              data-key="ArrowDown" data-code="ArrowDown" data-keycode="40"
+              data-key2="ArrowRight" data-code2="ArrowRight" data-keycode2="39">&#8600;</button>
     </div>
 
     <!-- Right: action buttons -->
@@ -377,9 +402,25 @@
        * We attach all touch events to the #dpad container so that a finger
        * sliding between buttons — or two fingers pressing simultaneously —
        * correctly fires keydown/keyup for every direction involved.
+       *
+       * Diagonal buttons carry data-key2/data-code2/data-keycode2 attributes
+       * and fire two key events simultaneously.
        * -------------------------------------------------------------------- */
       var dpad      = document.getElementById('dpad');
-      var dpadState = {};   /* touchIdentifier → { btn, key, code, keyCode } */
+      var dpadState = {};   /* touchIdentifier → { btn, keys: [{key,code,keyCode},…] } */
+
+      function getBtnKeys(el) {
+        var keys = [];
+        if (el.dataset.key) {
+          var kc = parseInt(el.dataset.keycode, 10);
+          if (!isNaN(kc)) keys.push({ key: el.dataset.key, code: el.dataset.code, keyCode: kc });
+        }
+        if (el.dataset.key2) {
+          var kc2 = parseInt(el.dataset.keycode2, 10);
+          if (!isNaN(kc2)) keys.push({ key: el.dataset.key2, code: el.dataset.code2, keyCode: kc2 });
+        }
+        return keys;
+      }
 
       function dpadBtnAt(x, y) {
         var el = document.elementFromPoint(x, y);
@@ -396,24 +437,27 @@
           var id  = t.identifier;
           var el  = dpadBtnAt(t.clientX, t.clientY);
           var cur = dpadState[id];
-          var curKey = cur ? cur.key : null;
-          var newKey = el ? el.dataset.key : null;
 
-          if (curKey === newKey) continue;   /* nothing changed for this touch */
+          if (cur && cur.btn === el) continue;   /* same button, nothing changed */
 
-          /* Release the old direction */
+          /* Release the old direction(s) */
           if (cur) {
             cur.btn.classList.remove('pressed');
-            sendKey(cur.key, cur.code, cur.keyCode, false);
+            for (var k = 0; k < cur.keys.length; k++) {
+              var ck = cur.keys[k];
+              sendKey(ck.key, ck.code, ck.keyCode, false);
+            }
             delete dpadState[id];
           }
-          /* Press the new direction */
-          if (el && newKey) {
-            var kc = parseInt(el.dataset.keycode, 10);
-            if (isNaN(kc)) continue;
-            dpadState[id] = { btn: el, key: newKey, code: el.dataset.code, keyCode: kc };
+          /* Press the new direction(s) */
+          if (el) {
+            var keys = getBtnKeys(el);
+            if (!keys.length) continue;
+            dpadState[id] = { btn: el, keys: keys };
             el.classList.add('pressed');
-            sendKey(newKey, el.dataset.code, kc, true);
+            for (var k = 0; k < keys.length; k++) {
+              sendKey(keys[k].key, keys[k].code, keys[k].keyCode, true);
+            }
           }
         }
       }
@@ -424,7 +468,10 @@
           var cur = dpadState[id];
           if (cur) {
             cur.btn.classList.remove('pressed');
-            sendKey(cur.key, cur.code, cur.keyCode, false);
+            for (var k = 0; k < cur.keys.length; k++) {
+              var ck = cur.keys[k];
+              sendKey(ck.key, ck.code, ck.keyCode, false);
+            }
             delete dpadState[id];
           }
         }
