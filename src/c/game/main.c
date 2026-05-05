@@ -304,6 +304,12 @@ void level_game_loop_external(void)
                          * Frames 0-2 use sprite_draw_alien_hatch(); frame 3
                          * (last 2 ticks) is a normal walk frame.
                          * Ref: lbC00A568 / lbL01B6F6 @ main.asm#L7272-7278,14544.
+                         *
+                         * Face huggers (is_facehugger=1) use 16×16 sprites from
+                         * atlas x=256-304 via sprite_draw_facehugger(), bypassing
+                         * both the hatch animation (lbL01BC0A uses the same 32×32
+                         * zoom frames as large aliens) and the 32×30 walk path.
+                         * Ref: lbW009414 / lbL00969C @ main.asm#L6059,L6315.
                          */
                         if (g_aliens[i].hatch_timer > HATCH_ANIM_WALK_THRESHOLD) {
                             int hf = (HATCH_ANIM_TIMER_INIT - g_aliens[i].hatch_timer) / 2;
@@ -311,16 +317,22 @@ void level_game_loop_external(void)
                                 sprite_draw_alien_hatch(hf, sx, sy);
                             } else {
                                 /* Frame 3: full-size = first walk frame */
-                                sprite_draw_alien(g_aliens[i].direction, 0, sx, sy);
+                                if (g_aliens[i].is_facehugger)
+                                    sprite_draw_facehugger(g_aliens[i].direction, 0, sx, sy);
+                                else
+                                    sprite_draw_alien(g_aliens[i].direction, 0, sx, sy);
                             }
                         } else {
                             int anim_tick  = g_aliens[i].anim_counter % 4;
                             int anim_frame = k_walk_cycle[anim_tick];
                             if (g_aliens[i].hit_flag) {
-                                anim_frame = ALIEN_WALK_FRAMES; /* ALT WALK: y=96 */
+                                anim_frame = ALIEN_WALK_FRAMES; /* ALT WALK */
                                 g_aliens[i].hit_flag--;
                             }
-                            sprite_draw_alien(g_aliens[i].direction, anim_frame, sx, sy);
+                            if (g_aliens[i].is_facehugger)
+                                sprite_draw_facehugger(g_aliens[i].direction, anim_frame, sx, sy);
+                            else
+                                sprite_draw_alien(g_aliens[i].direction, anim_frame, sx, sy);
                         }
                     }
                 }

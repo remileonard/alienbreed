@@ -37,8 +37,53 @@ typedef struct {
      * struct+46 = $14 = 20) and decremented by lbC00A568 each tick while
      * the AI is in the "hatching" state. */
     int   hatch_timer;
+    /* Face hugger flag — set to 1 when this alien is a small face hugger
+     * (spawned from TILE_ALIEN_SPAWN_SMALL (0x29) or from the facehugger
+     * hatch tile on level 12, which selects lbW009414 with size 4,4,8,8).
+     * Face huggers use 16×16 sprites from atlas x=256-304, y=0-80 rather
+     * than the 32×30 large-alien sprites.
+     * Ref: lbW009414 / lbL00969C @ main.asm#L6059-L6168; tile dispatch
+     * lbC0049D6 (tile 0x29 → lbW008FD4) and lbC004A28 (lbW009414). */
+    int   is_facehugger;
+    /* Boss flag — reserved for the dedicated boss issue.
+     * Actual bosses are spawned exclusively by tile_boss_trigger (a separate
+     * tile from tile 0x0A) using dedicated ASM structs with special AI:
+     *   boss_nbr 1 → lbW009114 (AI lbC009CE2, level 5)
+     *   boss_nbr 2 → lbW009254 (AI lbC009CE2, levels 7/8)
+     *   boss_nbr 3 → lbW009374 (level 12)
+     *   boss_nbr 4 → lbW009014 (AI lbC009AFC, level 10)
+     * The large aliens spawned by tile 0x0A (TILE_FACEHUGGER_HATCH) on
+     * non-level-12 levels (lbW008F94 / lbW009094) are regular large aliens
+     * sharing the standard AI (lbC00987E) — they are NOT bosses.
+     * Ref: tile_boss_trigger @ main.asm#L5632, boss_nbr_1..4 handlers. */
+    int   is_boss;
     /* Pathfinding state */
     int   target_x, target_y;
+    /*
+     * Stuck / evasion state — mirrors ASM offsets 78/80/82/88 in lbC00987E.
+     *
+     * evade_x (ASM 78(a0)): X-axis evasion timer.  Set to 50 by the stuck
+     *   logic when Y was physically blocked.  Decremented by 2 every game
+     *   tick (double-decrement at lbC009912).  While > 0 the alien reverses
+     *   its intended X direction (right→left / left→right).
+     *
+     * evade_y (ASM 80(a0)): Y-axis evasion timer.  Set to 50 by the stuck
+     *   logic when X was physically blocked.  Never decremented; stays until
+     *   the stuck counter fires again and toggles it back to 0.  While > 0
+     *   the alien reverses its intended Y direction (down→up / up→down).
+     *
+     * blocked_axis (ASM 82(a0)): last axis blocked by a wall collision.
+     *   0 = X movement was blocked (set by aliens_collision_stop when X speed
+     *       is zeroed).  1 = Y movement was blocked.
+     *
+     * stuck_counter (ASM 88(a0)): counts consecutive ticks with no movement
+     *   (dir_bits == 0).  When it reaches 25 it resets to 0 and toggles the
+     *   evasion timer for the blocked axis (lbC009A16–lbC009A60).
+     */
+    int   evade_x;
+    int   evade_y;
+    int   blocked_axis;
+    int   stuck_counter;
 } Alien;
 
 extern Alien g_aliens[MAX_ALIENS];
