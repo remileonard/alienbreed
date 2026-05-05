@@ -1,0 +1,161 @@
+name: PR Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+# One deployment per PR; cancel any in-progress run for the same PR number.
+concurrency:
+  group: pr-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # ------------------------------------------------------------------ #
+  # Build and deploy a preview for the PR                               #
+  # ------------------------------------------------------------------ #
+  deploy-preview:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ---------------------------------------------------------------- #
+      # Step 1 — Build native asset-conversion tools                     #
+      # ---------------------------------------------------------------- #
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libsdl2-dev libsdl2-mixer-dev
+
+      - name: Configure native build (tools only)
+        run: |
+          cmake -B build_native \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DEMBED_ASSETS=OFF
+
+      - name: Build native tools
+        run: |
+          cmake --build build_native --target \
+            bin2c convert_bitplanes convert_tileset \
+            convert_sprites convert_audio parse_levels \
+            -- -j$(nproc)
+
+      # ---------------------------------------------------------------- #
+      # Step 2 — Convert Amiga game data to portable asset files         #
+      # ---------------------------------------------------------------- #
+      - name: Convert game assets
+        run: |
+          BUILD=./build_native ./convert_assets.sh
+
+      # ---------------------------------------------------------------- #
+      # Step 3 — Build the WebAssembly version with all assets embedded  #
+      # ---------------------------------------------------------------- #
+      - name: Set up Emscripten SDK
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.64
+          actions-cache-folder: emsdk-cache
+
+      - name: Configure WASM build
+        run: |
+          emcmake cmake -B build_wasm \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DEMBED_ASSETS=ON \
+            -DBIN2C_EXECUTABLE="$(pwd)/build_native/bin2c"
+
+      - name: Build WASM
+        run: emmake make -C build_wasm alienbreed -j$(nproc)
+
+      # ---------------------------------------------------------------- #
+      # Step 4 — Assemble the preview directory                          #
+      # ---------------------------------------------------------------- #
+      - name: Prepare preview directory
+        run: |
+          mkdir -p pages
+          cp build_wasm/alienbreed.html pages/index.html
+          cp build_wasm/alienbreed.js   pages/
+          cp build_wasm/alienbreed.wasm pages/
+          cat > pages/_headers <<'EOF'
+          /*
+            Cross-Origin-Opener-Policy: same-origin
+            Cross-Origin-Embedder-Policy: require-corp
+          EOF
+
+      # ---------------------------------------------------------------- #
+      # Step 5 — Deploy to GitHub Pages under preview/<PR number>        #
+      # ---------------------------------------------------------------- #
+      - name: Deploy PR preview
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: pages
+          target-folder: preview/${{ github.event.pull_request.number }}
+          clean: false
+
+      # ---------------------------------------------------------------- #
+      # Step 6 — Post (or update) a comment on the PR with the URL       #
+      # ---------------------------------------------------------------- #
+      - name: Comment on PR with preview URL
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const owner    = context.repo.owner;
+            const repo     = context.repo.repo;
+            const url      = `https://${owner}.github.io/${repo}/preview/${prNumber}/`;
+            const marker   = '<!-- pr-preview-comment -->';
+            const body     = `${marker}\n## 🎮 PR Preview\n\nThe WASM build for this PR is available at:\n**[${url}](${url})**\n\n*The preview is updated on every push and removed automatically when the PR is closed.*`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number: prNumber,
+            });
+
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body,
+              });
+            }
+
+  # ------------------------------------------------------------------ #
+  # Remove the preview when the PR is closed (merged or abandoned)      #
+  # ------------------------------------------------------------------ #
+  cleanup-preview:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+
+      - name: Remove preview folder
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          if [ -d "preview/${PR_NUMBER}" ]; then
+            rm -rf "preview/${PR_NUMBER}"
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add .
+            git diff --staged --quiet || git commit -m "chore: remove preview for PR #${PR_NUMBER}"
+            git push
+          fi
