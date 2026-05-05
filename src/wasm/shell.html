@@ -118,9 +118,15 @@
       touch-action: none;
     }
 
-    body.touch-device #touch-controls { display: flex; }
+    /* Primary mechanism: CSS media query — works without any JS.
+     * (pointer: coarse) is true on all phones and tablets, including iPhone. */
+    @media (pointer: coarse) {
+      #touch-controls { display: flex; }
+      .controls { display: none; }
+    }
 
-    /* Hide the keyboard hint on touch devices — on-screen buttons replace it */
+    /* Fallback: JS-detected touch device (belt-and-suspenders) */
+    body.touch-device #touch-controls { display: flex; }
     body.touch-device .controls { display: none; }
 
     /* D-pad ---------------------------------------------------------------- */
@@ -339,7 +345,9 @@
       overlay.addEventListener('touchstart', unlockAudio, { passive: false });
 
       var isTouchDevice =
-        ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        ('ontouchstart' in window) ||
+        (navigator.maxTouchPoints > 0) ||
+        (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
       if (!isTouchDevice) return;
 
       document.body.classList.add('touch-device');
