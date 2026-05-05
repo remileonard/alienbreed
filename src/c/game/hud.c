@@ -8,6 +8,7 @@
 #include "level.h"
 #include "../engine/sprite.h"
 #include "../engine/tilemap.h"
+#include "../engine/palette.h"
 #include "../hal/video.h"
 #include "../hal/vfs.h"
 #include <stdio.h>
@@ -22,6 +23,7 @@ typedef struct { UBYTE *pixels; int w, h; } GfxImage;
 static GfxImage s_p1_bar;
 static GfxImage s_p2_bar;
 static GfxImage s_paused;
+static GfxImage s_mapbkgnd;
 
 static int load_gfx(GfxImage *img, const char *path)
 {
@@ -45,6 +47,7 @@ int hud_init(void)
     load_gfx(&s_p1_bar, "assets/gfx/main_player_1_status_304x8.raw");
     load_gfx(&s_p2_bar, "assets/gfx/main_player_2_status_304x8.raw");
     load_gfx(&s_paused, "assets/gfx/main_game_paused_96x7.raw");
+    load_gfx(&s_mapbkgnd, "assets/tiles/mapbkgnd.raw");
     sprite_load_player();
     return 0;
 }
@@ -54,6 +57,7 @@ void hud_quit(void)
     free(s_p1_bar.pixels); s_p1_bar.pixels = NULL;
     free(s_p2_bar.pixels); s_p2_bar.pixels = NULL;
     free(s_paused.pixels); s_paused.pixels = NULL;
+    free(s_mapbkgnd.pixels); s_mapbkgnd.pixels = NULL;
     sprite_free_all();
 }
 
@@ -85,6 +89,7 @@ void hud_quit(void)
  * Rows are explicitly filled to x=319 so the full width is covered.
  */
 #define SCREEN_W        320    /* full screen width */
+#define SCREEN_H        256    /* full screen height */
 #define BAR_X            0    /* left edge of bar on screen */
 #define BAR_W          304    /* bar image pixel width */
 #define BAR_P1_Y         0    /* Player 1 bar: top of screen */
@@ -349,31 +354,112 @@ void hud_render_pause(void)
     video_blit(s_paused.pixels, s_paused.w, px, py, s_paused.w, s_paused.h, 0);
 }
 
+/*
+ * Map overview palette: 16 background colours from mapbkgnd_320x256.lo4 +
+ * 16 overlay colours from map_overview_overlay_palette @ main.asm#L8970.
+ *
+ * Background (indices 0-15):  Amiga 12-bit $0RGB from the .lo4 palette tail.
+ * Overlay    (indices 16-31): Amiga 12-bit colours from map_overview_overlay_palette.
+ *
+ * Reference:
+ *   load_map_overview @ main.asm#L8941-L8967
+ *   map_overview_overlay_palette dc.w $346,$457,$556,$568,$866,$679,$976,$B76,
+ *                                      $78A,$C86,$D96,$FD6,$FFB,$89B,$9AC,$ABD
+ */
+static const UWORD k_overmap_pal[32] = {
+    /* Background palette (from mapbkgnd_320x256.lo4 at offset 40960) */
+    0x0000, 0x0111, 0x0210, 0x0222, 0x0520, 0x0333, 0x0630, 0x0830,
+    0x0444, 0x0940, 0x0A50, 0x0F90, 0x0FB5, 0x0555, 0x0666, 0x0777,
+    /* Overlay palette (map_overview_overlay_palette @ main.asm#L8970) */
+    0x0346, 0x0457, 0x0556, 0x0568, 0x0866, 0x0679, 0x0976, 0x0B76,
+    0x078A, 0x0C86, 0x0D96, 0x0FD6, 0x0FFB, 0x089B, 0x09AC, 0x0ABD
+};
+
+/*
+ * Render the in-game map overview (toggled by the M key).
+ *
+ * Mirrors plot_map_overview_data + get_players_position @ main.asm#L8739-L8917.
+ *
+ * Coordinate derivation (from ASM reverse-engineering):
+ *   - The 6-bitplane display section starts at Amiga screen line 52 = C screen y=8.
+ *   - Bitplane row r → C screen y = 8 + r.
+ *   - plot_map_overview_data places tile (map_row, map_col) at bitplane row
+ *       d1 = 8 + 2*map_row  and  bitplane col d0 = 2 + 2*map_col.
+ *   → C screen position: x = 2 + 2*col,  y = (8 + d1) = 16 + 2*row.
+ *
+ *   get_players_position: player_map_x = PLAYER_POS_X>>3 + 24 (bitplane x).
+ *   For the C port (world coordinates differ from ASM): pos_x/8 + 2 gives the
+ *   same tile-aligned position as 2+2*(pos_x/16).
+ *   Similarly: pos_y/8 + 16 = 16 + 2*(pos_y/16) for map-aligned y.
+ *
+ *   Wall   (attr==1) → colour = bg_pixel + 16  (plane-5 overlay, mirrors Amiga
+ *                       6-bitplane colour index combining background + plane 5).
+ *   Door   (attr==3) → EHB colour: bg_pixel as-is but drawn with the door plane
+ *                       colour index bg_pixel + 20 (slight visual distinction).
+ *   Player dot        → colour index OVERMAP_PAL_MAX ($0ABD, bright blueish-grey).
+ */
+#define OVERMAP_PAL_MAX  ((int)(sizeof(k_overmap_pal)/sizeof(k_overmap_pal[0])) - 1)
 void hud_render_map_overview(void)
 {
-    /* Draw a mini-map: one pixel per tile */
-    int ox = 8, oy = 20;
-    for (int row = 0; row < MAP_ROWS && oy + row < 256; row++) {
-        for (int col = 0; col < MAP_COLS && ox + col < 320; col++) {
+    /* Apply the dedicated map-overview palette (background + overlay). */
+    palette_set_immediate(k_overmap_pal, (int)(sizeof(k_overmap_pal)/sizeof(k_overmap_pal[0])));
+
+    /* Blit the background image at (0, 0) so the decorative frame is visible.
+     * Background row r appears at screen y = r (blit at origin).
+     * The map-tile overlay starts at C screen y=16 (bitplane row 8), well
+     * within the textured area of the background image (rows 8+). */
+    if (s_mapbkgnd.pixels)
+        video_blit(s_mapbkgnd.pixels, s_mapbkgnd.w, 0, 0,
+                   s_mapbkgnd.w, s_mapbkgnd.h, -1);
+
+    if (!g_cur_map.valid) return;
+
+    /* Plot 2×2 pixel blocks for solid tiles (walls and doors).
+     * Only attr==1 (TILE_WALL) and attr==3 (TILE_DOOR) are drawn, mirroring
+     * the ASM which only tests those two tile attribute values. */
+    for (int row = 0; row < MAP_ROWS; row++) {
+        for (int col = 0; col < MAP_COLS; col++) {
             UBYTE attr = tilemap_attr(&g_cur_map, col, row);
-            UBYTE color;
-            switch (attr) {
-                case TILE_WALL:      color = 2;  break;
-                case TILE_DOOR:      color = 6;  break;
-                case TILE_EXIT:      color = 10; break;
-                case TILE_ALIEN_SPAWN_BIG:
-                case TILE_ALIEN_SPAWN_SMALL:
-                case TILE_ALIEN_HOLE: color = 4; break;
-                default:             color = 1;  break;
-            }
-            video_plot_pixel(ox + col, oy + row, color);
+            if (attr != TILE_WALL && attr != TILE_DOOR) continue;
+
+            int px = 2 + col * 2;
+            int py = 16 + row * 2;
+            if (px < 0 || px + 1 >= SCREEN_W || py < 0 || py + 1 >= SCREEN_H) continue;
+
+            /* Wall colour: bg_pixel + 16 exactly replicates Amiga plane-5
+             * overlay (6-bitplane colour index = background bits + plane-5 bit).
+             * Door colour: use bg_pixel + 20 (a different band of the overlay
+             * palette) to give a visually distinct appearance from walls, since
+             * doors used EHB (plane 6) in the original hardware which produced
+             * a half-brightness tint not reproducible as a simple offset.      */
+            UBYTE bg_col = 0;
+            if (s_mapbkgnd.pixels)
+                bg_col = s_mapbkgnd.pixels[py * s_mapbkgnd.w + px] & 0x0F;
+            UBYTE color = (attr == TILE_DOOR) ? (UBYTE)(bg_col + 20)
+                                              : (UBYTE)(bg_col + 16);
+            if (color > OVERMAP_PAL_MAX) color = (UBYTE)OVERMAP_PAL_MAX;
+
+            g_framebuffer[ py      * SCREEN_W + px    ] = color;
+            g_framebuffer[ py      * SCREEN_W + px + 1] = color;
+            g_framebuffer[(py + 1) * SCREEN_W + px    ] = color;
+            g_framebuffer[(py + 1) * SCREEN_W + px + 1] = color;
         }
     }
-    /* Draw player positions */
+
+    /* Draw 2×2 player position dots.
+     * get_players_position @ main.asm#L8890 computes bitplane coords as
+     * PLAYER_POS_X>>3 + 24, PLAYER_POS_Y>>3 + 20 (for ASM world coords).
+     * In the C port: pos_x/8 + 2 and pos_y/8 + 16 give the equivalent
+     * tile-aligned screen position using C world coordinates. */
     for (int i = 0; i < MAX_PLAYERS; i++) {
         if (!g_players[i].alive) continue;
-        int mx = ox + g_players[i].pos_x / MAP_TILE_W;
-        int my = oy + g_players[i].pos_y / MAP_TILE_H;
-        video_plot_pixel(mx, my, 31);
+        int cx = g_players[i].pos_x / 8 + 2;
+        int cy = g_players[i].pos_y / 8 + 16;
+        if (cx < 0 || cx + 1 >= SCREEN_W || cy < 0 || cy + 1 >= SCREEN_H) continue;
+        /* Colour OVERMAP_PAL_MAX = $0ABD = bright blueish-grey, stands out on the map. */
+        g_framebuffer[ cy      * SCREEN_W + cx    ] = (UBYTE)OVERMAP_PAL_MAX;
+        g_framebuffer[ cy      * SCREEN_W + cx + 1] = (UBYTE)OVERMAP_PAL_MAX;
+        g_framebuffer[(cy + 1) * SCREEN_W + cx    ] = (UBYTE)OVERMAP_PAL_MAX;
+        g_framebuffer[(cy + 1) * SCREEN_W + cx + 1] = (UBYTE)OVERMAP_PAL_MAX;
     }
 }

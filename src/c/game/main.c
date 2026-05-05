@@ -178,6 +178,12 @@ void level_game_loop_external(void)
         }
         if (g_key_pressed == KEY_M) {
             g_map_overview_on = !g_map_overview_on;
+            /* Restore the level palette when leaving the map overview.
+             * hud_render_map_overview() switches to the map palette each frame
+             * it is active; when we leave, reinstate the level palette so that
+             * the game can continue with the correct colours.               */
+            if (!g_map_overview_on)
+                palette_set_immediate(g_cur_map.palette_a, 32);
         }
         if (g_key_pressed == KEY_D) {
             g_debug_overlay_on = !g_debug_overlay_on;
