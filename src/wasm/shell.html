@@ -54,6 +54,8 @@
       aspect-ratio: 320 / 256;
       image-rendering: pixelated;
       image-rendering: crisp-edges;
+      /* Prevent default browser touch gestures (scroll, zoom) on the canvas */
+      touch-action: none;
     }
 
     #status-bar {
@@ -99,6 +101,130 @@
     body.running .controls { display: none; }
     body.running #status-bar { color: #555; }
 
+    /* ------------------------------------------------------------------ */
+    /* Touch controls — only shown on touch-capable devices               */
+    /* ------------------------------------------------------------------ */
+    #touch-controls {
+      display: none;          /* hidden by default; JS adds .touch-device  */
+      width: 100%;
+      max-width: min(640px, 100vw - 16px);
+      padding: 10px 4px 4px;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 8px;
+      /* Prevent text selection and default touch handling on the overlay */
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+
+    /* Primary mechanism: CSS media query — works without any JS.
+     * (pointer: coarse) is true on all phones and tablets, including iPhone. */
+    @media (pointer: coarse) {
+      #touch-controls { display: flex; }
+      .controls { display: none; }
+    }
+
+    /* Fallback: JS-detected touch device (belt-and-suspenders) */
+    body.touch-device #touch-controls { display: flex; }
+    body.touch-device .controls { display: none; }
+
+    /* D-pad ---------------------------------------------------------------- */
+    #dpad {
+      display: grid;
+      grid-template-areas:
+        "nw up ne"
+        "left . right"
+        "sw down se";
+      grid-template-columns: 48px 48px 48px;
+      grid-template-rows:    48px 48px 48px;
+      gap: 4px;
+    }
+
+    .dpad-btn {
+      background: rgba(232, 64, 64, 0.12);
+      border: 1.5px solid rgba(232, 64, 64, 0.55);
+      color: #e84040;
+      font-size: 20px;
+      border-radius: 10px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: none;
+      transition: background 0.05s;
+    }
+
+    .dpad-btn.pressed,
+    .dpad-btn:active {
+      background: rgba(232, 64, 64, 0.45);
+    }
+
+    #btn-dpad-up    { grid-area: up; }
+    #btn-dpad-left  { grid-area: left; }
+    #btn-dpad-right { grid-area: right; }
+    #btn-dpad-down  { grid-area: down; }
+
+    /* Diagonal buttons — 32×32, centred inside their 48px corner cell */
+    .dpad-diag {
+      width: 32px;
+      height: 32px;
+      font-size: 14px;
+      align-self: center;
+      justify-self: center;
+    }
+    #btn-dpad-nw { grid-area: nw; }
+    #btn-dpad-ne { grid-area: ne; }
+    #btn-dpad-sw { grid-area: sw; }
+    #btn-dpad-se { grid-area: se; }
+
+    /* Action buttons ------------------------------------------------------- */
+    #action-btns {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 6px;
+    }
+
+    #action-top-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .action-btn {
+      background: rgba(232, 64, 64, 0.12);
+      border: 1.5px solid rgba(232, 64, 64, 0.55);
+      color: #e84040;
+      font-size: 10px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      border-radius: 10px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: none;
+      transition: background 0.05s;
+      min-width: 48px;
+      height: 44px;
+    }
+
+    .action-btn.pressed,
+    .action-btn:active {
+      background: rgba(232, 64, 64, 0.45);
+    }
+
+    #btn-fire {
+      height: 68px;
+      min-width: 96px;
+      font-size: 13px;
+      letter-spacing: 2px;
+    }
+
     /* Audio unlock overlay */
     #audio-overlay {
       display: none;
@@ -127,8 +253,8 @@
 
   <div id="canvas-wrapper">
     <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
-    <div id="audio-overlay" onclick="Module.resumeMainLoop && Module.resumeMainLoop(); this.classList.remove('visible');">
-      Click to start
+    <div id="audio-overlay">
+      Tap or click to start
     </div>
   </div>
 
@@ -142,6 +268,49 @@
     <span>P</span> — Pause &nbsp;&bull;&nbsp;
     <span>M</span> — Map overview &nbsp;&bull;&nbsp;
     <span>ESC</span> — Game over / quit
+  </div>
+
+  <!-- On-screen touch controller — shown only on touch-capable devices -->
+  <div id="touch-controls">
+    <!-- Left: D-pad -->
+    <div id="dpad">
+      <button class="dpad-btn dpad-diag" id="btn-dpad-nw"
+              data-key="ArrowUp" data-code="ArrowUp" data-keycode="38"
+              data-key2="ArrowLeft" data-code2="ArrowLeft" data-keycode2="37">&#8598;</button>
+      <button class="dpad-btn" id="btn-dpad-up"
+              data-key="ArrowUp" data-code="ArrowUp" data-keycode="38">&#9650;</button>
+      <button class="dpad-btn dpad-diag" id="btn-dpad-ne"
+              data-key="ArrowUp" data-code="ArrowUp" data-keycode="38"
+              data-key2="ArrowRight" data-code2="ArrowRight" data-keycode2="39">&#8599;</button>
+      <button class="dpad-btn" id="btn-dpad-left"
+              data-key="ArrowLeft" data-code="ArrowLeft" data-keycode="37">&#9664;</button>
+      <button class="dpad-btn" id="btn-dpad-right"
+              data-key="ArrowRight" data-code="ArrowRight" data-keycode="39">&#9654;</button>
+      <button class="dpad-btn dpad-diag" id="btn-dpad-sw"
+              data-key="ArrowDown" data-code="ArrowDown" data-keycode="40"
+              data-key2="ArrowLeft" data-code2="ArrowLeft" data-keycode2="37">&#8601;</button>
+      <button class="dpad-btn" id="btn-dpad-down"
+              data-key="ArrowDown" data-code="ArrowDown" data-keycode="40">&#9660;</button>
+      <button class="dpad-btn dpad-diag" id="btn-dpad-se"
+              data-key="ArrowDown" data-code="ArrowDown" data-keycode="40"
+              data-key2="ArrowRight" data-code2="ArrowRight" data-keycode2="39">&#8600;</button>
+    </div>
+
+    <!-- Right: action buttons -->
+    <div id="action-btns">
+      <div id="action-top-row">
+        <button class="action-btn" id="btn-map"
+                data-key="m" data-code="KeyM" data-keycode="77">MAP</button>
+        <button class="action-btn" id="btn-intex"
+                data-key="x" data-code="KeyX" data-keycode="88">INTEX</button>
+        <button class="action-btn" id="btn-nextwpn"
+                data-key="x" data-code="KeyX" data-keycode="88">WPN</button>
+        <button class="action-btn" id="btn-pause"
+                data-key="p" data-code="KeyP" data-keycode="80">&#9646;&#9646;</button>
+      </div>
+      <button class="action-btn" id="btn-fire"
+              data-key="z" data-code="KeyZ" data-keycode="90">FIRE</button>
+    </div>
   </div>
 
   <script>
@@ -189,6 +358,165 @@
       statusEl.textContent = 'Error: ' + msg;
       statusEl.style.color = '#ff4040';
     };
+
+    /* ------------------------------------------------------------------
+     * Touch controls
+     * Detected on first script evaluation so the layout is ready before
+     * the game finishes loading.
+     * ------------------------------------------------------------------ */
+    (function () {
+      /* Audio-unlock overlay — works for both mouse click and touch tap */
+      var overlay = document.getElementById('audio-overlay');
+      function unlockAudio(e) {
+        e.preventDefault();
+        if (window.Module && Module.resumeMainLoop) Module.resumeMainLoop();
+        overlay.classList.remove('visible');
+      }
+      overlay.addEventListener('click',      unlockAudio);
+      overlay.addEventListener('touchstart', unlockAudio, { passive: false });
+
+      var isTouchDevice =
+        ('ontouchstart' in window) ||
+        (navigator.maxTouchPoints > 0) ||
+        (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+      if (!isTouchDevice) return;
+
+      document.body.classList.add('touch-device');
+
+      var canvas = document.getElementById('canvas');
+
+      /* Dispatch a synthetic keyboard event to the canvas so that
+       * Emscripten's SDL2 layer picks it up exactly like a real keystroke. */
+      function sendKey(key, code, keyCode, down) {
+        canvas.dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup', {
+          key: key,
+          code: code,
+          keyCode: keyCode,
+          which: keyCode,
+          bubbles: true,
+          cancelable: true
+        }));
+      }
+
+      /* ---- Unified D-pad handler (supports diagonals and slide gestures) --
+       * We attach all touch events to the #dpad container so that a finger
+       * sliding between buttons — or two fingers pressing simultaneously —
+       * correctly fires keydown/keyup for every direction involved.
+       *
+       * Diagonal buttons carry data-key2/data-code2/data-keycode2 attributes
+       * and fire two key events simultaneously.
+       * -------------------------------------------------------------------- */
+      var dpad      = document.getElementById('dpad');
+      var dpadState = {};   /* touchIdentifier → { btn, keys: [{key,code,keyCode},…] } */
+
+      function getBtnKeys(el) {
+        var keys = [];
+        if (el.dataset.key) {
+          var kc = parseInt(el.dataset.keycode, 10);
+          if (!isNaN(kc)) keys.push({ key: el.dataset.key, code: el.dataset.code, keyCode: kc });
+        }
+        if (el.dataset.key2) {
+          var kc2 = parseInt(el.dataset.keycode2, 10);
+          if (!isNaN(kc2)) keys.push({ key: el.dataset.key2, code: el.dataset.code2, keyCode: kc2 });
+        }
+        return keys;
+      }
+
+      function dpadBtnAt(x, y) {
+        var el = document.elementFromPoint(x, y);
+        while (el) {
+          if (el.classList && el.classList.contains('dpad-btn')) return el;
+          el = el.parentElement;
+        }
+        return null;
+      }
+
+      function dpadUpdate(changedTouches) {
+        for (var i = 0; i < changedTouches.length; i++) {
+          var t   = changedTouches[i];
+          var id  = t.identifier;
+          var el  = dpadBtnAt(t.clientX, t.clientY);
+          var cur = dpadState[id];
+
+          if (cur && cur.btn === el) continue;   /* same button, nothing changed */
+
+          /* Release the old direction(s) */
+          if (cur) {
+            cur.btn.classList.remove('pressed');
+            for (var k = 0; k < cur.keys.length; k++) {
+              var ck = cur.keys[k];
+              sendKey(ck.key, ck.code, ck.keyCode, false);
+            }
+            delete dpadState[id];
+          }
+          /* Press the new direction(s) */
+          if (el) {
+            var keys = getBtnKeys(el);
+            if (!keys.length) continue;
+            dpadState[id] = { btn: el, keys: keys };
+            el.classList.add('pressed');
+            for (var k = 0; k < keys.length; k++) {
+              sendKey(keys[k].key, keys[k].code, keys[k].keyCode, true);
+            }
+          }
+        }
+      }
+
+      function dpadRelease(changedTouches) {
+        for (var i = 0; i < changedTouches.length; i++) {
+          var id  = changedTouches[i].identifier;
+          var cur = dpadState[id];
+          if (cur) {
+            cur.btn.classList.remove('pressed');
+            for (var k = 0; k < cur.keys.length; k++) {
+              var ck = cur.keys[k];
+              sendKey(ck.key, ck.code, ck.keyCode, false);
+            }
+            delete dpadState[id];
+          }
+        }
+      }
+
+      dpad.addEventListener('touchstart', function (e) {
+        e.preventDefault();
+        dpadUpdate(e.changedTouches);
+      }, { passive: false });
+
+      dpad.addEventListener('touchmove', function (e) {
+        e.preventDefault();
+        dpadUpdate(e.changedTouches);
+      }, { passive: false });
+
+      ['touchend', 'touchcancel'].forEach(function (evtype) {
+        dpad.addEventListener(evtype, function (e) {
+          e.preventDefault();
+          dpadRelease(e.changedTouches);
+        }, { passive: false });
+      });
+
+      /* ---- Action buttons (simple press/release — no sliding needed) ----- */
+      var actionBtns = document.querySelectorAll('#action-btns [data-key]');
+      actionBtns.forEach(function (btn) {
+        var key     = btn.dataset.key;
+        var code    = btn.dataset.code;
+        var keyCode = parseInt(btn.dataset.keycode, 10);
+        if (!key || !code || isNaN(keyCode)) return;
+
+        btn.addEventListener('touchstart', function (e) {
+          e.preventDefault();
+          btn.classList.add('pressed');
+          sendKey(key, code, keyCode, true);
+        }, { passive: false });
+
+        ['touchend', 'touchcancel'].forEach(function (evtype) {
+          btn.addEventListener(evtype, function (e) {
+            e.preventDefault();
+            btn.classList.remove('pressed');
+            sendKey(key, code, keyCode, false);
+          }, { passive: false });
+        });
+      });
+    })();
   </script>
   {{{ SCRIPT }}}
 </body>
