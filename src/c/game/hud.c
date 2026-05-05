@@ -9,6 +9,7 @@
 #include "../engine/sprite.h"
 #include "../engine/tilemap.h"
 #include "../engine/palette.h"
+#include "../engine/typewriter.h"
 #include "../hal/video.h"
 #include "../hal/vfs.h"
 #include <stdio.h>
@@ -24,6 +25,7 @@ static GfxImage s_p1_bar;
 static GfxImage s_p2_bar;
 static GfxImage s_paused;
 static GfxImage s_mapbkgnd;
+static Font     s_mapfont;
 
 static int load_gfx(GfxImage *img, const char *path)
 {
@@ -48,6 +50,9 @@ int hud_init(void)
     load_gfx(&s_p2_bar, "assets/gfx/main_player_2_status_304x8.raw");
     load_gfx(&s_paused, "assets/gfx/main_game_paused_96x7.raw");
     load_gfx(&s_mapbkgnd, "assets/tiles/mapbkgnd.raw");
+    /* Map-overview font: same font_pic used by on_map_font_struct (main.asm#L8879),
+     * letter_w=9, letter_h=12. */
+    font_load(&s_mapfont, "assets/fonts/font_16x504.raw", 9, 12, 0);
     sprite_load_player();
     return 0;
 }
@@ -58,6 +63,7 @@ void hud_quit(void)
     free(s_p2_bar.pixels); s_p2_bar.pixels = NULL;
     free(s_paused.pixels); s_paused.pixels = NULL;
     free(s_mapbkgnd.pixels); s_mapbkgnd.pixels = NULL;
+    font_free(&s_mapfont);
     sprite_free_all();
 }
 
@@ -397,7 +403,10 @@ static const UWORD k_overmap_pal[32] = {
  *                       6-bitplane colour index combining background + plane 5).
  *   Door   (attr==3) → EHB colour: bg_pixel as-is but drawn with the door plane
  *                       colour index bg_pixel + 20 (slight visual distinction).
- *   Player dot        → colour index OVERMAP_PAL_MAX ($0ABD, bright blueish-grey).
+ *   Player label      → '1'/'2' character from on_map_font_struct (font_16x504,
+ *                       letter_w=9, letter_h=12) in colour OVERMAP_PAL_MAX.
+ *                       Positioned at (dot_x+18, dot_y-16) per ASM
+ *                       print_player_pos_on_map @ main.asm#L8860-L8868.
  */
 #define OVERMAP_PAL_MAX      ((int)(sizeof(k_overmap_pal)/sizeof(k_overmap_pal[0])) - 1)
 #define OVERMAP_WALL_OFFSET  16   /* plane-5 colour offset: bg_col + 16 = wall colour */
@@ -460,20 +469,25 @@ void hud_render_map_overview(void)
         }
     }
 
-    /* Draw 2×2 player position dots.
-     * Player tile coordinates are derived from world pixel coordinates:
-     *   tile_col = pos_x / MAP_TILE_W  →  map_pixel_x = map_ox + tile_col * 2
-     *            = map_ox + (pos_x / 16) * 2 = map_ox + pos_x / 8
-     * Likewise for y. */
-    for (int i = 0; i < MAX_PLAYERS; i++) {
-        if (!g_players[i].alive) continue;
-        int cx = map_ox + g_players[i].pos_x / 8;
-        int cy = map_oy + g_players[i].pos_y / 8;
-        if (cx < 0 || cx + 1 >= SCREEN_W || cy < 0 || cy + 1 >= SCREEN_H) continue;
-        /* Colour OVERMAP_PAL_MAX = $0ABD = bright blueish-grey, stands out on the map. */
-        g_framebuffer[ cy      * SCREEN_W + cx    ] = (UBYTE)OVERMAP_PAL_MAX;
-        g_framebuffer[ cy      * SCREEN_W + cx + 1] = (UBYTE)OVERMAP_PAL_MAX;
-        g_framebuffer[(cy + 1) * SCREEN_W + cx    ] = (UBYTE)OVERMAP_PAL_MAX;
-        g_framebuffer[(cy + 1) * SCREEN_W + cx + 1] = (UBYTE)OVERMAP_PAL_MAX;
+    /* Draw player position as a '1'/'2' character label.
+     * Mirrors print_players_pos_on_map @ main.asm#L8850-L8868:
+     *   get_players_position computes tile pos (pos_x>>3+24, pos_y>>3+20);
+     *   print_player_pos_on_map shifts by (+18, -16) then draws '1' or '2'
+     *   with on_map_font_struct (font_pic, letter_w=9, letter_h=12).
+     * In the C port with centred map:
+     *   dot position: (map_ox + pos_x/8, map_oy + pos_y/8)
+     *   label origin: dot + (18, -16)  (same relative offsets as ASM).     */
+    if (s_mapfont.pixels) {
+        for (int i = 0; i < MAX_PLAYERS; i++) {
+            if (!g_players[i].alive) continue;
+            int dot_x = map_ox + g_players[i].pos_x / 8;
+            int dot_y = map_oy + g_players[i].pos_y / 8;
+            TextCtx ctx;
+            typewriter_init_ctx(&ctx, &s_mapfont, g_framebuffer, SCREEN_W,
+                                dot_x + 18, dot_y - 16);
+            ctx.text_color = OVERMAP_PAL_MAX;
+            char label[2] = { (char)('1' + i), '\0' };
+            typewriter_display(&ctx, label);
+        }
     }
 }
