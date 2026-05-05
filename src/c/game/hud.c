@@ -398,7 +398,9 @@ static const UWORD k_overmap_pal[32] = {
  *                       colour index bg_pixel + 20 (slight visual distinction).
  *   Player dot        → colour index OVERMAP_PAL_MAX ($0ABD, bright blueish-grey).
  */
-#define OVERMAP_PAL_MAX  ((int)(sizeof(k_overmap_pal)/sizeof(k_overmap_pal[0])) - 1)
+#define OVERMAP_PAL_MAX      ((int)(sizeof(k_overmap_pal)/sizeof(k_overmap_pal[0])) - 1)
+#define OVERMAP_WALL_OFFSET  16   /* plane-5 colour offset: bg_col + 16 = wall colour */
+#define OVERMAP_DOOR_OFFSET  20   /* door plane colour offset (EHB simulation) */
 void hud_render_map_overview(void)
 {
     /* Apply the dedicated map-overview palette (background + overlay). */
@@ -426,17 +428,21 @@ void hud_render_map_overview(void)
             int py = 16 + row * 2;
             if (px < 0 || px + 1 >= SCREEN_W || py < 0 || py + 1 >= SCREEN_H) continue;
 
-            /* Wall colour: bg_pixel + 16 exactly replicates Amiga plane-5
-             * overlay (6-bitplane colour index = background bits + plane-5 bit).
-             * Door colour: use bg_pixel + 20 (a different band of the overlay
-             * palette) to give a visually distinct appearance from walls, since
-             * doors used EHB (plane 6) in the original hardware which produced
-             * a half-brightness tint not reproducible as a simple offset.      */
+            /* Wall colour: bg_pixel + OVERMAP_WALL_OFFSET exactly replicates
+             * Amiga plane-5 overlay (6-bitplane colour index = background bits
+             * + plane-5 bit).
+             * Door colour: use bg_pixel + OVERMAP_DOOR_OFFSET (a different band
+             * of the overlay palette) to give a visually distinct appearance
+             * from walls, since doors used EHB (plane 6) in the original
+             * hardware which produced a half-brightness tint not reproducible
+             * as a simple offset.                                              */
             UBYTE bg_col = 0;
-            if (s_mapbkgnd.pixels)
+            if (s_mapbkgnd.pixels
+                    && py < s_mapbkgnd.h && px < s_mapbkgnd.w)
                 bg_col = s_mapbkgnd.pixels[py * s_mapbkgnd.w + px] & 0x0F;
-            UBYTE color = (attr == TILE_DOOR) ? (UBYTE)(bg_col + 20)
-                                              : (UBYTE)(bg_col + 16);
+            int offset = (attr == TILE_DOOR) ? OVERMAP_DOOR_OFFSET
+                                             : OVERMAP_WALL_OFFSET;
+            UBYTE color = (UBYTE)(bg_col + offset);
             if (color > OVERMAP_PAL_MAX) color = (UBYTE)OVERMAP_PAL_MAX;
 
             g_framebuffer[ py      * SCREEN_W + px    ] = color;
