@@ -129,55 +129,40 @@
     body.touch-device #touch-controls { display: flex; }
     body.touch-device .controls { display: none; }
 
-    /* D-pad ---------------------------------------------------------------- */
-    #dpad {
-      display: grid;
-      grid-template-areas:
-        "nw up ne"
-        "left . right"
-        "sw down se";
-      grid-template-columns: 48px 48px 48px;
-      grid-template-rows:    48px 48px 48px;
-      gap: 4px;
-    }
-
-    .dpad-btn {
-      background: rgba(232, 64, 64, 0.12);
-      border: 1.5px solid rgba(232, 64, 64, 0.55);
-      color: #e84040;
-      font-size: 20px;
-      border-radius: 10px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      -webkit-tap-highlight-color: transparent;
+    /* Virtual joystick ----------------------------------------------------- */
+    #joystick-container {
+      position: relative;
+      width: 130px;
+      height: 130px;
+      flex-shrink: 0;
       touch-action: none;
-      transition: background 0.05s;
     }
 
-    .dpad-btn.pressed,
-    .dpad-btn:active {
-      background: rgba(232, 64, 64, 0.45);
+    #joystick-base {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: rgba(232, 64, 64, 0.08);
+      border: 2px solid rgba(232, 64, 64, 0.35);
     }
 
-    #btn-dpad-up    { grid-area: up; }
-    #btn-dpad-left  { grid-area: left; }
-    #btn-dpad-right { grid-area: right; }
-    #btn-dpad-down  { grid-area: down; }
-
-    /* Diagonal buttons — 32×32, centred inside their 48px corner cell */
-    .dpad-diag {
-      width: 32px;
-      height: 32px;
-      font-size: 14px;
-      align-self: center;
-      justify-self: center;
+    #joystick-thumb {
+      position: absolute;
+      width: 54px;
+      height: 54px;
+      border-radius: 50%;
+      background: rgba(232, 64, 64, 0.30);
+      border: 2px solid rgba(232, 64, 64, 0.70);
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      will-change: transform;
     }
-    #btn-dpad-nw { grid-area: nw; }
-    #btn-dpad-ne { grid-area: ne; }
-    #btn-dpad-sw { grid-area: sw; }
-    #btn-dpad-se { grid-area: se; }
+
+    #joystick-thumb.active {
+      background: rgba(232, 64, 64, 0.55);
+      border-color: #e84040;
+    }
 
     /* Action buttons ------------------------------------------------------- */
     #action-btns {
@@ -211,6 +196,7 @@
       transition: background 0.05s;
       min-width: 48px;
       height: 44px;
+      font-family: 'Courier New', Courier, monospace;
     }
 
     .action-btn.pressed,
@@ -223,6 +209,79 @@
       min-width: 96px;
       font-size: 13px;
       letter-spacing: 2px;
+    }
+
+    /* Debug popup ---------------------------------------------------------- */
+    #debug-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.78);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #debug-overlay.visible { display: flex; }
+
+    #debug-popup {
+      background: #111;
+      border: 1.5px solid rgba(232, 64, 64, 0.65);
+      border-radius: 12px;
+      padding: 18px 16px;
+      min-width: 230px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      align-items: center;
+    }
+
+    #debug-popup-title {
+      color: #e84040;
+      font-size: 12px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+
+    #debug-btn-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      width: 100%;
+    }
+
+    .debug-btn {
+      background: rgba(232, 64, 64, 0.10);
+      border: 1.5px solid rgba(232, 64, 64, 0.45);
+      color: #e84040;
+      font-size: 10px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      border-radius: 8px;
+      cursor: pointer;
+      padding: 10px 4px;
+      text-align: center;
+      line-height: 1.4;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: none;
+      font-family: 'Courier New', Courier, monospace;
+    }
+
+    .debug-btn.pressed,
+    .debug-btn:active { background: rgba(232, 64, 64, 0.40); }
+
+    #debug-close {
+      background: rgba(232, 64, 64, 0.12);
+      border: 1.5px solid rgba(232, 64, 64, 0.55);
+      color: #e84040;
+      font-size: 11px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      border-radius: 8px;
+      cursor: pointer;
+      padding: 8px 24px;
+      font-family: 'Courier New', Courier, monospace;
+      -webkit-tap-highlight-color: transparent;
     }
 
     /* Audio unlock overlay */
@@ -264,7 +323,7 @@
   <div class="controls">
     <span>Arrow keys / WASD</span> — Move &nbsp;&bull;&nbsp;
     <span>Left Ctrl / Z</span> — Fire &nbsp;&bull;&nbsp;
-    <span>Left Alt / X</span> — Next weapon<br>
+    <span>Q / Right Alt</span> — Next weapon<br>
     <span>P</span> — Pause &nbsp;&bull;&nbsp;
     <span>M</span> — Map overview &nbsp;&bull;&nbsp;
     <span>ESC</span> — Game over / quit
@@ -272,28 +331,10 @@
 
   <!-- On-screen touch controller — shown only on touch-capable devices -->
   <div id="touch-controls">
-    <!-- Left: D-pad -->
-    <div id="dpad">
-      <button class="dpad-btn dpad-diag" id="btn-dpad-nw"
-              data-key="ArrowUp" data-code="ArrowUp" data-keycode="38"
-              data-key2="ArrowLeft" data-code2="ArrowLeft" data-keycode2="37">&#8598;</button>
-      <button class="dpad-btn" id="btn-dpad-up"
-              data-key="ArrowUp" data-code="ArrowUp" data-keycode="38">&#9650;</button>
-      <button class="dpad-btn dpad-diag" id="btn-dpad-ne"
-              data-key="ArrowUp" data-code="ArrowUp" data-keycode="38"
-              data-key2="ArrowRight" data-code2="ArrowRight" data-keycode2="39">&#8599;</button>
-      <button class="dpad-btn" id="btn-dpad-left"
-              data-key="ArrowLeft" data-code="ArrowLeft" data-keycode="37">&#9664;</button>
-      <button class="dpad-btn" id="btn-dpad-right"
-              data-key="ArrowRight" data-code="ArrowRight" data-keycode="39">&#9654;</button>
-      <button class="dpad-btn dpad-diag" id="btn-dpad-sw"
-              data-key="ArrowDown" data-code="ArrowDown" data-keycode="40"
-              data-key2="ArrowLeft" data-code2="ArrowLeft" data-keycode2="37">&#8601;</button>
-      <button class="dpad-btn" id="btn-dpad-down"
-              data-key="ArrowDown" data-code="ArrowDown" data-keycode="40">&#9660;</button>
-      <button class="dpad-btn dpad-diag" id="btn-dpad-se"
-              data-key="ArrowDown" data-code="ArrowDown" data-keycode="40"
-              data-key2="ArrowRight" data-code2="ArrowRight" data-keycode2="39">&#8600;</button>
+    <!-- Left: virtual joystick -->
+    <div id="joystick-container">
+      <div id="joystick-base"></div>
+      <div id="joystick-thumb"></div>
     </div>
 
     <!-- Right: action buttons -->
@@ -301,15 +342,30 @@
       <div id="action-top-row">
         <button class="action-btn" id="btn-map"
                 data-key="m" data-code="KeyM" data-keycode="77">MAP</button>
-        <button class="action-btn" id="btn-intex"
-                data-key="x" data-code="KeyX" data-keycode="88">INTEX</button>
         <button class="action-btn" id="btn-nextwpn"
-                data-key="x" data-code="KeyX" data-keycode="88">WPN</button>
+                data-key="q" data-code="KeyQ" data-keycode="81">WPN</button>
         <button class="action-btn" id="btn-pause"
                 data-key="p" data-code="KeyP" data-keycode="80">&#9646;&#9646;</button>
+        <button class="action-btn" id="btn-debug" title="Debug">&#9881;</button>
       </div>
       <button class="action-btn" id="btn-fire"
               data-key="z" data-code="KeyZ" data-keycode="90">FIRE</button>
+    </div>
+  </div>
+
+  <!-- Debug popup — shown when the ⚙ button is tapped -->
+  <div id="debug-overlay">
+    <div id="debug-popup">
+      <div id="debug-popup-title">Debug</div>
+      <div id="debug-btn-grid">
+        <button class="debug-btn" data-key="d" data-code="KeyD" data-keycode="68">DBG<br>OVRL</button>
+        <button class="debug-btn" data-key="f" data-code="KeyF" data-keycode="70">GFX<br>VIEW</button>
+        <button class="debug-btn" data-key="g" data-code="KeyG" data-keycode="71">PAL<br>VIEW</button>
+        <button class="debug-btn" data-key="h" data-code="KeyH" data-keycode="72">SKIP<br>LVL</button>
+        <button class="debug-btn" data-key="j" data-code="KeyJ" data-keycode="74">GOD<br>MODE</button>
+        <button class="debug-btn" data-key="Escape" data-code="Escape" data-keycode="27">QUIT</button>
+      </div>
+      <button id="debug-close">CLOSE</button>
     </div>
   </div>
 
@@ -398,103 +454,130 @@
         }));
       }
 
-      /* ---- Unified D-pad handler (supports diagonals and slide gestures) --
-       * We attach all touch events to the #dpad container so that a finger
-       * sliding between buttons — or two fingers pressing simultaneously —
-       * correctly fires keydown/keyup for every direction involved.
-       *
-       * Diagonal buttons carry data-key2/data-code2/data-keycode2 attributes
-       * and fire two key events simultaneously.
-       * -------------------------------------------------------------------- */
-      var dpad      = document.getElementById('dpad');
-      var dpadState = {};   /* touchIdentifier → { btn, keys: [{key,code,keyCode},…] } */
+      /* ---- Virtual Joystick -------------------------------------------- */
+      var jContainer = document.getElementById('joystick-container');
+      var jThumb     = document.getElementById('joystick-thumb');
 
-      function getBtnKeys(el) {
-        var keys = [];
-        if (el.dataset.key) {
-          var kc = parseInt(el.dataset.keycode, 10);
-          if (!isNaN(kc)) keys.push({ key: el.dataset.key, code: el.dataset.code, keyCode: kc });
+      /* Geometry (must match CSS): base=130px, thumb=54px */
+      var J_BASE_R   = 65;   /* base radius  */
+      var J_THUMB_R  = 27;   /* thumb radius */
+      var J_MAX_DIST = J_BASE_R - J_THUMB_R;  /* max travel = 38px */
+      var J_DEADZONE = 12;   /* px from centre before a direction fires */
+
+      var DIR = {
+        up:    { key: 'ArrowUp',    code: 'ArrowUp',    keyCode: 38 },
+        down:  { key: 'ArrowDown',  code: 'ArrowDown',  keyCode: 40 },
+        left:  { key: 'ArrowLeft',  code: 'ArrowLeft',  keyCode: 37 },
+        right: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 }
+      };
+
+      var joyState = { touchId: null, centerX: 0, centerY: 0, activeKeys: [] };
+
+      /* Map (dx,dy) to the list of direction keys that should be held */
+      function joyGetKeys(dx, dy) {
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < J_DEADZONE) return [];
+        var ang = Math.atan2(dy, dx) * 180 / Math.PI;
+        if (ang < 0) ang += 360;
+        /* 8 equal sectors of 45°, sector 0 = East */
+        var sec = Math.round(ang / 45) % 8;
+        switch (sec) {
+          case 0: return [DIR.right];
+          case 1: return [DIR.right, DIR.down];
+          case 2: return [DIR.down];
+          case 3: return [DIR.down,  DIR.left];
+          case 4: return [DIR.left];
+          case 5: return [DIR.left,  DIR.up];
+          case 6: return [DIR.up];
+          case 7: return [DIR.up,    DIR.right];
+          default: return [];
         }
-        if (el.dataset.key2) {
-          var kc2 = parseInt(el.dataset.keycode2, 10);
-          if (!isNaN(kc2)) keys.push({ key: el.dataset.key2, code: el.dataset.code2, keyCode: kc2 });
-        }
-        return keys;
       }
 
-      function dpadBtnAt(x, y) {
-        var el = document.elementFromPoint(x, y);
-        while (el) {
-          if (el.classList && el.classList.contains('dpad-btn')) return el;
-          el = el.parentElement;
-        }
-        return null;
+      /* Position thumb at (dx,dy) clamped to the base circle */
+      function joyMoveThumb(dx, dy) {
+        var dist  = Math.sqrt(dx * dx + dy * dy);
+        var clamp = Math.min(dist, J_MAX_DIST);
+        var nx = dist > 0 ? (dx / dist) * clamp : 0;
+        var ny = dist > 0 ? (dy / dist) * clamp : 0;
+        jThumb.style.transform =
+          'translate(calc(-50% + ' + nx.toFixed(1) + 'px), ' +
+                    'calc(-50% + ' + ny.toFixed(1) + 'px))';
       }
 
-      function dpadUpdate(changedTouches) {
-        for (var i = 0; i < changedTouches.length; i++) {
-          var t   = changedTouches[i];
-          var id  = t.identifier;
-          var el  = dpadBtnAt(t.clientX, t.clientY);
-          var cur = dpadState[id];
-
-          if (cur && cur.btn === el) continue;   /* same button, nothing changed */
-
-          /* Release the old direction(s) */
-          if (cur) {
-            cur.btn.classList.remove('pressed');
-            for (var k = 0; k < cur.keys.length; k++) {
-              var ck = cur.keys[k];
-              sendKey(ck.key, ck.code, ck.keyCode, false);
-            }
-            delete dpadState[id];
+      /* Send only the key events that changed between old and new sets */
+      function joyUpdateKeys(newKeys) {
+        var old = joyState.activeKeys;
+        var i, j, found;
+        for (i = 0; i < old.length; i++) {
+          found = false;
+          for (j = 0; j < newKeys.length; j++) {
+            if (old[i].code === newKeys[j].code) { found = true; break; }
           }
-          /* Press the new direction(s) */
-          if (el) {
-            var keys = getBtnKeys(el);
-            if (!keys.length) continue;
-            dpadState[id] = { btn: el, keys: keys };
-            el.classList.add('pressed');
-            for (var k = 0; k < keys.length; k++) {
-              sendKey(keys[k].key, keys[k].code, keys[k].keyCode, true);
-            }
-          }
+          if (!found) sendKey(old[i].key, old[i].code, old[i].keyCode, false);
         }
+        for (i = 0; i < newKeys.length; i++) {
+          found = false;
+          for (j = 0; j < old.length; j++) {
+            if (newKeys[i].code === old[j].code) { found = true; break; }
+          }
+          if (!found) sendKey(newKeys[i].key, newKeys[i].code, newKeys[i].keyCode, true);
+        }
+        joyState.activeKeys = newKeys;
       }
 
-      function dpadRelease(changedTouches) {
-        for (var i = 0; i < changedTouches.length; i++) {
-          var id  = changedTouches[i].identifier;
-          var cur = dpadState[id];
-          if (cur) {
-            cur.btn.classList.remove('pressed');
-            for (var k = 0; k < cur.keys.length; k++) {
-              var ck = cur.keys[k];
-              sendKey(ck.key, ck.code, ck.keyCode, false);
-            }
-            delete dpadState[id];
-          }
+      function joyReleaseAll() {
+        for (var i = 0; i < joyState.activeKeys.length; i++) {
+          var k = joyState.activeKeys[i];
+          sendKey(k.key, k.code, k.keyCode, false);
         }
+        joyState.activeKeys = [];
       }
 
-      dpad.addEventListener('touchstart', function (e) {
+      function joyHandleStart(t) {
+        if (joyState.touchId !== null) return;
+        var rect = jContainer.getBoundingClientRect();
+        joyState.touchId = t.identifier;
+        joyState.centerX = rect.left + rect.width  / 2;
+        joyState.centerY = rect.top  + rect.height / 2;
+        jThumb.classList.add('active');
+        joyHandleMove(t);
+      }
+
+      function joyHandleMove(t) {
+        if (t.identifier !== joyState.touchId) return;
+        var dx = t.clientX - joyState.centerX;
+        var dy = t.clientY - joyState.centerY;
+        joyMoveThumb(dx, dy);
+        joyUpdateKeys(joyGetKeys(dx, dy));
+      }
+
+      function joyHandleEnd(t) {
+        if (t.identifier !== joyState.touchId) return;
+        joyState.touchId = null;
+        joyReleaseAll();
+        jThumb.style.transform = 'translate(-50%, -50%)';
+        jThumb.classList.remove('active');
+      }
+
+      jContainer.addEventListener('touchstart', function (e) {
         e.preventDefault();
-        dpadUpdate(e.changedTouches);
+        for (var i = 0; i < e.changedTouches.length; i++) joyHandleStart(e.changedTouches[i]);
       }, { passive: false });
 
-      dpad.addEventListener('touchmove', function (e) {
+      jContainer.addEventListener('touchmove', function (e) {
         e.preventDefault();
-        dpadUpdate(e.changedTouches);
+        for (var i = 0; i < e.changedTouches.length; i++) joyHandleMove(e.changedTouches[i]);
       }, { passive: false });
 
       ['touchend', 'touchcancel'].forEach(function (evtype) {
-        dpad.addEventListener(evtype, function (e) {
+        jContainer.addEventListener(evtype, function (e) {
           e.preventDefault();
-          dpadRelease(e.changedTouches);
+          for (var i = 0; i < e.changedTouches.length; i++) joyHandleEnd(e.changedTouches[i]);
         }, { passive: false });
       });
 
-      /* ---- Action buttons (simple press/release — no sliding needed) ----- */
+      /* ---- Action buttons (MAP, WPN, PAUSE, FIRE) ----------------------- */
       var actionBtns = document.querySelectorAll('#action-btns [data-key]');
       actionBtns.forEach(function (btn) {
         var key     = btn.dataset.key;
@@ -515,6 +598,47 @@
             sendKey(key, code, keyCode, false);
           }, { passive: false });
         });
+      });
+
+      /* ---- Debug popup -------------------------------------------------- */
+      var debugOverlay = document.getElementById('debug-overlay');
+      var btnDebugOpen = document.getElementById('btn-debug');
+      var btnDebugClose = document.getElementById('debug-close');
+
+      btnDebugOpen.addEventListener('touchstart', function (e) {
+        e.preventDefault();
+        debugOverlay.classList.add('visible');
+      }, { passive: false });
+
+      btnDebugClose.addEventListener('touchstart', function (e) {
+        e.preventDefault();
+        debugOverlay.classList.remove('visible');
+      }, { passive: false });
+
+      /* Tap outside the popup to close */
+      debugOverlay.addEventListener('touchstart', function (e) {
+        if (e.target === debugOverlay) {
+          e.preventDefault();
+          debugOverlay.classList.remove('visible');
+        }
+      }, { passive: false });
+
+      /* Debug buttons fire a single keydown+keyup (they are toggle keys) */
+      var debugBtns = document.querySelectorAll('.debug-btn');
+      debugBtns.forEach(function (btn) {
+        var key     = btn.dataset.key;
+        var code    = btn.dataset.code;
+        var keyCode = parseInt(btn.dataset.keycode, 10);
+
+        btn.addEventListener('touchstart', function (e) {
+          e.preventDefault();
+          btn.classList.add('pressed');
+          sendKey(key, code, keyCode, true);
+          setTimeout(function () {
+            sendKey(key, code, keyCode, false);
+            btn.classList.remove('pressed');
+          }, 80);
+        }, { passive: false });
       });
     })();
   </script>
