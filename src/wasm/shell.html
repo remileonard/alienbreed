@@ -285,6 +285,57 @@
       -webkit-tap-highlight-color: transparent;
     }
 
+    /* Audio debug section inside the debug popup */
+    #audio-debug-section {
+      width: 100%;
+      border-top: 1px solid rgba(232, 64, 64, 0.25);
+      padding-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: stretch;
+    }
+
+    #audio-debug-title {
+      color: #888;
+      font-size: 9px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      text-align: center;
+    }
+
+    #audio-debug-info {
+      color: #aaa;
+      font-size: 9px;
+      letter-spacing: 1px;
+      line-height: 1.7;
+      text-align: left;
+      font-family: 'Courier New', Courier, monospace;
+      white-space: pre;
+      background: rgba(0,0,0,0.3);
+      border-radius: 4px;
+      padding: 6px 8px;
+    }
+
+    #btn-audio-retry {
+      background: rgba(232, 64, 64, 0.12);
+      border: 1.5px solid rgba(232, 64, 64, 0.45);
+      color: #e84040;
+      font-size: 10px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      border-radius: 8px;
+      cursor: pointer;
+      padding: 8px 4px;
+      text-align: center;
+      font-family: 'Courier New', Courier, monospace;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: none;
+    }
+
+    #btn-audio-retry.pressed,
+    #btn-audio-retry:active { background: rgba(232, 64, 64, 0.40); }
+
     /* Audio unlock overlay — sits over the touch-controls panel.
      * Hidden by default; JS adds .visible after onRuntimeInitialized on
      * touch devices.  On desktop the parent #touch-controls is never shown
@@ -376,6 +427,13 @@
         <button class="debug-btn" data-key="Escape" data-code="Escape" data-keycode="27">QUIT</button>
       </div>
       <button id="debug-close">CLOSE</button>
+
+      <!-- Audio debug info — visible when debug popup is open -->
+      <div id="audio-debug-section">
+        <div id="audio-debug-title">Audio state</div>
+        <div id="audio-debug-info">—</div>
+        <button id="btn-audio-retry">⟳ Retry audio unlock</button>
+      </div>
     </div>
   </div>
 
@@ -531,14 +589,59 @@
         /* Hide the overlay last — after all audio work is done and all
          * throwing calls are guarded — so it always runs. */
         overlay.classList.remove('visible');
+        refreshAudioDebug();
       }
 
-      /* once:true is safe here: the overlay has display:none when hidden so it
-       * receives no pointer events, meaning these listeners can only fire when
-       * the overlay is actually visible. The audioUnlocked flag also prevents
-       * onRuntimeInitialized from re-showing the overlay after a tap. */
-      overlay.addEventListener('click',      unlockAudio, { once: true });
-      overlay.addEventListener('touchstart', unlockAudio, { once: true, passive: false });
+      /* Retry unlock: can be called from within a user gesture even after the
+       * first unlock attempt, to recover if the first tap happened before any
+       * AudioContext was created (e.g. fast-loading page where SDL creates its
+       * context on the first game-loop tick after the tap). */
+      function retryAudioUnlock(e) {
+        if (e) e.preventDefault();
+        /* Force re-run even if already flagged as unlocked */
+        audioUnlocked = false;
+        window._abAudioUnlocked = false;
+        unlockAudio(e || { preventDefault: function(){} });
+      }
+
+      overlay.addEventListener('click',      unlockAudio);
+      overlay.addEventListener('touchstart', unlockAudio, { passive: false });
+
+      /* ---- On-screen audio debug panel ----------------------------------- */
+      var audioDebugInfo = document.getElementById('audio-debug-info');
+      var btnAudioRetry  = document.getElementById('btn-audio-retry');
+
+      function refreshAudioDebug() {
+        if (!audioDebugInfo) return;
+        var ctxs = window._abAudioContexts || [];
+        var lines = [];
+        lines.push('unlocked : ' + (window._abAudioUnlocked ? 'YES' : 'no'));
+        lines.push('contexts : ' + ctxs.length);
+        ctxs.forEach(function (ctx, i) {
+          lines.push('  ctx[' + i + '] : ' + (ctx ? ctx.state : '?'));
+        });
+        if (ctxs.length === 0) lines.push('  (none yet)');
+        audioDebugInfo.textContent = lines.join('\n');
+      }
+
+      if (btnAudioRetry) {
+        btnAudioRetry.addEventListener('touchstart', function (e) {
+          e.preventDefault();
+          btnAudioRetry.classList.add('pressed');
+          retryAudioUnlock(e);
+          setTimeout(function () { btnAudioRetry.classList.remove('pressed'); }, 120);
+        }, { passive: false });
+        btnAudioRetry.addEventListener('click', function (e) {
+          retryAudioUnlock(e);
+        });
+      }
+
+      /* Refresh the audio debug info whenever the debug popup is opened */
+      var btnDebugOpenForAudio = document.getElementById('btn-debug');
+      if (btnDebugOpenForAudio) {
+        btnDebugOpenForAudio.addEventListener('touchstart', refreshAudioDebug, { passive: true });
+        btnDebugOpenForAudio.addEventListener('click', refreshAudioDebug);
+      }
 
       var isTouchDevice =
         ('ontouchstart' in window) ||
