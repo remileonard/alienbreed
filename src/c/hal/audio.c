@@ -65,7 +65,7 @@ typedef struct {
  *   494 = 0x01EE → en=1, step=0xEE=−18 (fade-out every 18 ticks)
  */
 static const SampleParams k_sample_params[AUDIO_MAX_SAMPLES] = {
-/* ID  vol   per  lp  dur   v_en v_st  p_en p_st */
+/* ID  vol   per  lp  dur   vol_ramp_en  vol_ramp_step  pitch_ramp_en  pitch_ramp_step */
 /*  0 */{ 62, 428, 0,  28,   0,    0,   0,    0  },
 /*  1 */{ 32, 428, 0,  10,   1,   -4,   1,    1  },
 /*  2 */{ 32, 284, 0,  31,   0,    0,   0,    0  },
