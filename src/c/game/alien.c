@@ -1072,8 +1072,15 @@ void alien_update_all(void)
             continue;
         }
 
+        WORD prev_x = g_aliens[i].pos_x;
+        WORD prev_y = g_aliens[i].pos_y;
         alien_move(i, &g_aliens[i]);
-        g_aliens[i].anim_counter++;
+        /* Only advance the walk-cycle animation when the alien actually moved.
+         * If it is physically blocked (by a wall or another alien) its position
+         * stays the same and we do NOT tick the counter, so the sprite freezes
+         * on the current frame rather than running visibly on the spot. */
+        if (g_aliens[i].pos_x != prev_x || g_aliens[i].pos_y != prev_y)
+            g_aliens[i].anim_counter++;
     }
 
     /* Update projectiles */
