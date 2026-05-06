@@ -24,10 +24,19 @@ static int         s_mix_rate = 22050;
 typedef struct { int id; const char *file; } SampleEntry;
 
 static const SampleEntry k_sample_map[] = {
+    /* Weapon fire sounds — from weapons_attr_table @ main.asm#L736.
+     * Indices 0,2,3,4,6 map directly to the sample table entries. */
+    {  0, "samples/sample1"            },  /* SAMPLE_WEAPON_PLASMAGUN  */
+    {  2, "samples/sample2"            },  /* SAMPLE_WEAPON_FLAMEARC   */
+    {  3, "samples/sample3"            },  /* SAMPLE_WEAPON_LAZER      */
+    {  4, "samples/sample4"            },  /* SAMPLE_WEAPON_TWINFIRE / SIDEWINDERS */
     {  5, "samples/one_way_door"       },
+    {  6, "samples/intex_noise"        },  /* SAMPLE_WEAPON_FLAMETHROWER */
     { 13, "samples/intex_shutdown"     },
     { 14, "samples/intex_beep"         },  /* caret move reuses beep */
     { 18, "samples/destruction_horn"   },
+    { 20, "samples/dying_alien"        },  /* dying alien (variant A) */
+    { 21, "samples/dying_alien"        },  /* dying alien (variant B, same file) */
     { 22, "samples/getting_key"        },
     { 23, "samples/opening_door"       },
     { 24, "samples/ammo"               },
@@ -40,6 +49,7 @@ static const SampleEntry k_sample_map[] = {
     { 37, "samples/fire_gun"           },
     { 41, "samples/descent"            },
     { 42, "samples/descent_end"        },
+    { 47, "samples/reloading_weapon"   },  /* SAMPLE_RELOADING_WEAPON */
     { 48, "samples/intex_beep"         },  /* typewriter tick */
     { 73, "samples/dying_player"       },
     /* Voices */
@@ -203,4 +213,58 @@ void audio_pause_music(void)
 void audio_resume_music(void)
 {
     if (s_music) sm_resume(s_music);
+}
+
+/* -----------------------------------------------------------------------
+ * Voice sequence player
+ * Plays up to VOICE_SEQ_MAX voices sequentially on a dedicated channel.
+ * Ref: schedule_sample_to_play / smp_player_requires_struct_*
+ *      @ main.asm#L16806-L16816 and main.asm#L16919-L16924.
+ * ----------------------------------------------------------------------- */
+#define VOICE_CHANNEL    14
+#define VOICE_SEQ_MAX     4
+
+static int s_voice_seq[VOICE_SEQ_MAX];
+static int s_voice_seq_idx   = 0;
+static int s_voice_seq_count = 0;
+
+void audio_play_voice_seq(int v1, int v2, int v3, int v4)
+{
+    /* Refuse to interrupt a sequence that is still in progress.
+     * A sequence is "in progress" when there are still voices left to play
+     * OR the last voice is still playing on the channel.  Both conditions
+     * must be false for a new sequence to start.
+     * Ref: smp_player_requires_struct_* @ main.asm#L16806-L16816. */
+    if ((s_voice_seq_idx > 0 && s_voice_seq_idx <= s_voice_seq_count)
+            && Mix_Playing(VOICE_CHANNEL))
+        return;
+
+    s_voice_seq[0] = v1;
+    s_voice_seq[1] = v2;
+    s_voice_seq[2] = v3;
+    s_voice_seq[3] = v4;
+    s_voice_seq_count = VOICE_SEQ_MAX;
+    s_voice_seq_idx   = 0;
+
+    /* Play first sample immediately */
+    if (v1 >= 0 && v1 < AUDIO_MAX_SAMPLES && s_samples[v1]) {
+        Mix_PlayChannel(VOICE_CHANNEL, s_samples[v1], 0);
+        s_voice_seq_idx = 1;
+    }
+}
+
+void audio_update(void)
+{
+    /* Advance the voice sequence when the current voice has finished. */
+    if (s_voice_seq_idx < s_voice_seq_count && !Mix_Playing(VOICE_CHANNEL)) {
+        int id = s_voice_seq[s_voice_seq_idx++];
+        if (id >= 0 && id < AUDIO_MAX_SAMPLES && s_samples[id])
+            Mix_PlayChannel(VOICE_CHANNEL, s_samples[id], 0);
+    }
+}
+
+int audio_sample_loaded(int sample_id)
+{
+    if (sample_id < 0 || sample_id >= AUDIO_MAX_SAMPLES) return 0;
+    return s_samples[sample_id] != NULL;
 }

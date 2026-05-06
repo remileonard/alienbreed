@@ -31,6 +31,7 @@
 #define KEY_G           0x24
 #define KEY_H           0x35
 #define KEY_J           0x26
+#define KEY_L           0x28
 
 /* ----------------------------------------------------- */
 /* Player limits */
@@ -113,6 +114,11 @@
 /* Sample IDs (index into samples array) */
 /* ----------------------------------------------------- */
 #define SAMPLE_ONE_WAY_DOOR     5
+#define SAMPLE_WEAPON_PLASMAGUN 0   /* sample1.raw  — plasmagun fire  @ weapons_attr_table[4] */
+#define SAMPLE_WEAPON_FLAMEARC  2   /* sample2.raw  — flamearc fire   @ weapons_attr_table[3] */
+#define SAMPLE_WEAPON_LAZER     3   /* sample3.raw  — lazer fire      @ weapons_attr_table[7] */
+#define SAMPLE_WEAPON_TWINFIRE  4   /* sample4.raw  — twinfire fire   @ weapons_attr_table[2,6] */
+#define SAMPLE_WEAPON_FLAMETHROWER 6 /* intex_noise.raw — flamethrower @ weapons_attr_table[5] */
 #define SAMPLE_DOOR_HIT         4   /* sound on projectile-hit-door @ main.asm#L9671 */
 #define SAMPLE_EXPLOSION_A      10  /* sample7.raw short boom  (lbC00DEFE @ main.asm#L9285) */
 #define SAMPLE_REACTOR_BLAST    11  /* sample7.raw long  boom  @ main.asm#L9655 / lbC00DF16 */
@@ -132,7 +138,9 @@
 #define SAMPLE_DESCENT          41
 #define SAMPLE_DESCENT_END      42
 #define SAMPLE_RICOCHET         46  /* FLAMEARC/LAZER wall bounce @ main.asm#L9723 */
+#define SAMPLE_RELOADING_WEAPON 47  /* smp_reloading_weapon.raw — played when ammo pack consumed */
 #define SAMPLE_TYPE_WRITER      48
+#define SAMPLE_DYING_ALIEN      21  /* smp_dying_alien — alien death sound @ samples_table[21] */
 #define SAMPLE_DYING_PLAYER     73
 #define SAMPLE_EMPTY            76
 

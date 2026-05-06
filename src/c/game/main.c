@@ -210,6 +210,10 @@ void level_game_loop_external(void)
                 }
             }
         }
+        if (g_key_pressed == KEY_L) {
+            /* Debug: sound test module */
+            debug_sound_test_run();
+        }
 
         /* --- Update logic --------------------------------------------- */
         /* Game logic is suspended while the map overview is displayed so the
@@ -222,6 +226,16 @@ void level_game_loop_external(void)
             if (g_players[i].alive)
                 player_update(&g_players[i], player_get_input(&g_players[i]));
         }
+
+        /* Voice warnings — check low health/ammo once per frame.
+         * Ref: lbC006CD0 (health) and lbC00E0C8 (ammo) @ main.asm. */
+        for (int i = 0; i < g_number_players; i++) {
+            if (g_players[i].alive)
+                player_check_voice_warnings(&g_players[i], i);
+        }
+
+        /* Update voice sequence state machine */
+        audio_update();
 
         tile_anim_update();
 

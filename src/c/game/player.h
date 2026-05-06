@@ -116,6 +116,14 @@ typedef struct {
      * Ref: lbC006C7A / lbC0077DC @ main.asm#L3934-L4046. */
     int   death_counter;
 
+    /* Voice-warning state.
+     * Mirrors the warning-debounce fields at 420(a0) and 424(a0) in main.asm.
+     * Set to 1 when the corresponding voice sequence has been scheduled;
+     * cleared when the condition resolves. */
+    int   low_ammo_warned;    /* ref: 420(a0) @ lbC00E0C8 */
+    int   low_health_warned;  /* ref: 424(a0) @ lbC006CD0 */
+    int   key_warn_cooldown;  /* countdown to prevent door-warning voice spam */
+
     /* Input (references to global input state) */
     int   port;           /* 0 = player 1, 1 = player 2 */
 } Player;
@@ -175,6 +183,14 @@ void player_collect_supply(Player *p, int supply_flags);
 
 /* Advance to next weapon (wraps around owned weapons). */
 void player_next_weapon(Player *p);
+
+/*
+ * Check low-health and low-ammo conditions and play voice warnings.
+ * Must be called once per game frame from the main loop.
+ * player_idx: 0 for player 1, 1 for player 2.
+ * Ref: lbC006CD0 (health check) and lbC00E0C8 (ammo check) @ main.asm.
+ */
+void player_check_voice_warnings(Player *p, int player_idx);
 
 /* Returns the input bitmask for this player from g_player*_input. */
 UWORD player_get_input(const Player *p);

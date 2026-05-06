@@ -91,6 +91,10 @@ void player_reset_for_level(void)
         p->anim_seq_frame    = 0;
         p->anim_seq_timer    = 2;
         p->anim_seq_id       = -1;
+        /* Reset voice-warning state on each level */
+        p->low_ammo_warned   = 0;
+        p->low_health_warned = 0;
+        p->key_warn_cooldown = 0;
     }
 }
 
@@ -109,14 +113,14 @@ void player_set_cur_weapon(Player *p, int weapon_id)
      * dc.w  06,16,08,32,00,4,1
      * dc.w  07, 8,08,18,01,3,1 */
     static const struct { WORD speed; WORD rate; WORD strength; WORD smp; WORD shot_amount; } k_wdata[] = {
-        {  0,  0,  0, 0,              0 }, /* placeholder (index 0 unused) */
-        { 16,  3,  9, SAMPLE_FIRE_GUN, 4 }, /* 1: MACHINEGUN   */
-        { 16,  8, 13, SAMPLE_FIRE_GUN, 3 }, /* 2: TWINFIRE     */
-        { 12,  9, 19, SAMPLE_FIRE_GUN, 2 }, /* 3: FLAMEARC     */
-        { 14,  8, 12, SAMPLE_FIRE_GUN, 1 }, /* 4: PLASMAGUN    */
-        {  8,  3, 12, SAMPLE_FIRE_GUN, 1 }, /* 5: FLAMETHROWER */
-        { 16,  8, 32, SAMPLE_FIRE_GUN, 1 }, /* 6: SIDEWINDERS  */
-        {  8,  8, 18, SAMPLE_FIRE_GUN, 1 }, /* 7: LAZER        */
+        {  0,  0,  0, 0,                       0 }, /* placeholder (index 0 unused) */
+        { 16,  3,  9, SAMPLE_FIRE_GUN,          4 }, /* 1: MACHINEGUN   — smp idx 37 */
+        { 16,  8, 13, SAMPLE_WEAPON_TWINFIRE,   3 }, /* 2: TWINFIRE     — smp idx 4  */
+        { 12,  9, 19, SAMPLE_WEAPON_FLAMEARC,   2 }, /* 3: FLAMEARC     — smp idx 2  */
+        { 14,  8, 12, SAMPLE_WEAPON_PLASMAGUN,  1 }, /* 4: PLASMAGUN    — smp idx 0  */
+        {  8,  3, 12, SAMPLE_WEAPON_FLAMETHROWER,1},/* 5: FLAMETHROWER — smp idx 6  */
+        { 16,  8, 32, SAMPLE_WEAPON_TWINFIRE,   1 }, /* 6: SIDEWINDERS  — smp idx 4  */
+        {  8,  8, 18, SAMPLE_WEAPON_LAZER,      1 }, /* 7: LAZER        — smp idx 3  */
     };
 
     if (weapon_id < WEAPON_MAX) {
@@ -450,9 +454,15 @@ void check_tile_interaction(Player *p)
     case TILE_DOOR:
         /* Door requires key; if we have one, open_door() scans and patches it.
          * Without a key, the tile blocks movement (tilemap_is_solid could include
-         * doors too, but the original keeps them as attr 0x03, not 0x01/wall). */
+         * doors too, but the original keeps them as attr 0x03, not 0x01/wall).
+         * If no key: announce "PLAYER N REQUIRES KEYS" voice once per door bump.
+         * Ref: tile_door / smp_player_requires_struct_* @ main.asm#L5224-L5240. */
         if (p->keys > 0) {
             open_door(p);
+        } else if (p->key_warn_cooldown == 0) {
+            int pnum = (p->port == 0) ? VOICE_ONE : VOICE_TWO;
+            audio_play_voice_seq(VOICE_PLAYER, pnum, VOICE_REQUIRES, VOICE_KEYS);
+            p->key_warn_cooldown = 100;  /* ~2 s at 50 Hz */
         }
         break;
 
@@ -696,6 +706,10 @@ void player_update(Player *p, UWORD input_mask)
                     if (p->ammunitions <= 0 && p->ammopacks > 0) {
                         p->ammopacks--;
                         p->ammunitions = PLAYER_MAX_AMMO;
+                        /* Reloading sound — plays when an ammo pack is consumed.
+                         * Ref: no_more_ammo_packs trigger_sample_select_channel
+                         *      @ main.asm#L9397 (sample 47 = smp_reloading_weapon). */
+                        audio_play_sample(SAMPLE_RELOADING_WEAPON);
                     }
                 }
             } else {
@@ -811,6 +825,10 @@ void player_update(Player *p, UWORD input_mask)
     int idx = p->port;
     if (g_player_invincibility[idx] > 0)
         g_player_invincibility[idx]--;
+
+    /* Decrement key-warning cooldown */
+    if (p->key_warn_cooldown > 0)
+        p->key_warn_cooldown--;
 
     /* ---------------------------------------------------------------
      * Walk-cycle pose advance + animation state machine
@@ -992,4 +1010,45 @@ void player_next_weapon(Player *p)
             return;
         }
     } while (w != start);
+}
+
+void player_check_voice_warnings(Player *p, int player_idx)
+{
+    /*
+     * Check for low-health and low-ammo conditions and play voice warnings.
+     * Mirrors lbC006CD0 (health) and lbC00E0C8 (ammo) @ main.asm.
+     * The voice sequence "PLAYER N REQUIRES [RESOURCE]" plays once per
+     * condition; the flag is cleared when the condition is resolved.
+     *
+     * Health threshold: < 28 HP  (ref: cmp.w #28,PLAYER_HEALTH @ lbC006CD0)
+     * Ammo threshold: ammo packs ≤ 0 (ref: cmp.w #1,PLAYER_AMMOPACKS @ lbC00E0C8)
+     */
+    int pnum = (player_idx == 0) ? VOICE_ONE : VOICE_TWO;
+
+    /* ---- Low health ---- */
+    if (p->health < 28 && p->health > 0) {
+        if (!p->low_health_warned) {
+            audio_play_voice_seq(VOICE_PLAYER, pnum, VOICE_REQUIRES, VOICE_FIRST_AID);
+            p->low_health_warned = 1;
+        }
+    } else {
+        p->low_health_warned = 0;
+    }
+
+    /* ---- Low ammo (on last pack, running low) ----
+     * Threshold: no ammo packs left AND ammunition ≤ half-max (16).
+     * Mirrors lbC00E0C8 @ main.asm#L9406: plays when ammopacks ≤ 0.
+     * PLAYER_MAX_AMMO/2 avoids a magic constant and matches the "half remaining"
+     * sentinel that makes the warning timely before the player fully runs out. */
+#define LOW_AMMO_THRESHOLD (PLAYER_MAX_AMMO / 2)
+    if (p->ammopacks <= 0 && p->ammunitions <= LOW_AMMO_THRESHOLD && p->alive == 1) {
+        if (!p->low_ammo_warned) {
+            audio_play_voice_seq(VOICE_PLAYER, pnum, VOICE_REQUIRES, VOICE_AMMO);
+            p->low_ammo_warned = 1;
+        }
+    } else if (p->ammopacks > 0) {
+        /* Clear warning once ammo packs are available again */
+        p->low_ammo_warned = 0;
+    }
+#undef LOW_AMMO_THRESHOLD
 }

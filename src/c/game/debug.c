@@ -13,6 +13,7 @@
 #include "../engine/sprite.h"
 #include "../hal/video.h"
 #include "../hal/input.h"
+#include "../hal/audio.h"
 #include "../hal/timer.h"
 #include "../hal/vfs.h"
 #include <stdio.h>
@@ -985,5 +986,266 @@ void debug_palette_viewer_run(void)
         if (scroll_y > max_scroll) scroll_y = max_scroll;
 
         palette_viewer_render(scroll_y);
+    }
+}
+
+/* ================================================================== */
+/* Sound Test — interactive browser for all known samples, voices and  */
+/* music tracks.  Triggered by KEY_L during gameplay.                  */
+/* ================================================================== */
+
+/*
+ * Catalogue of all audio entries known to the C port.
+ * Entries marked type 'S' (sample) or 'V' (voice) are played via
+ * audio_play_sample(); entries marked 'M' (music) are played via
+ * audio_play_music().  The file column shows the asset stem for info.
+ */
+typedef struct {
+    char        type;   /* 'S'=sample, 'V'=voice, 'M'=music */
+    int         id;     /* sample/voice ID (ignored for music) */
+    const char *name;   /* short display name */
+    const char *file;   /* asset stem (informational) */
+} SoundEntry;
+
+static const SoundEntry k_sound_entries[] = {
+    /* ---- Samples ---- */
+    { 'S',  0, "WEAPON: PLASMAGUN",     "sample1"              },
+    { 'S',  2, "WEAPON: FLAMEARC",      "sample2"              },
+    { 'S',  3, "WEAPON: LAZER",         "sample3"              },
+    { 'S',  4, "WEAPON: TWINFIRE/SIDE", "sample4"              },
+    { 'S',  5, "ONE WAY DOOR",          "one_way_door"         },
+    { 'S',  6, "WEAPON: FLAMETHROWER",  "intex_noise"          },
+    { 'S', 10, "EXPLOSION SHORT",       "sample7"              },
+    { 'S', 11, "EXPLOSION LONG",        "sample7"              },
+    { 'S', 13, "INTEX SHUTDOWN",        "intex_shutdown"       },
+    { 'S', 14, "CARET MOVE",            "intex_beep"           },
+    { 'S', 18, "DESTRUCTION HORN",      "destruction_horn"     },
+    { 'S', 20, "DYING ALIEN (A)",       "dying_alien"          },
+    { 'S', 21, "DYING ALIEN (B)",       "dying_alien"          },
+    { 'S', 22, "GETTING KEY",           "getting_key"          },
+    { 'S', 23, "OPENING DOOR",          "opening_door"         },
+    { 'S', 24, "AMMO PICKUP",           "ammo"                 },
+    { 'S', 27, "1UP JINGLE",            "descent_end"          },
+    { 'S', 30, "FIRST AID / CREDITS",   "first_aid_and_credits"},
+    { 'S', 33, "HURT PLAYER",           "hurt_player"          },
+    { 'S', 34, "ACID POOL",             "acid_pool"            },
+    { 'S', 35, "WATER POOL",            "water_pool"           },
+    { 'S', 36, "HATCHING ALIEN",        "hatching_alien"       },
+    { 'S', 37, "MACHINEGUN FIRE",       "fire_gun"             },
+    { 'S', 41, "DESCENT",               "descent"              },
+    { 'S', 42, "DESCENT END",           "descent_end"          },
+    { 'S', 46, "RICOCHET",              "intex_noise"          },
+    { 'S', 47, "RELOADING WEAPON",      "reloading_weapon"     },
+    { 'S', 48, "TYPEWRITER / BEEP",     "intex_beep"           },
+    { 'S', 73, "DYING PLAYER",          "dying_player"         },
+    /* ---- Voices ---- */
+    { 'V', 17, "WARNING",               "voices/warning"       },
+    { 'V', 18, "DESTRUCTION IMMINENT",  "voices/destruction_imminent"},
+    { 'V', 50, "ENTERING",              "voices/entering"      },
+    { 'V', 51, "ZONE",                  "voices/zone"          },
+    { 'V', 52, "WELCOME TO",            "voices/welcome_to"    },
+    { 'V', 53, "INTEX SYSTEMS",         "voices/intex_systems" },
+    { 'V', 54, "DEATH",                 "voices/death"         },
+    { 'V', 57, "PLAYER",               "voices/player"         },
+    { 'V', 58, "REQUIRES",              "voices/requires"      },
+    { 'V', 59, "AMMO",                  "voices/ammo"          },
+    { 'V', 60, "FIRST AID",             "voices/first_aid"     },
+    { 'V', 61, "DANGER",                "voices/danger"        },
+    { 'V', 62, "INSERT DISK",           "voices/insert_disk"   },
+    { 'V', 63, "KEYS",                  "voices/keys"          },
+    { 'V', 64, "GAME OVER",             "voices/game_over"     },
+    { 'V', 65, "ONE",                   "voices/one"           },
+    { 'V', 66, "TWO",                   "voices/two"           },
+    { 'V', 67, "THREE",                 "voices/three"         },
+    { 'V', 68, "FOUR",                  "voices/four"          },
+    { 'V', 69, "FIVE",                  "voices/five"          },
+    { 'V', 70, "SIX",                   "voices/six"           },
+    { 'V', 71, "SEVEN",                 "voices/seven"         },
+    { 'V', 72, "EIGHT",                 "voices/eight"         },
+    /* ---- Voice sequences ---- */
+    { 'Q',  0, "SEQ: P1 NEEDS HEALTH",  ""                     },
+    { 'Q',  1, "SEQ: P1 NEEDS AMMO",    ""                     },
+    { 'Q',  2, "SEQ: P1 NEEDS KEYS",    ""                     },
+    { 'Q',  3, "SEQ: P2 NEEDS HEALTH",  ""                     },
+    { 'Q',  4, "SEQ: P2 NEEDS AMMO",    ""                     },
+    { 'Q',  5, "SEQ: P2 NEEDS KEYS",    ""                     },
+    /* ---- Music ---- */
+    { 'M',  0, "MUSIC: TITLE",          "title"                },
+    { 'M',  1, "MUSIC: LEVEL",          "level"                },
+};
+
+#define SOUND_N_ENTRIES ((int)(sizeof(k_sound_entries)/sizeof(k_sound_entries[0])))
+
+/* Row geometry */
+#define SND_HEADER_H   14
+#define SND_ROW_H       9
+#define SND_TOTAL_VH   (SND_HEADER_H + SOUND_N_ENTRIES * SND_ROW_H)
+
+/* Column X positions */
+#define SND_COL_SEL    2
+#define SND_COL_TYPE  10
+#define SND_COL_ID    24
+#define SND_COL_NAME  46
+#define SND_COL_FILE 198
+
+static const char *k_music_files[] = { "title", "level" };
+
+static void sound_test_play(int idx)
+{
+    if (idx < 0 || idx >= SOUND_N_ENTRIES) return;
+    const SoundEntry *e = &k_sound_entries[idx];
+    switch (e->type) {
+    case 'S':
+    case 'V':
+        audio_play_sample(e->id);
+        break;
+    case 'Q':
+        /* Voice sequences for "player N requires resource" */
+        switch (e->id) {
+        case 0: audio_play_voice_seq(VOICE_PLAYER, VOICE_ONE, VOICE_REQUIRES, VOICE_FIRST_AID); break;
+        case 1: audio_play_voice_seq(VOICE_PLAYER, VOICE_ONE, VOICE_REQUIRES, VOICE_AMMO);      break;
+        case 2: audio_play_voice_seq(VOICE_PLAYER, VOICE_ONE, VOICE_REQUIRES, VOICE_KEYS);      break;
+        case 3: audio_play_voice_seq(VOICE_PLAYER, VOICE_TWO, VOICE_REQUIRES, VOICE_FIRST_AID); break;
+        case 4: audio_play_voice_seq(VOICE_PLAYER, VOICE_TWO, VOICE_REQUIRES, VOICE_AMMO);      break;
+        case 5: audio_play_voice_seq(VOICE_PLAYER, VOICE_TWO, VOICE_REQUIRES, VOICE_KEYS);      break;
+        default: break;
+        }
+        break;
+    case 'M':
+        if (e->id >= 0 && e->id < 2)
+            audio_play_music(k_music_files[e->id]);
+        break;
+    default: break;
+    }
+}
+
+static void sound_test_render(int scroll_y, int sel)
+{
+    video_clear();
+    video_upload_framebuffer();
+
+    for (int i = 0; i < SOUND_N_ENTRIES; i++) {
+        const SoundEntry *e = &k_sound_entries[i];
+        int vy = SND_HEADER_H + i * SND_ROW_H;
+        int sy = vy - scroll_y;
+        if (sy + SND_ROW_H < SND_HEADER_H) continue;
+        if (sy >= 256) break;
+
+        /* Row background */
+        int selected = (i == sel);
+        if (selected)
+            video_overlay_fill_rect(0, sy, 320, SND_ROW_H - 1, 60, 30, 0, 220);
+        else {
+            Uint8 bg = (i & 1) ? 28 : 18;
+            video_overlay_fill_rect(0, sy, 320, SND_ROW_H - 1, bg, bg, bg, 200);
+        }
+
+        /* Selection arrow */
+        if (selected)
+            draw_string(SND_COL_SEL, sy + 1, ">", 255, 200, 0);
+
+        /* Type badge colour */
+        Uint8 tr = 180, tg = 180, tb = 180;
+        const char *type_str = "SMP";
+        if (e->type == 'V') { type_str = "VOI"; tr = 80; tg = 220; tb = 255; }
+        else if (e->type == 'Q') { type_str = "SEQ"; tr = 255; tg = 160; tb = 80; }
+        else if (e->type == 'M') { type_str = "MUS"; tr = 80; tg = 255; tb = 120; }
+
+        draw_string(SND_COL_TYPE, sy + 1, type_str, tr, tg, tb);
+
+        /* ID (not shown for music/sequence) */
+        char buf[16];
+        if (e->type == 'S' || e->type == 'V') {
+            /* Dim out entries that have no loaded WAV file */
+            int loaded = audio_sample_loaded(e->id);
+            snprintf(buf, sizeof(buf), "%3d", e->id);
+            Uint8 ir = loaded ? 220 : 100;
+            Uint8 ig = loaded ? 180 : 80;
+            Uint8 ib = loaded ? 80  : 80;
+            draw_string(SND_COL_ID, sy + 1, buf, ir, ig, ib);
+        }
+
+        /* Name */
+        Uint8 nr = selected ? 255 : 200;
+        Uint8 ng = selected ? 220 : 200;
+        Uint8 nb = selected ? 100 : 200;
+        draw_string(SND_COL_NAME, sy + 1, e->name, nr, ng, nb);
+
+        /* File stem (right-side label) */
+        if (e->file[0])
+            draw_string(SND_COL_FILE, sy + 1, e->file, 100, 100, 140);
+    }
+
+    /* Sticky header */
+    video_overlay_fill_rect(0, 0, 320, SND_HEADER_H, 0, 0, 0, 230);
+    draw_string(SND_COL_SEL,  1, "SOUND TEST", 232, 64, 0);
+    draw_string(130,           1, "L/ESC=CLOSE", 160, 160, 160);
+    draw_string(200,           1, "ENTER=PLAY", 160, 220, 80);
+    draw_string(SND_COL_TYPE, SND_HEADER_H - 8, "TYP", 160, 160, 160);
+    draw_string(SND_COL_ID,   SND_HEADER_H - 8, " ID", 160, 160, 160);
+    draw_string(SND_COL_NAME, SND_HEADER_H - 8, "NAME", 160, 160, 160);
+    draw_string(SND_COL_FILE, SND_HEADER_H - 8, "FILE", 100, 100, 140);
+
+    /* Scrollbar */
+    int viewport_h = 256 - SND_HEADER_H;
+    int max_scroll = SND_TOTAL_VH > 256 ? SND_TOTAL_VH - 256 : 0;
+    if (max_scroll > 0) {
+        int bar_h = viewport_h * viewport_h / SND_TOTAL_VH;
+        if (bar_h < 4) bar_h = 4;
+        int bar_y = SND_HEADER_H + scroll_y * (viewport_h - bar_h) / max_scroll;
+        video_overlay_fill_rect(317, bar_y, 3, bar_h, 200, 100, 40, 220);
+    }
+
+    video_flip();
+}
+
+void debug_sound_test_run(void)
+{
+    /* Drain the KEY_L event that triggered entry */
+    input_poll();
+
+    int max_scroll = SND_TOTAL_VH > 256 ? SND_TOTAL_VH - 256 : 0;
+    int scroll_y   = 0;
+    int sel        = 0;
+    int debounce   = 0;
+
+    while (!g_quit_requested) {
+        timer_begin_frame();
+        input_poll();
+        audio_update();
+
+        if (g_key_pressed == KEY_L || g_key_pressed == KEY_ESC)
+            break;
+
+        if (debounce > 0) {
+            debounce--;
+        } else {
+            const Uint8 *ks = SDL_GetKeyboardState(NULL);
+
+            if (ks[SDL_SCANCODE_UP]) {
+                if (sel > 0) { sel--; debounce = 6; }
+            }
+            if (ks[SDL_SCANCODE_DOWN]) {
+                if (sel < SOUND_N_ENTRIES - 1) { sel++; debounce = 6; }
+            }
+        }
+
+        /* RETURN or fire button plays the selected entry */
+        if (g_key_pressed == KEY_RETURN)
+            sound_test_play(sel);
+
+        /* Keep selection visible */
+        {
+            int vy  = SND_HEADER_H + sel * SND_ROW_H;
+            int bot = vy + SND_ROW_H;
+            if (vy < scroll_y + SND_HEADER_H)
+                scroll_y = vy - SND_HEADER_H;
+            if (bot > scroll_y + 256)
+                scroll_y = bot - 256;
+            if (scroll_y < 0)          scroll_y = 0;
+            if (scroll_y > max_scroll) scroll_y = max_scroll;
+        }
+
+        sound_test_render(scroll_y, sel);
     }
 }

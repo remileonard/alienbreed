@@ -63,6 +63,23 @@ void audio_set_music_volume(int vol);
 void audio_pause_music(void);
 void audio_resume_music(void);
 
+/*
+ * Play a sequence of up to 4 voices sequentially on a dedicated channel.
+ * Each voice starts only after the previous one finishes.
+ * Pass -1 to terminate the sequence early.
+ * Ref: smp_player_requires_struct_* @ main.asm#L16806-L16816.
+ */
+void audio_play_voice_seq(int v1, int v2, int v3, int v4);
+
+/*
+ * Update the voice sequence state machine — call once per game frame.
+ * Advances to the next voice in the sequence when the current one finishes.
+ */
+void audio_update(void);
+
+/* Check whether a sample ID is loaded and available for playback. */
+int audio_sample_loaded(int sample_id);
+
 /* Global music enabled flag (mirrors music_enabled from main.asm) */
 extern int g_music_enabled;
 
