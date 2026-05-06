@@ -461,14 +461,11 @@
         if (audioUnlocked) return;
         audioUnlocked = true;
 
-        /* Hide the overlay FIRST, before any call that could throw, so the
-         * overlay is always dismissed even if a later step fails on iOS. */
-        overlay.classList.remove('visible');
-
-        /* Resume every Web Audio context that Emscripten may have created.
-         * This is the critical step for iOS Safari: the AudioContext starts
-         * in the 'suspended' state and only produces sound after .resume()
-         * is called from within a user-gesture event handler. */
+        /* Resume audio FIRST — iOS Safari requires ctx.resume() to be called
+         * as early as possible inside the user-gesture handler, before any
+         * DOM mutations that trigger layout/paint. A repaint before resume()
+         * can invalidate the gesture context and leave the AudioContext
+         * permanently suspended. */
         if (window._abAudioContexts) {
           window._abAudioContexts.forEach(function (ctx) {
             if (ctx && ctx.state !== 'closed') {
@@ -478,10 +475,14 @@
         }
 
         /* resumeMainLoop may throw if the main loop is not yet initialised;
-         * wrap it so that failure here cannot affect anything else. */
+         * wrap it so that failure here cannot block overlay removal. */
         try {
           if (window.Module && Module.resumeMainLoop) Module.resumeMainLoop();
         } catch (err) { console.error('resumeMainLoop error:', err); }
+
+        /* Hide the overlay last — after all audio work is done and all
+         * throwing calls are guarded — so it always runs. */
+        overlay.classList.remove('visible');
       }
 
       /* once:true is safe here: the overlay has display:none when hidden so it
