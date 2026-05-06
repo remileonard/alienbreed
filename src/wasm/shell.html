@@ -454,22 +454,42 @@
     (function () {
       /* Audio-unlock overlay — works for both mouse click and touch tap */
       var overlay = document.getElementById('audio-overlay');
+      var audioUnlocked = false;
+
       function unlockAudio(e) {
         e.preventDefault();
+        if (audioUnlocked) return;
+        audioUnlocked = true;
+
+        /* Hide the overlay FIRST, before any call that could throw, so the
+         * overlay is always dismissed even if a later step fails on iOS. */
+        overlay.classList.remove('visible');
+
         /* Resume every Web Audio context that Emscripten may have created.
          * This is the critical step for iOS Safari: the AudioContext starts
          * in the 'suspended' state and only produces sound after .resume()
          * is called from within a user-gesture event handler. */
         if (window._abAudioContexts) {
           window._abAudioContexts.forEach(function (ctx) {
-            if (ctx && ctx.state !== 'closed') ctx.resume();
+            if (ctx && ctx.state !== 'closed') {
+              try { ctx.resume(); } catch (err) { console.error('AudioContext.resume error:', err); }
+            }
           });
         }
-        if (window.Module && Module.resumeMainLoop) Module.resumeMainLoop();
-        overlay.classList.remove('visible');
+
+        /* resumeMainLoop may throw if the main loop is not yet initialised;
+         * wrap it so that failure here cannot affect anything else. */
+        try {
+          if (window.Module && Module.resumeMainLoop) Module.resumeMainLoop();
+        } catch (err) { console.error('resumeMainLoop error:', err); }
       }
-      overlay.addEventListener('click',      unlockAudio);
-      overlay.addEventListener('touchstart', unlockAudio, { passive: false });
+
+      /* once:true is safe here: the overlay has display:none when hidden so it
+       * receives no pointer events, meaning these listeners can only fire when
+       * the overlay is actually visible. The audioUnlocked flag also prevents
+       * onRuntimeInitialized from re-showing the overlay after a tap. */
+      overlay.addEventListener('click',      unlockAudio, { once: true });
+      overlay.addEventListener('touchstart', unlockAudio, { once: true, passive: false });
 
       var isTouchDevice =
         ('ontouchstart' in window) ||
@@ -482,11 +502,13 @@
       /* On touch devices (e.g. iPhone/iPad with iOS Safari) the Web Audio
        * API requires a user gesture before any sound plays.  Show the
        * audio-unlock overlay once the WASM runtime is ready so the player
-       * sees the "Tap to start" prompt and audio works from the first note. */
+       * sees the "Tap to start" prompt and audio works from the first note.
+       * The audioUnlocked guard prevents re-showing the overlay if the user
+       * already tapped before onRuntimeInitialized fired (fast cached load). */
       var _origRTI = Module.onRuntimeInitialized;
       Module.onRuntimeInitialized = function () {
         if (_origRTI) _origRTI.call(this);
-        overlay.classList.add('visible');
+        if (!audioUnlocked) overlay.classList.add('visible');
       };
 
       var canvas = document.getElementById('canvas');
