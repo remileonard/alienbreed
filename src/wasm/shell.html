@@ -106,6 +106,7 @@
     /* ------------------------------------------------------------------ */
     #touch-controls {
       display: none;          /* hidden by default; JS adds .touch-device  */
+      position: relative;     /* anchor for the audio-unlock overlay        */
       width: 100%;
       max-width: min(640px, 100vw - 16px);
       padding: 10px 4px 4px;
@@ -284,7 +285,61 @@
       -webkit-tap-highlight-color: transparent;
     }
 
-    /* Audio unlock overlay */
+    /* Audio debug section inside the debug popup */
+    #audio-debug-section {
+      width: 100%;
+      border-top: 1px solid rgba(232, 64, 64, 0.25);
+      padding-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: stretch;
+    }
+
+    #audio-debug-title {
+      color: #888;
+      font-size: 9px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      text-align: center;
+    }
+
+    #audio-debug-info {
+      color: #aaa;
+      font-size: 9px;
+      letter-spacing: 1px;
+      line-height: 1.7;
+      text-align: left;
+      font-family: 'Courier New', Courier, monospace;
+      white-space: pre;
+      background: rgba(0,0,0,0.3);
+      border-radius: 4px;
+      padding: 6px 8px;
+    }
+
+    #btn-audio-retry {
+      background: rgba(232, 64, 64, 0.12);
+      border: 1.5px solid rgba(232, 64, 64, 0.45);
+      color: #e84040;
+      font-size: 10px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      border-radius: 8px;
+      cursor: pointer;
+      padding: 8px 4px;
+      text-align: center;
+      font-family: 'Courier New', Courier, monospace;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: none;
+    }
+
+    #btn-audio-retry.pressed,
+    #btn-audio-retry:active { background: rgba(232, 64, 64, 0.40); }
+
+    /* Audio unlock overlay — sits over the touch-controls panel.
+     * Hidden by default; JS adds .visible after onRuntimeInitialized on
+     * touch devices.  On desktop the parent #touch-controls is never shown
+     * so this overlay is never visible there either. */
     #audio-overlay {
       display: none;
       position: absolute;
@@ -299,6 +354,8 @@
       text-align: center;
       cursor: pointer;
       padding: 16px;
+      z-index: 10;
+      border-radius: 4px;
     }
 
     #audio-overlay.visible {
@@ -312,9 +369,6 @@
 
   <div id="canvas-wrapper">
     <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
-    <div id="audio-overlay">
-      Tap or click to start
-    </div>
   </div>
 
   <div id="status-bar">Loading&hellip;</div>
@@ -331,6 +385,11 @@
 
   <!-- On-screen touch controller — shown only on touch-capable devices -->
   <div id="touch-controls">
+    <!-- Audio unlock overlay — covers controls until first tap on iOS -->
+    <div id="audio-overlay">
+      Tap to start
+    </div>
+
     <!-- Left: virtual joystick -->
     <div id="joystick-container">
       <div id="joystick-base"></div>
@@ -368,12 +427,130 @@
         <button class="debug-btn" data-key="Escape" data-code="Escape" data-keycode="27">QUIT</button>
       </div>
       <button id="debug-close">CLOSE</button>
+
+      <!-- Audio debug info — visible when debug popup is open -->
+      <div id="audio-debug-section">
+        <div id="audio-debug-title">Audio state</div>
+        <div id="audio-debug-info">—</div>
+        <button id="btn-audio-retry">⟳ Retry audio unlock</button>
+      </div>
     </div>
   </div>
 
   <script>
     var statusEl   = document.getElementById('status-bar');
     var progressEl = document.getElementById('progress-bar');
+
+    /* ------------------------------------------------------------------
+     * iOS / Safari Web Audio unlock
+     * iOS Safari suspends the AudioContext until a user gesture occurs.
+     * Emscripten's SDL2 layer creates an AudioContext during WASM init
+     * (before any gesture), so it starts in the 'suspended' state and
+     * produces no sound.
+     *
+     * We monkey-patch the AudioContext constructor here — before the WASM
+     * glue script runs — to track every context that Emscripten creates.
+     * The unlockAudio handler (below) then calls .resume() on each of
+     * them inside the first user-interaction event, which iOS requires.
+     * ------------------------------------------------------------------ */
+    (function () {
+      var Orig = window.AudioContext || window.webkitAudioContext;
+      if (!Orig) return;
+      var _tracked = [];
+      window._abAudioContexts = _tracked;
+
+      function TrackedAC(opts) {
+        var ctx;
+        try { ctx = opts ? new Orig(opts) : new Orig(); }
+        catch (e) { ctx = new Orig(); }
+        _tracked.push(ctx);
+
+        /* If the user already tapped before this context was created (e.g.
+         * because SDL_mixer opens audio on the first game-loop tick rather
+         * than in main()), resume it immediately.  The resume() call here is
+         * synchronous and runs in the same JS task as SDL's constructor call,
+         * which is close enough to the gesture for iOS to accept it. */
+        if (window._abAudioUnlocked && ctx.state !== 'running') {
+          try { ctx.resume(); } catch (e) {}
+        }
+
+        /* Re-resume whenever iOS auto-suspends the context (e.g. after the
+         * page is backgrounded and then brought back to the foreground). */
+        ctx.addEventListener('statechange', function () {
+          if (window._abAudioUnlocked && ctx.state === 'suspended') {
+            try { ctx.resume(); } catch (e) {}
+          }
+        });
+
+        return ctx;
+      }
+      TrackedAC.prototype = Orig.prototype;
+      window.AudioContext = TrackedAC;
+      if (window.webkitAudioContext) window.webkitAudioContext = TrackedAC;
+    })();
+
+    /* ------------------------------------------------------------------
+     * Helpers shared between the initial overlay unlock and the persistent
+     * gesture listener below.
+     * ------------------------------------------------------------------ */
+
+    /* Play a one-frame silent buffer through an AudioContext.
+     * On iOS, ctx.resume() alone does not always unlock the hardware audio
+     * session — actually scheduling a buffer-source node is required. */
+    function playUnlockBuffer(ctx) {
+      try {
+        var buf = ctx.createBuffer(1, 1, ctx.sampleRate);
+        var src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.connect(ctx.destination);
+        src.start(0);
+        src.stop(0);
+      } catch (err) {}
+    }
+
+    /* Resume every tracked AudioContext that is still suspended.
+     * MUST be called from within a synchronous user-gesture handler. */
+    function tryResumeAllContexts() {
+      var ctxs = window._abAudioContexts || [];
+      ctxs.forEach(function (ctx) {
+        if (ctx && ctx.state !== 'running' && ctx.state !== 'closed') {
+          try { ctx.resume(); } catch (e) {}
+          playUnlockBuffer(ctx);
+        }
+      });
+    }
+
+    /* ------------------------------------------------------------------
+     * Persistent gesture listener — iOS SDL lazy-AudioContext fix.
+     *
+     * SDL_mixer creates its WebAudio AudioContext on the first
+     * Mix_PlayChannel() call, which happens AFTER the "Tap to start"
+     * overlay gesture completes.  At the time of the overlay tap,
+     * _abAudioContexts is still empty, so nothing gets resumed.
+     *
+     * To recover without user intervention, we install a capture-phase
+     * listener on document that calls tryResumeAllContexts() on every
+     * subsequent user touch / click.  The moment the user touches any
+     * control (joystick, fire button, …) after SDL has created its
+     * context, the context is resumed inside a genuine gesture handler
+     * and iOS accepts it.  The listener removes itself once all tracked
+     * contexts are confirmed running.
+     * ------------------------------------------------------------------ */
+    (function () {
+      function gestureHandler() {
+        tryResumeAllContexts();
+        /* Self-remove once every context is running */
+        var ctxs = window._abAudioContexts || [];
+        if (ctxs.length > 0 && ctxs.every(function (c) {
+          return !c || c.state === 'running' || c.state === 'closed';
+        })) {
+          document.removeEventListener('touchstart', gestureHandler, true);
+          document.removeEventListener('click',      gestureHandler, true);
+        }
+      }
+      document.addEventListener('touchstart', gestureHandler, { capture: true, passive: true });
+      document.addEventListener('click',      gestureHandler, { capture: true, passive: true });
+    })();
 
     var Module = {
       canvas: document.getElementById('canvas'),
@@ -425,13 +602,87 @@
     (function () {
       /* Audio-unlock overlay — works for both mouse click and touch tap */
       var overlay = document.getElementById('audio-overlay');
+      var audioUnlocked = false;
+
       function unlockAudio(e) {
         e.preventDefault();
-        if (window.Module && Module.resumeMainLoop) Module.resumeMainLoop();
+        if (audioUnlocked) return;
+        audioUnlocked = true;
+
+        /* Signal TrackedAC to auto-resume any context created after this tap
+         * (handles the case where SDL_mixer opens audio after onRuntimeInit). */
+        window._abAudioUnlocked = true;
+
+        /* Resume audio FIRST — iOS Safari requires ctx.resume() to be called
+         * as early as possible inside the user-gesture handler, before any
+         * DOM mutations that trigger layout/paint.  Then play a silent buffer
+         * through each context: on iOS, resume() alone does not always unlock
+         * the hardware audio session — actually scheduling a buffer source is
+         * required. */
+        tryResumeAllContexts();
+
+        /* resumeMainLoop may throw if the main loop is not yet initialised;
+         * wrap it so that failure here cannot block overlay removal. */
+        try {
+          if (window.Module && Module.resumeMainLoop) Module.resumeMainLoop();
+        } catch (err) { console.error('resumeMainLoop error:', err); }
+
+        /* Hide the overlay last — after all audio work is done and all
+         * throwing calls are guarded — so it always runs. */
         overlay.classList.remove('visible');
+        refreshAudioDebug();
       }
+
+      /* Retry unlock: can be called from within a user gesture even after the
+       * first unlock attempt, to recover if the first tap happened before any
+       * AudioContext was created (e.g. fast-loading page where SDL creates its
+       * context on the first game-loop tick after the tap). */
+      function retryAudioUnlock(e) {
+        if (e) e.preventDefault();
+        /* Force re-run even if already flagged as unlocked */
+        audioUnlocked = false;
+        window._abAudioUnlocked = false;
+        unlockAudio(e || { preventDefault: function(){} });
+      }
+
       overlay.addEventListener('click',      unlockAudio);
       overlay.addEventListener('touchstart', unlockAudio, { passive: false });
+
+      /* ---- On-screen audio debug panel ----------------------------------- */
+      var audioDebugInfo = document.getElementById('audio-debug-info');
+      var btnAudioRetry  = document.getElementById('btn-audio-retry');
+
+      function refreshAudioDebug() {
+        if (!audioDebugInfo) return;
+        var ctxs = window._abAudioContexts || [];
+        var lines = [];
+        lines.push('unlocked : ' + (window._abAudioUnlocked ? 'YES' : 'no'));
+        lines.push('contexts : ' + ctxs.length);
+        ctxs.forEach(function (ctx, i) {
+          lines.push('  ctx[' + i + '] : ' + (ctx ? ctx.state : '?'));
+        });
+        if (ctxs.length === 0) lines.push('  (none yet)');
+        audioDebugInfo.textContent = lines.join('\n');
+      }
+
+      if (btnAudioRetry) {
+        btnAudioRetry.addEventListener('touchstart', function (e) {
+          e.preventDefault();
+          btnAudioRetry.classList.add('pressed');
+          retryAudioUnlock(e);
+          setTimeout(function () { btnAudioRetry.classList.remove('pressed'); }, 120);
+        }, { passive: false });
+        btnAudioRetry.addEventListener('click', function (e) {
+          retryAudioUnlock(e);
+        });
+      }
+
+      /* Refresh the audio debug info whenever the debug popup is opened */
+      var btnDebugOpenForAudio = document.getElementById('btn-debug');
+      if (btnDebugOpenForAudio) {
+        btnDebugOpenForAudio.addEventListener('touchstart', refreshAudioDebug, { passive: true });
+        btnDebugOpenForAudio.addEventListener('click', refreshAudioDebug);
+      }
 
       var isTouchDevice =
         ('ontouchstart' in window) ||
@@ -440,6 +691,18 @@
       if (!isTouchDevice) return;
 
       document.body.classList.add('touch-device');
+
+      /* On touch devices (e.g. iPhone/iPad with iOS Safari) the Web Audio
+       * API requires a user gesture before any sound plays.  Show the
+       * audio-unlock overlay once the WASM runtime is ready so the player
+       * sees the "Tap to start" prompt and audio works from the first note.
+       * The audioUnlocked guard prevents re-showing the overlay if the user
+       * already tapped before onRuntimeInitialized fired (fast cached load). */
+      var _origRTI = Module.onRuntimeInitialized;
+      Module.onRuntimeInitialized = function () {
+        if (_origRTI) _origRTI.call(this);
+        if (!audioUnlocked) overlay.classList.add('visible');
+      };
 
       var canvas = document.getElementById('canvas');
 
