@@ -12,6 +12,7 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_mixer.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 int g_music_enabled = 0;
@@ -33,8 +34,10 @@ static int         s_mix_rate = 22050;
  *                  step > 0  → fade-in:  add      8 Paula units every    step  ticks
  *                  (mirrors lbC024142 vol-ramp branch, ±8 Paula = ±16 SDL units)
  *   pitch_ramp : word: same encoding; direction: step < 0 → pitch up  (per−50),
- *                  step > 0 → pitch down (per+50). Not applied (SDL_mixer has no
- *                  real-time pitch API); field kept for future use.
+ *                  step > 0 → pitch down (per+50). Implemented via
+ *                  Mix_RegisterEffect: a silent looping chunk holds the SDL
+ *                  channel while pitch_effect_cb resamples the raw PCM at
+ *                  ratio per_initial/per_current each audio buffer.
  * ----------------------------------------------------------------------- */
 typedef struct {
     int vol;           /* 0–64 Paula scale                     */
@@ -43,7 +46,7 @@ typedef struct {
     int dur;           /* duration in 50 Hz ticks (0=unlimited)*/
     int vol_ramp_en;   /* non-zero → vol ramp active           */
     int vol_ramp_step; /* signed; <0=fade-out, >0=fade-in      */
-    int pitch_ramp_en; /* non-zero → pitch ramp active (NYI)   */
+    int pitch_ramp_en; /* non-zero → pitch ramp active           */
     int pitch_ramp_step;/* signed; <0=pitch-up, >0=pitch-down  */
 } SampleParams;
 
@@ -159,19 +162,105 @@ typedef struct {
     int vol_ramp_raw_step;   /* original signed step from samples_table  */
     int vol_ramp_countdown;  /* working countdown; decrements each tick  */
     int vol_sdl;             /* current SDL channel volume   (0–128)     */
+    /* Pitch ramp — real-time resampling via Mix_RegisterEffect.
+     * A silent looping chunk occupies the SDL channel; the effect
+     * overwrites it each audio buffer with pitch-shifted audio drawn
+     * from a malloc'd copy of the original chunk PCM. */
+    int          pitch_ramp_en;       /* non-zero → pitch ramp active              */
+    int          pitch_ramp_raw_step; /* signed; <0 = pitch up, >0 = pitch down    */
+    int          pitch_ramp_countdown;/* ticks until next per change               */
+    int          per_initial;         /* Paula period at play time (from table)    */
+    volatile int per_current_fp;      /* current per × 256; written by game thread */
+    Uint8       *pitch_raw;           /* malloc'd copy of chunk PCM (freed on stop)*/
+    Uint32       pitch_raw_len;       /* size of pitch_raw in bytes                */
+    double       pitch_read_pos;      /* fractional frame index (audio thread only)*/
+    volatile int pitch_done;          /* 1 when PCM exhausted (set by audio thread)*/
 } ChannelState;
 
 static ChannelState s_chan_state[16]; /* indexed by SDL channel number */
 
+/* -----------------------------------------------------------------------
+ * Silent looping chunk used as placeholder for pitch-ramp channels.
+ * The pitch effect callback overwrites the silence with resampled audio.
+ * Four zero bytes = one frame of silence in any S16 stereo format.
+ * allocated=0 prevents SDL_mixer from freeing s_silence_buf.
+ * ----------------------------------------------------------------------- */
+static Uint8     s_silence_buf[4]  = {0, 0, 0, 0};
+static Mix_Chunk s_silent_chunk    = {0, s_silence_buf, 4, MIX_MAX_VOLUME};
+
+/* -----------------------------------------------------------------------
+ * Pitch effect callback — registered via Mix_RegisterEffect on channels
+ * that have pitch_ramp_en set.  Runs in the SDL audio thread.
+ *
+ * Receives a buffer pre-filled with silence (from s_silent_chunk) and
+ * overwrites it with linearly-interpolated samples read from pitch_raw
+ * at the speed ratio  per_initial / per_current.
+ *
+ *   ratio > 1  →  read faster  →  higher pitch  (per decreased)
+ *   ratio < 1  →  read slower  →  lower  pitch  (per increased)
+ *
+ * Output format assumed: S16 signed, stereo (4 bytes per frame), which
+ * matches Mix_OpenAudio(22050, MIX_DEFAULT_FORMAT, 2, ...).
+ * ----------------------------------------------------------------------- */
+static void pitch_effect_cb(int chan, void *stream, int len, void *udata)
+{
+    ChannelState *cs = (ChannelState *)udata;
+
+    if (cs->pitch_done || !cs->pitch_raw) {
+        memset(stream, 0, len);
+        return;
+    }
+
+    int per_fp = cs->per_current_fp;
+    if (per_fp <= 0) per_fp = cs->per_initial * 256;
+
+    double ratio      = (double)(cs->per_initial * 256) / (double)per_fp;
+    int    out_frames = len / 4;                          /* S16 stereo = 4 B/frame */
+    int    raw_frames = (int)(cs->pitch_raw_len / 4);
+    Sint16      *out  = (Sint16 *)stream;
+    const Sint16 *raw = (const Sint16 *)cs->pitch_raw;
+
+    for (int i = 0; i < out_frames; i++) {
+        int idx0 = (int)cs->pitch_read_pos;
+        if (idx0 >= raw_frames - 1) {
+            /* PCM exhausted — zero-fill the rest and signal game thread */
+            memset(out + i * 2, 0, (out_frames - i) * 4);
+            cs->pitch_done = 1;
+            return;
+        }
+        double frac = cs->pitch_read_pos - idx0;
+        int    idx1 = idx0 + 1;
+        /* Linear interpolation — stereo L then R */
+        out[i * 2    ] = (Sint16)(raw[idx0 * 2    ]
+                         + frac * (raw[idx1 * 2    ] - raw[idx0 * 2    ]));
+        out[i * 2 + 1] = (Sint16)(raw[idx0 * 2 + 1]
+                         + frac * (raw[idx1 * 2 + 1] - raw[idx0 * 2 + 1]));
+        cs->pitch_read_pos += ratio;
+    }
+}
+
 static void channel_state_clear(int ch)
 {
     ChannelState *cs = &s_chan_state[ch];
-    cs->active            = 0;
-    cs->dur_remaining     = 0;
-    cs->vol_ramp_en       = 0;
-    cs->vol_ramp_raw_step = 0;
-    cs->vol_ramp_countdown= 0;
-    cs->vol_sdl           = MIX_MAX_VOLUME;
+    /* Free the pitch PCM copy if not already released by a prior HaltChannel */
+    if (cs->pitch_raw) {
+        free(cs->pitch_raw);
+        cs->pitch_raw = NULL;
+    }
+    cs->active             = 0;
+    cs->dur_remaining      = 0;
+    cs->vol_ramp_en        = 0;
+    cs->vol_ramp_raw_step  = 0;
+    cs->vol_ramp_countdown = 0;
+    cs->vol_sdl            = MIX_MAX_VOLUME;
+    cs->pitch_ramp_en       = 0;
+    cs->pitch_ramp_raw_step = 0;
+    cs->pitch_ramp_countdown= 0;
+    cs->per_initial         = 0;
+    cs->per_current_fp      = 0;
+    cs->pitch_raw_len       = 0;
+    cs->pitch_read_pos      = 0.0;
+    cs->pitch_done          = 0;
 }
 
 /* Maps sample ID to filename stem (assets/samples/ or assets/voices/) */
@@ -319,11 +408,12 @@ void audio_play_sample(int sample_id)
     Mix_VolumeChunk(s_samples[sample_id], MIX_MAX_VOLUME);
 
     int loops = p->loop ? -1 : 0;
-    Mix_PlayChannel(ch, s_samples[sample_id], loops);
-    Mix_Volume(ch, sdl_vol);
 
     /* Initialise channel envelope state */
     ChannelState *cs = &s_chan_state[ch];
+    /* Release any stale pitch buffer from a previous use of this channel */
+    if (cs->pitch_raw) { free(cs->pitch_raw); cs->pitch_raw = NULL; }
+
     cs->active        = 1;
     /* Looping samples never auto-stop via dur (mirrors ASM lbC024184 tst.b 1(a0)) */
     cs->dur_remaining = p->loop ? 0 : p->dur;
@@ -338,6 +428,44 @@ void audio_play_sample(int sample_id)
     } else {
         cs->vol_ramp_countdown = 0;
     }
+
+    /* Pitch-ramp state */
+    cs->pitch_ramp_en       = p->pitch_ramp_en;
+    cs->pitch_ramp_raw_step = p->pitch_ramp_step;
+    cs->pitch_done          = 0;
+    cs->pitch_raw           = NULL;
+    cs->pitch_raw_len       = 0;
+    cs->pitch_read_pos      = 0.0;
+    cs->per_initial         = p->per;
+    cs->per_current_fp      = p->per * 256;
+
+    if (p->pitch_ramp_en && p->pitch_ramp_step != 0) {
+        int abs_step = p->pitch_ramp_step < 0
+                       ? -p->pitch_ramp_step : p->pitch_ramp_step;
+        cs->pitch_ramp_countdown = abs_step;
+
+        /* Copy the chunk PCM so the effect callback can resample it at
+         * variable speed.  The chunk itself is not used for playback;
+         * a silent looping placeholder keeps the SDL channel open. */
+        Mix_Chunk *chunk = s_samples[sample_id];
+        cs->pitch_raw = (Uint8 *)malloc(chunk->alen);
+        if (cs->pitch_raw) {
+            memcpy(cs->pitch_raw, chunk->abuf, chunk->alen);
+            cs->pitch_raw_len = chunk->alen;
+            Mix_PlayChannel(ch, &s_silent_chunk, -1);
+            Mix_Volume(ch, sdl_vol);
+            Mix_RegisterEffect(ch, pitch_effect_cb, NULL, cs);
+            return;
+        }
+        /* malloc failed — fall through to normal playback without pitch */
+        cs->pitch_ramp_en = 0;
+    } else {
+        cs->pitch_ramp_countdown = 0;
+    }
+
+    /* Normal (non-pitch-ramp) playback */
+    Mix_PlayChannel(ch, s_samples[sample_id], loops);
+    Mix_Volume(ch, sdl_vol);
 }
 
 /* Dedicated channel reserved for the looping self-destruct alarm. */
@@ -505,6 +633,34 @@ void audio_update(void)
                 } else {
                     cs->vol_ramp_countdown--;
                 }
+            }
+        }
+
+        /* Pitch ramp: update per_current_fp every abs(step) ticks.
+         * per decreasing → frequency increasing → pitch up   (step < 0).
+         * per increasing → frequency decreasing → pitch down (step > 0).
+         * Mirrors the pitch-ramp branch of lbC024142 in main.asm. */
+        if (cs->pitch_ramp_en && cs->pitch_ramp_raw_step != 0) {
+            /* Effect callback signals PCM exhaustion via pitch_done */
+            if (cs->pitch_done) {
+                Mix_HaltChannel(ch);
+                channel_state_clear(ch);
+                continue;
+            }
+            if (cs->pitch_ramp_countdown == 0) {
+                int abs_step = cs->pitch_ramp_raw_step < 0
+                               ? -cs->pitch_ramp_raw_step
+                               :  cs->pitch_ramp_raw_step;
+                cs->pitch_ramp_countdown = abs_step - 1;
+                if (cs->pitch_ramp_raw_step < 0)
+                    cs->per_current_fp -= 50 * 256; /* pitch up */
+                else
+                    cs->per_current_fp += 50 * 256; /* pitch down */
+                /* Clamp to a sane Paula period range */
+                if (cs->per_current_fp <   50 * 256) cs->per_current_fp =   50 * 256;
+                if (cs->per_current_fp > 4096 * 256) cs->per_current_fp = 4096 * 256;
+            } else {
+                cs->pitch_ramp_countdown--;
             }
         }
     }
