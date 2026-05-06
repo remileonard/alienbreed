@@ -106,6 +106,7 @@
     /* ------------------------------------------------------------------ */
     #touch-controls {
       display: none;          /* hidden by default; JS adds .touch-device  */
+      position: relative;     /* anchor for the audio-unlock overlay        */
       width: 100%;
       max-width: min(640px, 100vw - 16px);
       padding: 10px 4px 4px;
@@ -284,7 +285,10 @@
       -webkit-tap-highlight-color: transparent;
     }
 
-    /* Audio unlock overlay */
+    /* Audio unlock overlay — sits over the touch-controls panel.
+     * Hidden by default; JS adds .visible after onRuntimeInitialized on
+     * touch devices.  On desktop the parent #touch-controls is never shown
+     * so this overlay is never visible there either. */
     #audio-overlay {
       display: none;
       position: absolute;
@@ -299,6 +303,8 @@
       text-align: center;
       cursor: pointer;
       padding: 16px;
+      z-index: 10;
+      border-radius: 4px;
     }
 
     #audio-overlay.visible {
@@ -312,9 +318,6 @@
 
   <div id="canvas-wrapper">
     <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
-    <div id="audio-overlay">
-      Tap or click to start
-    </div>
   </div>
 
   <div id="status-bar">Loading&hellip;</div>
@@ -331,6 +334,11 @@
 
   <!-- On-screen touch controller — shown only on touch-capable devices -->
   <div id="touch-controls">
+    <!-- Audio unlock overlay — covers controls until first tap on iOS -->
+    <div id="audio-overlay">
+      Tap to start
+    </div>
+
     <!-- Left: virtual joystick -->
     <div id="joystick-container">
       <div id="joystick-base"></div>
