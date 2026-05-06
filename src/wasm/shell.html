@@ -489,6 +489,69 @@
       if (window.webkitAudioContext) window.webkitAudioContext = TrackedAC;
     })();
 
+    /* ------------------------------------------------------------------
+     * Helpers shared between the initial overlay unlock and the persistent
+     * gesture listener below.
+     * ------------------------------------------------------------------ */
+
+    /* Play a one-frame silent buffer through an AudioContext.
+     * On iOS, ctx.resume() alone does not always unlock the hardware audio
+     * session — actually scheduling a buffer-source node is required. */
+    function playUnlockBuffer(ctx) {
+      try {
+        var buf = ctx.createBuffer(1, 1, ctx.sampleRate);
+        var src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.connect(ctx.destination);
+        src.start(0);
+        src.stop(0);
+      } catch (err) {}
+    }
+
+    /* Resume every tracked AudioContext that is still suspended.
+     * MUST be called from within a synchronous user-gesture handler. */
+    function tryResumeAllContexts() {
+      var ctxs = window._abAudioContexts || [];
+      ctxs.forEach(function (ctx) {
+        if (ctx && ctx.state !== 'running' && ctx.state !== 'closed') {
+          try { ctx.resume(); } catch (e) {}
+          playUnlockBuffer(ctx);
+        }
+      });
+    }
+
+    /* ------------------------------------------------------------------
+     * Persistent gesture listener — iOS SDL lazy-AudioContext fix.
+     *
+     * SDL_mixer creates its WebAudio AudioContext on the first
+     * Mix_PlayChannel() call, which happens AFTER the "Tap to start"
+     * overlay gesture completes.  At the time of the overlay tap,
+     * _abAudioContexts is still empty, so nothing gets resumed.
+     *
+     * To recover without user intervention, we install a capture-phase
+     * listener on document that calls tryResumeAllContexts() on every
+     * subsequent user touch / click.  The moment the user touches any
+     * control (joystick, fire button, …) after SDL has created its
+     * context, the context is resumed inside a genuine gesture handler
+     * and iOS accepts it.  The listener removes itself once all tracked
+     * contexts are confirmed running.
+     * ------------------------------------------------------------------ */
+    (function () {
+      function gestureHandler() {
+        tryResumeAllContexts();
+        /* Self-remove once every context is running */
+        var ctxs = window._abAudioContexts || [];
+        if (ctxs.length > 0 && ctxs.every(function (c) {
+          return !c || c.state === 'running' || c.state === 'closed';
+        })) {
+          document.removeEventListener('touchstart', gestureHandler, true);
+          document.removeEventListener('click',      gestureHandler, true);
+        }
+      }
+      document.addEventListener('touchstart', gestureHandler, { capture: true, passive: true });
+      document.addEventListener('click',      gestureHandler, { capture: true, passive: true });
+    })();
+
     var Module = {
       canvas: document.getElementById('canvas'),
 
@@ -541,21 +604,6 @@
       var overlay = document.getElementById('audio-overlay');
       var audioUnlocked = false;
 
-      /* Play a one-frame silent buffer through an AudioContext.
-       * On iOS this is the critical step: ctx.resume() alone is not enough
-       * to unlock the hardware audio session — iOS requires that actual audio
-       * nodes are activated within the user-gesture handler. */
-      function playUnlockBuffer(ctx) {
-        try {
-          var buf = ctx.createBuffer(1, 1, ctx.sampleRate);
-          var src = ctx.createBufferSource();
-          src.buffer = buf;
-          src.connect(ctx.destination);
-          src.start(0);
-          src.stop(0);
-        } catch (err) { console.warn('playUnlockBuffer error:', err); }
-      }
-
       function unlockAudio(e) {
         e.preventDefault();
         if (audioUnlocked) return;
@@ -571,14 +619,7 @@
          * through each context: on iOS, resume() alone does not always unlock
          * the hardware audio session — actually scheduling a buffer source is
          * required. */
-        if (window._abAudioContexts) {
-          window._abAudioContexts.forEach(function (ctx) {
-            if (ctx && ctx.state !== 'closed') {
-              try { ctx.resume(); } catch (err) { console.error('AudioContext.resume error:', err); }
-              playUnlockBuffer(ctx);
-            }
-          });
-        }
+        tryResumeAllContexts();
 
         /* resumeMainLoop may throw if the main loop is not yet initialised;
          * wrap it so that failure here cannot block overlay removal. */
