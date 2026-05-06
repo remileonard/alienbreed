@@ -392,11 +392,30 @@
       if (!Orig) return;
       var _tracked = [];
       window._abAudioContexts = _tracked;
+
       function TrackedAC(opts) {
         var ctx;
         try { ctx = opts ? new Orig(opts) : new Orig(); }
         catch (e) { ctx = new Orig(); }
         _tracked.push(ctx);
+
+        /* If the user already tapped before this context was created (e.g.
+         * because SDL_mixer opens audio on the first game-loop tick rather
+         * than in main()), resume it immediately.  The resume() call here is
+         * synchronous and runs in the same JS task as SDL's constructor call,
+         * which is close enough to the gesture for iOS to accept it. */
+        if (window._abAudioUnlocked && ctx.state !== 'running') {
+          try { ctx.resume(); } catch (e) {}
+        }
+
+        /* Re-resume whenever iOS auto-suspends the context (e.g. after the
+         * page is backgrounded and then brought back to the foreground). */
+        ctx.addEventListener('statechange', function () {
+          if (window._abAudioUnlocked && ctx.state === 'suspended') {
+            try { ctx.resume(); } catch (e) {}
+          }
+        });
+
         return ctx;
       }
       TrackedAC.prototype = Orig.prototype;
@@ -456,20 +475,41 @@
       var overlay = document.getElementById('audio-overlay');
       var audioUnlocked = false;
 
+      /* Play a one-frame silent buffer through an AudioContext.
+       * On iOS this is the critical step: ctx.resume() alone is not enough
+       * to unlock the hardware audio session — iOS requires that actual audio
+       * nodes are activated within the user-gesture handler. */
+      function playUnlockBuffer(ctx) {
+        try {
+          var buf = ctx.createBuffer(1, 1, ctx.sampleRate);
+          var src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.connect(ctx.destination);
+          src.start(0);
+          src.stop(0);
+        } catch (err) { console.warn('playUnlockBuffer error:', err); }
+      }
+
       function unlockAudio(e) {
         e.preventDefault();
         if (audioUnlocked) return;
         audioUnlocked = true;
 
+        /* Signal TrackedAC to auto-resume any context created after this tap
+         * (handles the case where SDL_mixer opens audio after onRuntimeInit). */
+        window._abAudioUnlocked = true;
+
         /* Resume audio FIRST — iOS Safari requires ctx.resume() to be called
          * as early as possible inside the user-gesture handler, before any
-         * DOM mutations that trigger layout/paint. A repaint before resume()
-         * can invalidate the gesture context and leave the AudioContext
-         * permanently suspended. */
+         * DOM mutations that trigger layout/paint.  Then play a silent buffer
+         * through each context: on iOS, resume() alone does not always unlock
+         * the hardware audio session — actually scheduling a buffer source is
+         * required. */
         if (window._abAudioContexts) {
           window._abAudioContexts.forEach(function (ctx) {
             if (ctx && ctx.state !== 'closed') {
               try { ctx.resume(); } catch (err) { console.error('AudioContext.resume error:', err); }
+              playUnlockBuffer(ctx);
             }
           });
         }
