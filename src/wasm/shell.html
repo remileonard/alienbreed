@@ -375,6 +375,35 @@
     var statusEl   = document.getElementById('status-bar');
     var progressEl = document.getElementById('progress-bar');
 
+    /* ------------------------------------------------------------------
+     * iOS / Safari Web Audio unlock
+     * iOS Safari suspends the AudioContext until a user gesture occurs.
+     * Emscripten's SDL2 layer creates an AudioContext during WASM init
+     * (before any gesture), so it starts in the 'suspended' state and
+     * produces no sound.
+     *
+     * We monkey-patch the AudioContext constructor here — before the WASM
+     * glue script runs — to track every context that Emscripten creates.
+     * The unlockAudio handler (below) then calls .resume() on each of
+     * them inside the first user-interaction event, which iOS requires.
+     * ------------------------------------------------------------------ */
+    (function () {
+      var Orig = window.AudioContext || window.webkitAudioContext;
+      if (!Orig) return;
+      var _tracked = [];
+      window._abAudioContexts = _tracked;
+      function TrackedAC(opts) {
+        var ctx;
+        try { ctx = opts ? new Orig(opts) : new Orig(); }
+        catch (e) { ctx = new Orig(); }
+        _tracked.push(ctx);
+        return ctx;
+      }
+      TrackedAC.prototype = Orig.prototype;
+      window.AudioContext = TrackedAC;
+      if (window.webkitAudioContext) window.webkitAudioContext = TrackedAC;
+    })();
+
     var Module = {
       canvas: document.getElementById('canvas'),
 
@@ -427,6 +456,15 @@
       var overlay = document.getElementById('audio-overlay');
       function unlockAudio(e) {
         e.preventDefault();
+        /* Resume every Web Audio context that Emscripten may have created.
+         * This is the critical step for iOS Safari: the AudioContext starts
+         * in the 'suspended' state and only produces sound after .resume()
+         * is called from within a user-gesture event handler. */
+        if (window._abAudioContexts) {
+          window._abAudioContexts.forEach(function (ctx) {
+            if (ctx && ctx.state !== 'closed') ctx.resume();
+          });
+        }
         if (window.Module && Module.resumeMainLoop) Module.resumeMainLoop();
         overlay.classList.remove('visible');
       }
@@ -440,6 +478,16 @@
       if (!isTouchDevice) return;
 
       document.body.classList.add('touch-device');
+
+      /* On touch devices (e.g. iPhone/iPad with iOS Safari) the Web Audio
+       * API requires a user gesture before any sound plays.  Show the
+       * audio-unlock overlay once the WASM runtime is ready so the player
+       * sees the "Tap to start" prompt and audio works from the first note. */
+      var _origRTI = Module.onRuntimeInitialized;
+      Module.onRuntimeInitialized = function () {
+        if (_origRTI) _origRTI.call(this);
+        overlay.classList.add('visible');
+      };
 
       var canvas = document.getElementById('canvas');
 
