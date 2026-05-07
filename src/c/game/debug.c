@@ -1204,6 +1204,10 @@ void debug_sound_test_run(void)
     /* Drain the KEY_L event that triggered entry */
     input_poll();
 
+    /* Stop any currently playing SFX (e.g. elevator loop) and pause music */
+    audio_stop_samples();
+    audio_pause_music();
+
     int max_scroll = SND_TOTAL_VH > 256 ? SND_TOTAL_VH - 256 : 0;
     int scroll_y   = 0;
     int sel        = 0;
@@ -1223,10 +1227,18 @@ void debug_sound_test_run(void)
             const Uint8 *ks = SDL_GetKeyboardState(NULL);
 
             if (ks[SDL_SCANCODE_UP]) {
-                if (sel > 0) { sel--; debounce = 6; }
+                if (sel > 0) {
+                    audio_stop_samples();
+                    sel--;
+                    debounce = 6;
+                }
             }
             if (ks[SDL_SCANCODE_DOWN]) {
-                if (sel < SOUND_N_ENTRIES - 1) { sel++; debounce = 6; }
+                if (sel < SOUND_N_ENTRIES - 1) {
+                    audio_stop_samples();
+                    sel++;
+                    debounce = 6;
+                }
             }
         }
 
@@ -1248,4 +1260,8 @@ void debug_sound_test_run(void)
 
         sound_test_render(scroll_y, sel);
     }
+
+    /* Restore audio: stop any sound test samples and resume game music */
+    audio_stop_samples();
+    audio_resume_music();
 }
