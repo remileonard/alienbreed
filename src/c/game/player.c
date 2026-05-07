@@ -119,26 +119,22 @@ void player_set_cur_weapon(Player *p, int weapon_id)
      * A value of 1 means the projectile passes through aliens; 0 means it stops.
      * Ref: tst.w 18(a1) / bne.b lbC00AC38 @ main.asm#L7739.
      *
-     * Strength values are scaled by WEAPON_STRENGTH_SCALE (×5) relative to the
-     * ASM originals.  The C port multiplied alien base-HP by the same factor
-     * (k_alien_type_hp[0]=100 vs ASM 0x14=20) to allow finer-grained HP tuning
-     * across levels.  Without this scaling, weapons deal only 1/5 of their
-     * intended damage, making the plasma gun consume far too much ammo per kill.
-     * Ref: k_alien_type_hp[] @ alien.c, FACEHUGGER_BASE_HP / BOSS_BASE_HP. */
-#define WEAPON_STRENGTH_SCALE 5
+     * Strength values are the exact ASM values from weapons_attr_table — no scaling.
+     * Alien HP values in alien.c are likewise taken directly from the ASM structs
+     * (NORMAL_BASE_HP=20, FACEHUGGER_BASE_HP=8, BOSS_BASE_HP=256) so the ratio
+     * between weapon damage and alien HP is identical to the original Amiga game. */
     static const struct {
         WORD speed; WORD rate; WORD strength; WORD penetrating; WORD smp; WORD shot_amount;
     } k_wdata[] = {
-        {  0,  0,   0, 0, 0,                        0 }, /* placeholder (index 0 unused) */
-        { 16,  3,  45, 0, SAMPLE_FIRE_GUN,           4 }, /* 1: MACHINEGUN   — ASM str=9  × 5 */
-        { 16,  8,  65, 0, SAMPLE_WEAPON_TWINFIRE,    3 }, /* 2: TWINFIRE     — ASM str=13 × 5 */
-        { 12,  9,  95, 0, SAMPLE_WEAPON_FLAMEARC,    2 }, /* 3: FLAMEARC     — ASM str=19 × 5 */
-        { 14,  8,  60, 1, SAMPLE_WEAPON_PLASMAGUN,   1 }, /* 4: PLASMAGUN    — ASM str=12 × 5, penetrating */
-        {  8,  3,  60, 1, SAMPLE_WEAPON_FLAMETHROWER,1 }, /* 5: FLAMETHROWER — ASM str=12 × 5, penetrating */
-        { 16,  8, 160, 0, SAMPLE_WEAPON_TWINFIRE,    1 }, /* 6: SIDEWINDERS  — ASM str=32 × 5 */
-        {  8,  8,  90, 1, SAMPLE_WEAPON_LAZER,       1 }, /* 7: LAZER        — ASM str=18 × 5, penetrating */
+        {  0,  0,  0, 0, 0,                        0 }, /* placeholder (index 0 unused) */
+        { 16,  3,  9, 0, SAMPLE_FIRE_GUN,           4 }, /* 1: MACHINEGUN   */
+        { 16,  8, 13, 0, SAMPLE_WEAPON_TWINFIRE,    3 }, /* 2: TWINFIRE     */
+        { 12,  9, 19, 0, SAMPLE_WEAPON_FLAMEARC,    2 }, /* 3: FLAMEARC     */
+        { 14,  8, 12, 1, SAMPLE_WEAPON_PLASMAGUN,   1 }, /* 4: PLASMAGUN    — penetrating */
+        {  8,  3, 12, 1, SAMPLE_WEAPON_FLAMETHROWER,1 }, /* 5: FLAMETHROWER — penetrating */
+        { 16,  8, 32, 0, SAMPLE_WEAPON_TWINFIRE,    1 }, /* 6: SIDEWINDERS  */
+        {  8,  8, 18, 1, SAMPLE_WEAPON_LAZER,       1 }, /* 7: LAZER        — penetrating */
     };
-#undef WEAPON_STRENGTH_SCALE
 
     if (weapon_id < WEAPON_MAX) {
         p->weapon_speed        = k_wdata[weapon_id].speed;
