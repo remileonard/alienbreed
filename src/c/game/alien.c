@@ -1155,19 +1155,49 @@ void alien_update_all(void)
         if (tilemap_is_projectile_trigger(&g_cur_map, col, row)) {
             audio_play_sample(SAMPLE_OPENING_DOOR);
             if (attr == 0x08 || attr == 0x12) {
-                /* Left button: col+0, col+3, col+2, col+4 */
-                tile_anim_queue(col,     row, TILEANIM_FIRE_DOOR);
-                tilemap_replace_tile(&g_cur_map, col,     row);
-                tilemap_replace_tile(&g_cur_map, col + 3, row);
-                tilemap_replace_tile(&g_cur_map, col + 2, row);
-                tilemap_replace_tile(&g_cur_map, col + 4, row);
+                /* Left button (0x08/0x12): activate fire door panels.
+                 * Ref: patch_fire_door_left_btn @ main.asm#L9790-L9804.
+                 *
+                 * In the original ASM the BOB animation system writes specific
+                 * tile_words to the live map while animating and holds the
+                 * final-frame tile_words permanently.  The final values come
+                 * from lbW01C52A / lbW01BECA entries (same across all atlases):
+                 *   col+0  (button)      : $5B00  attr=0x00  → floor
+                 *   col+2  rows 0-2      : $05A3  attr=0x23  → tile_hard_climb_right
+                 *                                               = physical wall for alive players
+                 *   col+3  rows 0-2      : $0080  attr=0x00  → floor
+                 *   col+4  (right button): $563C  attr=0x3C  → fire-door panel graphic
+                 *
+                 * BOB row coverage: lbL020DE2/lbL020E3A use linked-tile offsets
+                 * {0, 248, 496, -1} (248 bytes = 1 map row) → 3 rows.
+                 * lbL020DBE (col+4) uses offset {0,-1,-1,-1} → 1 row only.
+                 * Ref: main.asm#L16108-L16122 (animation sequences),
+                 *      lbC01165A @ main.asm#L11878 (atlas→BOB copy),
+                 *      lbC00AF20 @ main.asm (linked-tile pointer setup). */
+                tile_anim_queue(col, row, TILEANIM_FIRE_DOOR);
+                tilemap_replace_tile(&g_cur_map, col, row);       /* button → floor */
+                for (int r = 0; r < 3; r++) {
+                    /* col+2: wall tile (tile_hard_climb_right, attr=0x23) */
+                    tilemap_set_tile_word(&g_cur_map, col + 2, row + r, 0x05A3);
+                    /* col+3: floor */
+                    tilemap_set_tile_word(&g_cur_map, col + 3, row + r, 0x0080);
+                }
+                /* col+4 (right button): fire-door panel graphic */
+                tilemap_set_tile_word(&g_cur_map, col + 4, row, 0x563C);
             } else {
-                /* Right button: col+0, col-1, col-2, col-4 */
-                tile_anim_queue(col,     row, TILEANIM_FIRE_DOOR);
-                tilemap_replace_tile(&g_cur_map, col,     row);
-                tilemap_replace_tile(&g_cur_map, col - 1, row);
-                tilemap_replace_tile(&g_cur_map, col - 2, row);
-                tilemap_replace_tile(&g_cur_map, col - 4, row);
+                /* Right button (0x09/0x13): mirror of the left button.
+                 * Ref: patch_fire_door_right_btn @ main.asm#L9806-L9820.
+                 *   col+0  (button)     : $5B00  → floor
+                 *   col-2  rows 0-2     : $05A3  → tile_hard_climb_right (wall)
+                 *   col-1  rows 0-2     : $0080  → floor
+                 *   col-4  (left button): $563C  → fire-door panel graphic */
+                tile_anim_queue(col, row, TILEANIM_FIRE_DOOR);
+                tilemap_replace_tile(&g_cur_map, col, row);       /* button → floor */
+                for (int r = 0; r < 3; r++) {
+                    tilemap_set_tile_word(&g_cur_map, col - 2, row + r, 0x05A3);
+                    tilemap_set_tile_word(&g_cur_map, col - 1, row + r, 0x0080);
+                }
+                tilemap_set_tile_word(&g_cur_map, col - 4, row, 0x563C);
             }
             /* Alarm variants: increment counter if this is not the last-hit button.
              * Mirrors lbL00E756 / cmp.l / beq guard @ main.asm#L9827-L9832.

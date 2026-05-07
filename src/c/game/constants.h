@@ -213,6 +213,12 @@
 #define TILE_DESTRUCT_TRIGGER 0x15 /* starts self-destruct countdown */
 #define TILE_ACID_POOL      0x16  /* -1 HP every 25 frames */
 #define TILE_INTEX          0x17  /* INTEX terminal — activated by FIRE2 */
+/* 0x23: hard-climb-right. For alive players (death_counter==0) behaves as a
+ * wall; for dying players applies extra_spd_x=+2 (rightward push).
+ * Assigned to fire-door panel tiles (col+2 / col-2 from the button) when the
+ * fire door is activated, creating a physical barrier 3 tiles tall.
+ * Ref: tile_hard_climb_right @ main.asm#L5465-L5469. */
+#define TILE_HARD_CLIMB_RIGHT 0x23
 /* 0x26: one-way-right that kills the player if they try to go left.
  * 0x2E: one-way-left that kills the player if they try to go right.
  * Ref: tile_one_deadly_way_right/left @ main.asm#L5600-L5630. */
