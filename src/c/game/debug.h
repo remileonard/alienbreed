@@ -53,4 +53,14 @@ void debug_gfx_viewer_run(void);
  */
 void debug_palette_viewer_run(void);
 
+/*
+ * Full-screen interactive sound test module.
+ * Pauses the game and displays all known samples, voices and music tracks:
+ *   ID | TYPE | NAME
+ * Arrow keys navigate; RETURN or FIRE plays the selected entry.
+ * Press L or ESC to return to the game.
+ * Triggered by pressing the L key during gameplay.
+ */
+void debug_sound_test_run(void);
+
 #endif /* AB_DEBUG_H */

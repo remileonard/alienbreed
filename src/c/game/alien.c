@@ -1547,8 +1547,9 @@ void alien_kill(int i)
      * Ref: alien_dies @ main.asm#L7308; death anim lbL018C2E#L13907. */
     g_aliens[i].alive       = 2;
     g_aliens[i].death_frame = 0;
-    /* Play alien death sound (not hatching sound) */
-    audio_play_sample(SAMPLE_DYING_PLAYER);  /* closest match for alien death */
+    /* Play alien death sound.
+     * Ref: alien_dies @ main.asm#L7308; samples_table[21] = smp_dying_alien. */
+    audio_play_sample(SAMPLE_DYING_ALIEN);
     
     /* Track kill for INTEX stats (Ref: run_intex @ main.asm#L8975) */
     /* Award kill to all players (credit split between shooting/damaged) */
