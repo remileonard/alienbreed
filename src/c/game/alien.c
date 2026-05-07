@@ -96,8 +96,10 @@ static const WORD BOSS_SPEED   =     4;  /* lbW009114+32 */
  *
  *   weapon_type   : WEAPON_* constant (used to select rendering and behaviour)
  *   penetrating   : 1 = passes through aliens (weapons 4/5/7).
- *                   From offset 18(a3) in the ASM projectile struct, set from
- *                   field 4 of weapons_attr_table (=01 for PLASMAGUN/FLAMETHROWER/LAZER).
+ *                   From offset 18(a3) in the ASM projectile struct, copied from
+ *                   player offset 270(a0) = the 5th field (offset 8 per entry) of
+ *                   weapons_attr_table (=01 for PLASMAGUN/FLAMETHROWER/LAZER).
+ *                   Mirrors move.w 270(a0),18(a3) @ main.asm#L9486.
  *                   Ref: tst.w 18(a1) @ main.asm#L7739.
  *   lifetime      : frames remaining before auto-expire (-1 = infinite).
  *                   Used by FLAMETHROWER (8 ticks @ 25 Hz = 64 px range).
@@ -1463,11 +1465,17 @@ void aliens_collisions_with_weapons(void)
 
                 /*
                  * Penetrating weapons (PLASMAGUN/FLAMETHROWER/LAZER) keep
-                 * flying after hitting an alien.
-                 * Non-penetrating weapons deactivate and play an impact flash.
-                 * Ref: tst.w 18(a1) / bne.b lbC00AC38 @ main.asm#L7739-L7744.
+                 * flying after hitting a normal alien.
+                 * Non-penetrating weapons always deactivate on hit.
+                 * Boss aliens (is_boss=1) stop even penetrating projectiles —
+                 *   mirrors the check cmp.w #1,38(a6) @ main.asm#L7737 where
+                 *   38(a6) is the boss flag in the alien type descriptor (=1 for
+                 *   lbW009114/lbW009254/lbW009374/lbW009014 boss structs, =0 for
+                 *   normal alien structs lbW008F94/lbW009094/lbW008FD4).
+                 * Ref: beq.b lbC00AC26 / tst.w 18(a1) / bne.b lbC00AC38
+                 *      @ main.asm#L7738-L7740.
                  */
-                if (!s_projectiles[pi].penetrating) {
+                if (!s_projectiles[pi].penetrating || g_aliens[ai].is_boss) {
                     s_projectiles[pi].active       = 0;
                     s_projectiles[pi].impact_active = 1;
                     s_projectiles[pi].impact_x     = (int)s_projectiles[pi].x;

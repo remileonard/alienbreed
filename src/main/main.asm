@@ -730,7 +730,7 @@ player_2_tbl_weapon_pos:
 ; speed of the projectile
 ; repetition frequency
 ; amount of damage
-; ????
+; penetrating flag (1=projectile passes through aliens; stored to 270(a0) then 18(a3))
 ; weapon sample to play
 ; number of shots before depleting player ammo
 weapons_attr_table: dc.w    01,16,03,09,00,SAMPLE_FIRE_GUN,04
