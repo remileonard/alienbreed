@@ -80,13 +80,16 @@ static inline UBYTE tilemap_attr(const LevelMap *map, int col, int row)
  * entries that jump to tile_wall @ main.asm#L5059-L5104):
  *   0x01 = wall
  *   0x1d = wall (variant)
+ *   0x23 = tile_hard_climb_right: acts as a wall for alive players
+ *          (beq tile_wall when 280(a0)==0 @ main.asm#L5465-L5468).
+ *          Assigned to fire-door panel tiles after activation.
  *   0x2a-0x2d = reactor walls
  * All other attributes are walkable (floor, pickups, doors open with key, etc.)
  */
 static inline int tilemap_is_solid(const LevelMap *map, int col, int row)
 {
     UBYTE a = tilemap_attr(map, col, row);
-    return (a == 0x01 || a == 0x1d || (a >= 0x2a && a <= 0x2d));
+    return (a == 0x01 || a == 0x1d || a == 0x23 || (a >= 0x2a && a <= 0x2d));
 }
 
 /*
@@ -167,6 +170,21 @@ static inline int tilemap_pixel_to_row(int py) { return py / MAP_TILE_H; }
 /* Scan map for the player spawn tile (attr 0x35) and return its world-pixel
  * centre.  Returns 1 on success, 0 if not found (caller uses defaults). */
 int tilemap_find_spawn(const LevelMap *map, int *out_x, int *out_y);
+
+/*
+ * Directly write a tile word to (col, row).  Bounds-checked; out-of-range
+ * coordinates are silently ignored.  Used by the fire-door activation logic
+ * to assign the exact tile_words dictated by the original BOB system, rather
+ * than copying from a neighbour tile.
+ * Ref: lbC01165A copies tile_words from the atlas table into BOB buffers;
+ *      the BOB renderer then writes those words to the live map each frame
+ *      (move.w 40(a3),(a5) @ main.asm#L12436).
+ */
+static inline void tilemap_set_tile_word(LevelMap *map, int col, int row, UWORD word)
+{
+    if (!map || col < 0 || col >= MAP_COLS || row < 0 || row >= MAP_ROWS) return;
+    map->tiles[row][col] = word;
+}
 
 /*
  * Replace a tile at (col, row) with a floor tile, making both the logic
