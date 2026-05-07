@@ -104,31 +104,45 @@ void player_set_cur_weapon(Player *p, int weapon_id)
     p->cur_weapon = (WORD)weapon_id;
 
     /* Weapon parameters from weapons_attr_table @ main.asm#L736.
-     * Format: index, speed, rate, strength, ???, sample, shots_per_ammo
+     * Format: index, speed, rate, strength, penetrating, sample, shots_per_ammo
      * dc.w  01,16,03, 9,00,SAMPLE_FIRE_GUN,4
      * dc.w  02,16,08,13,00,4,3
      * dc.w  03,12,09,19,00,2,2
      * dc.w  04,14,08,12,01,0,1
      * dc.w  05, 8,03,12,01,6,1
      * dc.w  06,16,08,32,00,4,1
-     * dc.w  07, 8,08,18,01,3,1 */
-    static const struct { WORD speed; WORD rate; WORD strength; WORD smp; WORD shot_amount; } k_wdata[] = {
-        {  0,  0,  0, 0,                       0 }, /* placeholder (index 0 unused) */
-        { 16,  3,  9, SAMPLE_FIRE_GUN,          4 }, /* 1: MACHINEGUN   — smp idx 37 */
-        { 16,  8, 13, SAMPLE_WEAPON_TWINFIRE,   3 }, /* 2: TWINFIRE     — smp idx 4  */
-        { 12,  9, 19, SAMPLE_WEAPON_FLAMEARC,   2 }, /* 3: FLAMEARC     — smp idx 2  */
-        { 14,  8, 12, SAMPLE_WEAPON_PLASMAGUN,  1 }, /* 4: PLASMAGUN    — smp idx 0  */
-        {  8,  3, 12, SAMPLE_WEAPON_FLAMETHROWER,1},/* 5: FLAMETHROWER — smp idx 6  */
-        { 16,  8, 32, SAMPLE_WEAPON_TWINFIRE,   1 }, /* 6: SIDEWINDERS  — smp idx 4  */
-        {  8,  8, 18, SAMPLE_WEAPON_LAZER,      1 }, /* 7: LAZER        — smp idx 3  */
+     * dc.w  07, 8,08,18,01,3,1
+     *
+     * The 5th field ("penetrating") was previously unidentified (marked "????").
+     * It is stored to player offset 270(a0) by copy_weapon_attrs @ main.asm#L687,
+     * then copied to projectile offset 18(a3) at fire time @ main.asm#L9486.
+     * A value of 1 means the projectile passes through aliens; 0 means it stops.
+     * Ref: tst.w 18(a1) / bne.b lbC00AC38 @ main.asm#L7739.
+     *
+     * Strength values are the exact ASM values from weapons_attr_table — no scaling.
+     * Alien HP values in alien.c are likewise taken directly from the ASM structs
+     * (NORMAL_BASE_HP=20, FACEHUGGER_BASE_HP=8, BOSS_BASE_HP=256) so the ratio
+     * between weapon damage and alien HP is identical to the original Amiga game. */
+    static const struct {
+        WORD speed; WORD rate; WORD strength; WORD penetrating; WORD smp; WORD shot_amount;
+    } k_wdata[] = {
+        {  0,  0,  0, 0, 0,                        0 }, /* placeholder (index 0 unused) */
+        { 16,  3,  9, 0, SAMPLE_FIRE_GUN,           4 }, /* 1: MACHINEGUN   */
+        { 16,  8, 13, 0, SAMPLE_WEAPON_TWINFIRE,    3 }, /* 2: TWINFIRE     */
+        { 12,  9, 19, 0, SAMPLE_WEAPON_FLAMEARC,    2 }, /* 3: FLAMEARC     */
+        { 14,  8, 12, 1, SAMPLE_WEAPON_PLASMAGUN,   1 }, /* 4: PLASMAGUN    — penetrating */
+        {  8,  3, 12, 1, SAMPLE_WEAPON_FLAMETHROWER,1 }, /* 5: FLAMETHROWER — penetrating */
+        { 16,  8, 32, 0, SAMPLE_WEAPON_TWINFIRE,    1 }, /* 6: SIDEWINDERS  */
+        {  8,  8, 18, 1, SAMPLE_WEAPON_LAZER,       1 }, /* 7: LAZER        — penetrating */
     };
 
     if (weapon_id < WEAPON_MAX) {
-        p->weapon_speed    = k_wdata[weapon_id].speed;
-        p->weapon_rate     = k_wdata[weapon_id].rate;
-        p->weapon_strength = k_wdata[weapon_id].strength;
-        p->weapon_smp      = k_wdata[weapon_id].smp;
-        p->shot_amount     = k_wdata[weapon_id].shot_amount;
+        p->weapon_speed        = k_wdata[weapon_id].speed;
+        p->weapon_rate         = k_wdata[weapon_id].rate;
+        p->weapon_strength     = k_wdata[weapon_id].strength;
+        p->weapon_penetrating  = k_wdata[weapon_id].penetrating;
+        p->weapon_smp          = k_wdata[weapon_id].smp;
+        p->shot_amount         = k_wdata[weapon_id].shot_amount;
     }
     p->weapon_rate_counter  = 0;
     p->shot_amount_counter  = 0;
@@ -775,17 +789,18 @@ void player_update(Player *p, UWORD input_mask)
 
             /*
              * Weapon-specific parameters:
-             *   penetrating  : 1 for PLASMAGUN/FLAMETHROWER/LAZER (field4=01 in
-             *                    weapons_attr_table @ main.asm#L736-L742).
+             *   penetrating  : read from p->weapon_penetrating, set by
+             *                    player_set_cur_weapon from the 5th field of
+             *                    weapons_attr_table (field at offset 8 per entry).
+             *                    Mirrors move.w 270(a0),18(a3) @ main.asm#L9486.
+             *                  1 for PLASMAGUN/FLAMETHROWER/LAZER, 0 for others.
              *                  Ref: tst.w 18(a1) @ main.asm#L7739.
              *   lifetime     : FLAMETHROWER = 8 ticks (lbL018D06 8-frame list,
              *                    delay=1 each @ main.asm#L13935); others = -1.
              *   bounce_count : FLAMEARC=1 (cmp.w #2,24(a3) @ main.asm#L9712),
              *                  LAZER=5 (cmp.w #6,24(a3) @ main.asm#L9716), others=0.
              */
-            int penetrating  = (wt == WEAPON_PLASMAGUN ||
-                                 wt == WEAPON_FLAMETHROWER ||
-                                 wt == WEAPON_LAZER) ? 1 : 0;
+            int penetrating  = p->weapon_penetrating;
             int lifetime     = (wt == WEAPON_FLAMETHROWER) ? FLAME_LIFETIME_TICKS : -1;
             int bounce_count = 0;
             if (wt == WEAPON_FLAMEARC)  bounce_count = 1;

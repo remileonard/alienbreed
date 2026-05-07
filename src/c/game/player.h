@@ -96,6 +96,13 @@ typedef struct {
     WORD  weapon_rate;
     WORD  weapon_rate_counter;
     WORD  weapon_strength;
+    /* Penetrating flag — mirrors the 5th field (offset 8) in weapons_attr_table
+     * copied to player offset 270(a0) then to projectile offset 18(a3).
+     * 1 = projectile passes through aliens (PLASMAGUN/FLAMETHROWER/LAZER).
+     * 0 = projectile stops on first alien hit.
+     * Ref: move.w 8(a1),270(a0) @ main.asm#L687 (copy_weapon_attrs)
+     *      move.w 270(a0),18(a3) @ main.asm#L9486 (lbC00E21E) */
+    WORD  weapon_penetrating;
     WORD  weapon_smp;     /* sound sample to play when firing */
     WORD  shot_amount;
     WORD  shot_amount_counter;
