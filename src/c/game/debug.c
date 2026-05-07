@@ -1180,7 +1180,7 @@ static void sound_test_render(int scroll_y, int sel)
     video_overlay_fill_rect(0, 0, 320, SND_HEADER_H, 0, 0, 0, 230);
     draw_string(SND_COL_SEL,  1, "SOUND TEST", 232, 64, 0);
     draw_string(130,           1, "L/ESC=CLOSE", 160, 160, 160);
-    draw_string(200,           1, "ENTER/W=PLAY", 160, 220, 80);
+    draw_string(200,           1, "ENTER/Z=PLAY", 160, 220, 80);
     draw_string(SND_COL_TYPE, SND_HEADER_H - 8, "TYP", 160, 160, 160);
     draw_string(SND_COL_ID,   SND_HEADER_H - 8, " ID", 160, 160, 160);
     draw_string(SND_COL_NAME, SND_HEADER_H - 8, "NAME", 160, 160, 160);
@@ -1230,8 +1230,8 @@ void debug_sound_test_run(void)
             }
         }
 
-        /* RETURN or W key plays the selected entry */
-        if (g_key_pressed == KEY_RETURN || g_key_pressed == KEY_W)
+        /* RETURN or Z key plays the selected entry */
+        if (g_key_pressed == KEY_RETURN || g_key_pressed == KEY_Z)
             sound_test_play(sel);
 
         /* Keep selection visible */
