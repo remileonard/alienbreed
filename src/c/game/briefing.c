@@ -529,6 +529,10 @@ void briefing_run(int level_idx)
      * Record that state so the fade-to-black at the end has the right start. */
     memcpy(cur_pal, k_pal_briefingcore, sizeof(cur_pal));
 
+    /* Stop the looping SAMPLE_DESCENT before starting the next phase.
+     * The sample has loop=1 so it would keep playing indefinitely otherwise. */
+    audio_stop_samples();
+
     /* --- Play SAMPLE_DESCENT_END --- */
     audio_play_sample(SAMPLE_DESCENT_END);
 

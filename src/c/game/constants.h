@@ -15,6 +15,7 @@
 /* Keyboard scancodes (SDL2 equivalents mapped in input.c) */
 /* Original Amiga raw keycodes kept here for reference.  */
 /* ----------------------------------------------------- */
+#define KEY_W           0x11
 #define KEY_P           0x19
 #define KEY_M           0x37
 #define KEY_SPACE       0x40

@@ -97,6 +97,7 @@ static UWORD build_gamepad_input(int idx)
 static UBYTE sdl_to_amiga_key(SDL_Keycode sym)
 {
     switch (sym) {
+        case SDLK_w:       return KEY_W;
         case SDLK_p:       return KEY_P;
         case SDLK_m:       return KEY_M;
         case SDLK_SPACE:   return KEY_SPACE;
