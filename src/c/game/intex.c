@@ -1737,6 +1737,10 @@ void intex_run(int player_idx)
     audio_play_sample(SAMPLE_INTEX_SHUTDOWN);
     audio_pause_music();
 
+    /* Reset per-visit purchase flags so items can be bought again on re-entry.
+     * Ref: purchased_supplies dc.l 0 @ intex.asm#L547 */
+    g_players[player_idx].purchased_supplies = 0;
+
     /* Load assets */
     IntexImg bg = {NULL, 0, 0};
     {
