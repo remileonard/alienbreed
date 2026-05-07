@@ -1204,6 +1204,10 @@ void debug_sound_test_run(void)
     /* Drain the KEY_L event that triggered entry */
     input_poll();
 
+    /* Remember which level music was playing so we can restore it on exit */
+    char saved_music[256];
+    snprintf(saved_music, sizeof(saved_music), "%s", audio_get_current_music_name());
+
     /* Stop any currently playing SFX (e.g. elevator loop) and pause music */
     audio_stop_samples();
     audio_pause_music();
@@ -1261,7 +1265,9 @@ void debug_sound_test_run(void)
         sound_test_render(scroll_y, sel);
     }
 
-    /* Restore audio: stop any sound test samples and resume game music */
+    /* Restore audio: stop any sound test samples/music and restart the level music */
     audio_stop_samples();
-    audio_resume_music();
+    audio_stop_music();
+    if (saved_music[0])
+        audio_play_music(saved_music);
 }

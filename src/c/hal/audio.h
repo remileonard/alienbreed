@@ -56,6 +56,10 @@ void audio_play_music(const char *name);
 /* Stop the currently playing music. */
 void audio_stop_music(void);
 
+/* Return the name (without path/extension) of the currently loaded music,
+ * or an empty string if no music is loaded. */
+const char *audio_get_current_music_name(void);
+
 /* Set music volume (0–128, SDL_mixer scale). */
 void audio_set_music_volume(int vol);
 

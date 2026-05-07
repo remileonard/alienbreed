@@ -20,6 +20,7 @@ int g_music_enabled = 0;
 static Mix_Chunk  *s_samples[AUDIO_MAX_SAMPLES];
 static SM_Module  *s_music  = NULL;
 static int         s_mix_rate = 22050;
+static char        s_current_music_name[256] = "";
 
 /* -----------------------------------------------------------------------
  * Per-sample parameters derived from ASM samples_table (main.asm#L18049).
@@ -505,9 +506,11 @@ void audio_play_music(const char *name)
     s_music = sm_load(path);
     if (!s_music) {
         fprintf(stderr, "Warning: could not load music '%s'\n", path);
+        s_current_music_name[0] = '\0';
         return;
     }
 
+    snprintf(s_current_music_name, sizeof(s_current_music_name), "%s", name);
     sm_play(s_music, s_mix_rate);
     Mix_HookMusic(sm_mix_callback, s_music);
     g_music_enabled = 1;
@@ -520,7 +523,13 @@ void audio_stop_music(void)
         sm_free(s_music);
         s_music = NULL;
     }
+    s_current_music_name[0] = '\0';
     g_music_enabled = 0;
+}
+
+const char *audio_get_current_music_name(void)
+{
+    return s_current_music_name;
 }
 
 void audio_set_music_volume(int vol)
