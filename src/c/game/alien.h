@@ -99,6 +99,14 @@ typedef struct {
     int   evade_y;
     int   blocked_axis;
     int   stuck_counter;
+    /*
+     * Orbit waypoint index for boss_nbr=4 (level 10 reactor shield elements).
+     * Mirrors the 72(a0) current-waypoint pointer in lbC009AFC @ main.asm#L6640.
+     * Initialised to boss_rank * 9 (evenly spaced around the 62-entry orbit
+     * circle) by alien_boss_trigger(); advanced +1 per frame, wraps at 62→0.
+     * Unused for non boss_nbr=4 aliens.
+     */
+    int   orbit_idx;
 } Alien;
 
 extern Alien g_aliens[MAX_ALIENS];

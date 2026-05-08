@@ -1133,6 +1133,117 @@ static void alien_move(int self_idx, Alien *a)
 }
 
 /*
+ * Pre-computed orbit waypoints for boss_nbr=4 reactor-shield elements.
+ *
+ * Mirrors lbW0256B4 @ main.asm#L18324-L18330 (lbW0256B4..lbW02578C then
+ * dc.w -1,-1 as sentinel).  62 relative (X, Y) positions describe a complete
+ * elliptical orbit around the reactor, approximately centred at (75, 75).
+ *
+ * In lbC009AFC the world offset is added after setting the position:
+ *   add.w #1662, ALIEN_POS_X(a0)   (@ main.asm#L6730)
+ *   add.w  #731, ALIEN_POS_Y(a0)
+ * These constants map relative (0,0) to world pixel (1662, 731), placing the
+ * orbit over the reactor room on level 10 (L9MA).
+ *
+ * The 7 shield-element aliens start at evenly-spaced offsets in the table:
+ *   alien 0 (k=0): orbit index 0  (lbW0256B4)
+ *   alien 1 (k=1): orbit index 9  (lbW0256D8)
+ *   ...
+ *   alien 6 (k=6): orbit index 54 (lbW02578C)
+ * starting_index = k * BOSS4_ORBIT_STEP,  BOSS4_ORBIT_STEP = 9.
+ */
+#define BOSS4_ORBIT_COUNT   62
+#define BOSS4_ORBIT_STEP     9
+#define BOSS4_ORBIT_WORLD_X  1662
+#define BOSS4_ORBIT_WORLD_Y  731
+
+static const WORD k_boss4_orbit[BOSS4_ORBIT_COUNT][2] = {
+    /* lbW0256B4 — alien 0 starts here */
+    {0x4F, 0x00}, {0x56, 0x01}, {0x5E, 0x02}, {0x65, 0x05},
+    {0x6B, 0x07}, {0x72, 0x0B}, {0x78, 0x0F}, {0x7E, 0x14},
+    {0x84, 0x1A},
+    /* lbW0256D8 — alien 1 starts here (index 9) */
+    {0x88, 0x20}, {0x8C, 0x26}, {0x90, 0x2D}, {0x92, 0x34},
+    {0x94, 0x3B}, {0x96, 0x43}, {0x96, 0x4B}, {0x96, 0x53},
+    {0x94, 0x5B},
+    /* lbW0256FC — alien 2 starts here (index 18) */
+    {0x92, 0x62}, {0x90, 0x69}, {0x8D, 0x6F}, {0x88, 0x76},
+    {0x84, 0x7C}, {0x7F, 0x81}, {0x79, 0x86}, {0x72, 0x8B},
+    {0x6C, 0x8E},
+    /* lbW025720 — alien 3 starts here (index 27) */
+    {0x65, 0x91}, {0x5E, 0x94}, {0x56, 0x95}, {0x4F, 0x96},
+    {0x47, 0x96}, {0x3F, 0x95}, {0x38, 0x94}, {0x31, 0x91},
+    {0x2A, 0x8E},
+    /* lbW025744 — alien 4 starts here (index 36) */
+    {0x24, 0x8B}, {0x1D, 0x86}, {0x18, 0x82}, {0x12, 0x7C},
+    {0x0E, 0x76}, {0x09, 0x6F}, {0x06, 0x69}, {0x04, 0x62},
+    {0x02, 0x5A},
+    /* lbW025768 — alien 5 starts here (index 45) */
+    {0x00, 0x53}, {0x00, 0x4B}, {0x00, 0x43}, {0x02, 0x3C},
+    {0x03, 0x35}, {0x06, 0x2E}, {0x09, 0x27}, {0x0D, 0x21},
+    {0x11, 0x1B},
+    /* lbW02578C — alien 6 starts here (index 54) */
+    {0x17, 0x15}, {0x1D, 0x10}, {0x23, 0x0C}, {0x2A, 0x08},
+    {0x31, 0x05}, {0x38, 0x02}, {0x3F, 0x01}, {0x47, 0x00}
+};
+
+/*
+ * Advance one boss_nbr=4 reactor-shield element along its pre-computed orbit.
+ *
+ * Re-implementation of lbC009AFC @ main.asm#L6640 (movement section only):
+ *   1. Advance the 72(a0) waypoint pointer by 4 bytes (one X,Y entry).
+ *   2. If the current entry is the sentinel (dc.w -1,-1) wrap to the start
+ *      (68(a0) = lbW0256B4).  In the C port this is a simple index wrap.
+ *   3. Set ALIEN_POS_X/Y from the waypoint entry.
+ *   4. Add the world offset (1662, 731) so the orbit is placed over the reactor.
+ *
+ * The direction field is set via an approximate translation of the lbC009BC4
+ * helper (@ main.asm#L6756): it computes the 8-direction compass bearing from
+ * the current relative position toward the orbit centre (75, 75) so the shield
+ * element faces the reactor as it orbits.
+ */
+static void boss4_orbit_move(Alien *a)
+{
+    /* Advance and wrap the waypoint index. */
+    a->orbit_idx++;
+    if (a->orbit_idx >= BOSS4_ORBIT_COUNT)
+        a->orbit_idx = 0;
+
+    int rx = (int)k_boss4_orbit[a->orbit_idx][0];  /* relative X */
+    int ry = (int)k_boss4_orbit[a->orbit_idx][1];  /* relative Y */
+
+    /* Apply world offset: mirrors add.w #1662/731,ALIEN_POS_X/Y @ main.asm#L6730. */
+    a->pos_x = (WORD)(rx + BOSS4_ORBIT_WORLD_X);
+    a->pos_y = (WORD)(ry + BOSS4_ORBIT_WORLD_Y);
+
+    /*
+     * Approximate lbC009BC4 direction computation.
+     * The helper maps the vector from current position to centre (75,75) onto
+     * an 8-direction compass:
+     *   dx = 75 - rx,  dy = 75 - ry
+     * Each quadrant contributes directions 0-7 (N=0,NE=1,E=2,SE=3,S=4,SW=5,W=6,NW=7).
+     */
+    int dx = 75 - rx;
+    int dy = 75 - ry;
+    int adx = (dx < 0) ? -dx : dx;
+    int ady = (dy < 0) ? -dy : dy;
+    int dir_bits = 0;
+    if (dy < 0) dir_bits |= 2;  /* moving up   (toward centre is upward)  */
+    else if (dy > 0) dir_bits |= 1;  /* moving down */
+    if (dx > 0) dir_bits |= 4;  /* moving right */
+    else if (dx < 0) dir_bits |= 8;  /* moving left */
+    /* Suppress the weaker axis when the other dominates (>2:1 ratio). */
+    if (adx > 0 && ady > adx * 2) dir_bits &= ~(4 | 8);
+    if (ady > 0 && adx > ady * 2) dir_bits &= ~(1 | 2);
+    static const int k_dir_table[16] = {
+        -1,  4,  0, -1,   2,  3,  1, -1,
+         6,  5,  7, -1,  -1, -1, -1, -1
+    };
+    if (dir_bits > 0 && dir_bits < 16 && k_dir_table[dir_bits] >= 0)
+        a->direction = k_dir_table[dir_bits];
+}
+
+/*
  * Move one boss alien (is_boss=1) toward the nearest living player.
  *
  * Re-implementation of the movement section of lbC009CE2 @ main.asm#L6883.
@@ -1299,7 +1410,15 @@ void alien_update_all(void)
         WORD prev_x = g_aliens[i].pos_x;
         WORD prev_y = g_aliens[i].pos_y;
         if (g_aliens[i].is_boss) {
-            if (g_aliens[i].boss_rank > 0) {
+            if (g_boss_nbr == 4) {
+                /*
+                 * boss_nbr=4 reactor shield elements — lbC009AFC AI.
+                 * All 7 aliens follow their own pre-computed orbit around the
+                 * reactor independently; none copy another's position.
+                 * Ref: lbC009AFC @ main.asm#L6640 (waypoint follower).
+                 */
+                boss4_orbit_move(&g_aliens[i]);
+            } else if (g_aliens[i].boss_rank > 0) {
                 /*
                  * Secondary boss (turret) — mirrors lbC009C68 @ main.asm#L6777.
                  * The secondary alien has no movement AI of its own: it copies
@@ -2030,6 +2149,15 @@ void alien_boss_trigger(int trigger_wx, int trigger_wy)
                 g_aliens[idx].strength  = (WORD)(def->hp + g_global_aliens_extra_strength);
                 g_aliens[idx].speed     = def->speed;
                 g_aliens[idx].boss_rank = def->boss_rank;
+                /*
+                 * boss_nbr=4 orbit initialisation — mirrors the per-alien
+                 * current-waypoint initialisation in boss_nbr_4 @ main.asm#L5664:
+                 *   alien k starts at lbW0256B4 + k*36 bytes = k*9 entries.
+                 * move.l #lbW0256xx,72(a0) (current ptr) sets the starting
+                 * position; each frame lbC009AFC advances by one entry (4 bytes).
+                 */
+                if (g_boss_nbr == 4)
+                    g_aliens[idx].orbit_idx = k * BOSS4_ORBIT_STEP;
             }
         }
     } else {
