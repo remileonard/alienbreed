@@ -1847,7 +1847,10 @@ void alien_boss_trigger(int trigger_wx, int trigger_wy)
      * This corresponds to alien1_struct using type struct lbW009114/etc.
      * Ref: boss_nbr_1: lea alien1_struct/lea lbW009114/bsr patch_boss_door
      *      @ main.asm#L5727-L5730. */
-    spawn_alien_at(boss_wx, boss_wy, 1, 0, 1);
+    spawn_alien_at(boss_wx, boss_wy,
+                   1,   /* alien_type = 1 (boss type struct index) */
+                   0,   /* is_facehugger = 0 */
+                   1);  /* is_boss = 1 */
 
     /* Mark boss encounter as active.
      * Mirrors: move.w #1,lbW0004EA @ main.asm#L5740. */
