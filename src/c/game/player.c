@@ -640,6 +640,48 @@ void check_tile_interaction(Player *p)
         p->extra_spd_y = -1;
         break;
 
+    /* -----------------------------------------------------------------
+     * Reactor zone boundary tiles (level 8, Engine Room).
+     * Announce "ZONE N" when the player enters the corresponding ring
+     * around the reactor.  The adjacency check disambiguates tiles 0x30
+     * and 0x31 which each encode two zone numbers (1/3 and 2/4).
+     * Ref: tile_unknown5/6/7 and tile_force_fields_sequence
+     *      @ main.asm#L5865-L5910; lbC022D1E @ main.asm#L16533.
+     * ----------------------------------------------------------------- */
+    case TILE_ZONE_1_BOUNDARY:
+        {
+            /* Adjacent tile to the right (col+1) or left (col-1) also
+             * 0x30 → innermost ring → "ZONE ONE", else "ZONE THREE". */
+            int adj_r = tilemap_attr(&g_cur_map, col + 1, row);
+            int adj_l = tilemap_attr(&g_cur_map, col - 1, row);
+            int zone = ((adj_r == TILE_ZONE_1_BOUNDARY) ||
+                        (adj_l == TILE_ZONE_1_BOUNDARY)) ? 1 : 3;
+            audio_play_voice_seq(VOICE_ZONE, VOICE_ONE + zone - 1, -1, -1);
+        }
+        break;
+
+    case TILE_ZONE_2_BOUNDARY:
+        {
+            int adj_r = tilemap_attr(&g_cur_map, col + 1, row);
+            int adj_l = tilemap_attr(&g_cur_map, col - 1, row);
+            int zone = ((adj_r == TILE_ZONE_2_BOUNDARY) ||
+                        (adj_l == TILE_ZONE_2_BOUNDARY)) ? 2 : 4;
+            audio_play_voice_seq(VOICE_ZONE, VOICE_ONE + zone - 1, -1, -1);
+        }
+        break;
+
+    case TILE_ZONE_5_BOUNDARY:
+        /* No adjacency check — always "ZONE FIVE".
+         * Ref: tile_unknown7 @ main.asm#L5903. */
+        audio_play_voice_seq(VOICE_ZONE, VOICE_FIVE, -1, -1);
+        break;
+
+    case TILE_ZONE_6_TRIGGER:
+        /* Innermost ring, always "ZONE SIX".
+         * Ref: tile_force_fields_sequence @ main.asm#L5906. */
+        audio_play_voice_seq(VOICE_ZONE, VOICE_SIX, -1, -1);
+        break;
+
     default:
         /* Plain floor / metallic floor / unknown: reset acid counter.
          * Note: TILE_ACID_POOL is handled above with break, so this default

@@ -229,6 +229,24 @@
 #define TILE_ALIEN_SPAWN_SMALL 0x29  /* respawning location of small aliens */
 #define TILE_ONE_DEADLY_WAY_LEFT  0x2E
 #define TILE_CLIMB_RIGHT    0x2F  /* extra_spd_x = -1 (slows rightward movement) */
+/*
+ * Zone boundary tiles — used in level 8 (Engine Room / reactor room).
+ * When the player steps on one of these tiles the game announces which
+ * reactor zone they have entered, mirroring the Amiga voice sample
+ * smp_zone_struct_1/2 played by lbC022D1E @ main.asm#L16533.
+ *
+ * Adjacency logic (mirrors tile_unknown5/tile_unknown6 @ main.asm#L5865-L5901):
+ *   0x30: if the tile directly to the left or right is also 0x30 → "ZONE ONE"
+ *          otherwise → "ZONE THREE"
+ *   0x31: if adjacent tile is also 0x31 → "ZONE TWO", otherwise → "ZONE FOUR"
+ *   0x32: always → "ZONE FIVE"   (tile_unknown7)
+ *   0x33: always → "ZONE SIX"    (tile_force_fields_sequence)
+ * Ref: tile_unknown5/6/7 and tile_force_fields_sequence @ main.asm#L5865-L5910.
+ */
+#define TILE_ZONE_1_BOUNDARY   0x30
+#define TILE_ZONE_2_BOUNDARY   0x31
+#define TILE_ZONE_5_BOUNDARY   0x32  /* always "ZONE FIVE"  */
+#define TILE_ZONE_6_TRIGGER    0x33  /* always "ZONE SIX"   */
 #define TILE_ALIEN_HOLE        0x34  /* hole with aliens coming out */
 #define TILE_CLIMB_UP       0x37  /* extra_spd_y = +1 (slows upward movement)   */
 /* Diagonal one-way tiles (push in two directions simultaneously).

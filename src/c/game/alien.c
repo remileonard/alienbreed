@@ -126,12 +126,24 @@ static const BossGroup k_boss_groups[5] = {
     }},
 
     /*
-     * boss_nbr=2 (level 7, L6MA):
+     * boss_nbr=2 (level 7, L6MA — alien queen; level 8, L7MA — reactor shield):
+     *
+     * Level 7: three alien-queen bodies (1 primary + 2 secondaries).
+     *   Killing the primary triggers level_start_destruction() via alien_kill()
+     *   / lbC00A0EE @ main.asm#L7049.
+     *
+     * Level 8: same 3 boss aliens spawn as the REACTOR SHIELD — they orbit the
+     *   reactor (tiles 0x2a-0x2d) and must be avoided or destroyed.  On level 8
+     *   self-destruct can be triggered either by killing the primary boss OR by
+     *   destroying all 4 reactor faces (6 hits each, check_reactors logic).
+     *   Zone-boundary tiles (0x30-0x33) in L7MA announce "ZONE ONE".."ZONE SIX"
+     *   as the player advances into the reactor room.
+     *
      *   alien1: lbW009254 @ lbW05F7A8 → IFF(57,107); AI lbC009CE2; HP=$100 speed=4
      *   alien2: lbW009294 @ lbW063DB8 → IFF_row≈130 (out of C MAP_ROWS=96);
      *           fallback: use main pos (57,107); AI lbC009C68; HP=$200=512 speed=4
      *   alien3: lbW0092D4 @ lbW063DB8 → same fallback; HP=$100 speed=4
-     * Ref: main.asm#L5744-L5765.
+     * Ref: main.asm#L5744-L5765 (boss_nbr_2); lbC00A0EE @ main.asm#L7049 (die handler).
      */
     { 3, {
         { 57, 107, 256, 4, 0 },  /* primary   — lbW009254 @ lbW05F7A8 */
