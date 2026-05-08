@@ -1696,32 +1696,104 @@ void aliens_collisions_with_players(void)
 }
 
 /*
+ * Scan the map from the trigger tile to find a valid spawn position for the
+ * boss that lies within the same room.
+ *
+ * "Same room" is defined as: no alien-solid wall tile between the trigger and
+ * the candidate spawn along the scan path.  The scan stops the moment it hits
+ * a wall tile.
+ *
+ * The boss sprite is 96×128 px = 6×8 tiles.  A candidate tile at (col, row)
+ * is valid only when the entire boss bounding box — 3 tiles to each side and
+ * 4 tiles above/below the centre — is free of alien-solid tiles.
+ *
+ * Scan order (Y first since Y = up/down = "forward/backward" in the corridor):
+ *   1. +Y  (downward on screen — most common boss-room direction)
+ *   2. -Y  (upward)
+ *   3. +X  (right)
+ *   4. -X  (left)
+ *
+ * Returns 1 and writes (*out_wx, *out_wy) on success.
+ * Returns 0 and falls back to trigger_wy + BOSS_SCAN_MAX_TILES*TILE_H on failure.
+ *
+ * The search starts at step BOSS_SCAN_MIN_TILES from the trigger (so we skip
+ * the trigger tile itself and its immediate neighbours) and goes up to
+ * BOSS_SCAN_MAX_TILES tiles away.
+ */
+#define BOSS_SCAN_MIN_TILES  3   /* start looking this many tiles from trigger */
+#define BOSS_SCAN_MAX_TILES 30   /* give up after this many tiles (one room width) */
+/* Boss bounding half-size in tiles (boss = 6×8 tiles, half = 3×4). */
+#define BOSS_HALF_W_TILES    3
+#define BOSS_HALF_H_TILES    4
+
+static int find_boss_spawn(int trigger_wx, int trigger_wy,
+                           int *out_wx, int *out_wy)
+{
+    int sc = tilemap_pixel_to_col(trigger_wx);
+    int sr = tilemap_pixel_to_row(trigger_wy);
+
+    /* Four scan directions: [0]=+Y, [1]=-Y, [2]=+X, [3]=-X */
+    static const int k_dirs[4][2] = { {0,1}, {0,-1}, {1,0}, {-1,0} };
+
+    for (int d = 0; d < 4; d++) {
+        int dc = k_dirs[d][0];
+        int dr = k_dirs[d][1];
+
+        for (int step = BOSS_SCAN_MIN_TILES; step <= BOSS_SCAN_MAX_TILES; step++) {
+            int c = sc + dc * step;
+            int r = sr + dr * step;
+
+            /* Stay within map bounds */
+            if (c < 0 || c >= MAP_COLS || r < 0 || r >= MAP_ROWS) break;
+
+            /* If the path itself is blocked, we have left the room — stop */
+            if (tilemap_is_alien_solid(&g_cur_map, c, r)) break;
+
+            /* Check that the boss bounding box fits with no solid tiles */
+            int fits = 1;
+            for (int cr = -BOSS_HALF_H_TILES; cr <= BOSS_HALF_H_TILES && fits; cr++) {
+                for (int cc = -BOSS_HALF_W_TILES; cc <= BOSS_HALF_W_TILES && fits; cc++) {
+                    if (tilemap_is_alien_solid(&g_cur_map, c + cc, r + cr))
+                        fits = 0;
+                }
+            }
+
+            if (fits) {
+                /* Return the world pixel centre of the candidate tile */
+                *out_wx = c * MAP_TILE_W + MAP_TILE_W / 2;
+                *out_wy = r * MAP_TILE_H + MAP_TILE_H / 2;
+                return 1;
+            }
+        }
+    }
+
+    /* Fallback: place boss BOSS_SCAN_MIN_TILES tiles below the trigger.
+     * This will at least stay on the Y axis ("forward"). */
+    *out_wx = trigger_wx + MAP_TILE_W / 2;
+    *out_wy = trigger_wy + BOSS_SCAN_MIN_TILES * MAP_TILE_H;
+    return 0;
+}
+
+/*
  * Trigger the boss encounter for the current level.
  *
  * Mirrors tile_boss_trigger → boss_nbr_N dispatch @ main.asm#L5632-L5742.
  *
  * (trigger_wx, trigger_wy): world pixel position of the 0x3D tile.
  *
- * The boss is spawned slightly offset from the trigger tile to place it
- * visually inside the boss room.  The trigger tile is typically at the
- * ENTRANCE of the boss room, so the boss spawns a number of pixels ahead
- * (in the positive-X direction for most maps).
+ * The boss spawn position is determined by scanning the map from the trigger
+ * tile (see find_boss_spawn above) rather than using a fixed offset.  The scan
+ * walks in the Y direction first (Y = up/down = "in front of" the player along
+ * the corridor) so the boss reliably appears inside the boss room, not outside.
  *
- * In the original ASM, the exact spawn position is encoded as a pointer
- * to a tile in the map binary data (lbW0619E8 / lbW05F7A8 etc.), computing
- * the pixel position as:
+ * In the original ASM, the exact spawn position is encoded as a pointer to a
+ * tile in the map binary data (lbW0619E8 / lbW05F7A8 etc.):
  *   boss_pixel_x = col * 16 + type_struct[+4]   (type_struct[4]=38 for boss 1)
  *   boss_pixel_y = row * 16 + type_struct[+6]   (type_struct[6]=96 for boss 1)
- * Because those Amiga memory addresses cannot be resolved from C without
- * disassembling the binary map data, the C port spawns the boss at a fixed
- * offset from the trigger tile:
- *   boss_x = trigger_wx + BOSS_SPAWN_OFFSET_X   (one screen ahead)
- *   boss_y = trigger_wy + BOSS_SPAWN_OFFSET_Y   (centred vertically)
+ * The C port approximates this by scanning for the nearest valid open area.
  * Ref: patch_boss_door → lbC00A860 @ main.asm#L7170-L7190;
  *      lbW009114 offsets 4,6 = $26,$60 = 38,96 @ main.asm#L6114.
  */
-#define BOSS_SPAWN_OFFSET_X  200   /* ≈12.5 tiles ahead of trigger (16 px/tile) */
-#define BOSS_SPAWN_OFFSET_Y    0   /* same row as trigger */
 
 void alien_boss_trigger(int trigger_wx, int trigger_wy)
 {
@@ -1748,15 +1820,13 @@ void alien_boss_trigger(int trigger_wx, int trigger_wy)
     }
 
     /*
-     * Compute boss spawn position from trigger tile.
-     * Ref: patch_boss_door calculation @ main.asm#L7170:
-     *   d0 = col * 16 + offset_48(type_struct)
-     *   d1 = row * 16 + offset_50(type_struct)
-     *   then add type_struct[+4] and [+6] for per-type X/Y adjustment.
-     * The C port uses a simpler fixed offset from the trigger tile.
+     * Find a valid boss spawn position by scanning the map from the trigger
+     * tile (see find_boss_spawn above).  The scan prioritises Y directions
+     * (up/down = forward along the corridor) so the boss lands inside the
+     * boss room, never outside.
      */
-    int boss_wx = trigger_wx + BOSS_SPAWN_OFFSET_X;
-    int boss_wy = trigger_wy + BOSS_SPAWN_OFFSET_Y;
+    int boss_wx, boss_wy;
+    find_boss_spawn(trigger_wx, trigger_wy, &boss_wx, &boss_wy);
 
     /* Spawn the main boss alien (index 0 in the encounter group).
      * This corresponds to alien1_struct using type struct lbW009114/etc.
