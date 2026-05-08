@@ -1863,6 +1863,25 @@ void alien_boss_trigger(int trigger_wx, int trigger_wy)
                    0,   /* is_facehugger = 0 */
                    1);  /* is_boss = 1 */
 
+    /* Erase every TILE_BOSS_TRIGGER (0x3D) tile from the map.
+     * The player.c handler already replaces the single tile that was stepped on,
+     * but there may be several 0x3D tiles forming the trigger zone.  If they
+     * are left in place, stepping on them after the boss is killed (g_boss_active
+     * reset to 0) would re-activate the encounter.  We scan the whole map once
+     * and replace each remaining trigger tile with a floor tile.
+     * This is a one-time cost per level: MAP_ROWS × MAP_COLS = 96 × 120 = 11 520
+     * iterations, which is negligible compared to the rest of the frame budget.
+     * (In the ASM, the tiles_action_table dispatch guarantees the handler is
+     * entered only while the player is actively on that tile each frame, and
+     * the lbW0004EA guard stops re-entry; the C port uses the same guard but
+     * a full map erase is the safest equivalent to prevent any re-trigger.) */
+    for (int r = 0; r < MAP_ROWS; r++) {
+        for (int c = 0; c < MAP_COLS; c++) {
+            if ((g_cur_map.tiles[r][c] & 0x3F) == TILE_BOSS_TRIGGER)
+                tilemap_replace_tile(&g_cur_map, c, r);
+        }
+    }
+
     /* Mark boss encounter as active.
      * Mirrors: move.w #1,lbW0004EA @ main.asm#L5740. */
     g_boss_active = 1;
