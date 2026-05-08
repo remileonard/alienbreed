@@ -165,16 +165,18 @@ static const BossGroup k_boss_groups[5] = {
      *   Zone-boundary tiles (0x30-0x33) in L7MA announce "ZONE ONE".."ZONE SIX"
      *   as the player advances into the reactor room.
      *
-     *   alien1: lbW009254 @ lbW05F7A8 → IFF(57,107); AI lbC009CE2; HP=$100 speed=4
-     *   alien2: lbW009294 @ lbW063DB8 → IFF_row≈130 (out of C MAP_ROWS=96);
-     *           fallback: use main pos (57,107); AI lbC009C68; HP=$200=512 speed=4
-     *   alien3: lbW0092D4 @ lbW063DB8 → same fallback; HP=$100 speed=4
+     *   alien1: lbW009254 @ lbW05F7A8 → buffer_row=14, col=60; AI lbC009CE2; HP=$100 speed=4
+     *           Derivation: cur_map_top=0x05E9A0 (from lvl5 anchor lbW0619E8=row49,col104),
+     *           offset=lbW05F7A8-cur_map_top=0x0E08=3592; 3592/248=14 rem120 → col=60.
+     *   alien2: lbW009294 @ lbW063DB8 → buffer_row=86, col=100;
+     *           AI lbC009C68; HP=$200=512 speed=4
+     *   alien3: lbW0092D4 @ lbW063DB8 → same pos; HP=$100 speed=4
      * Ref: main.asm#L5744-L5765 (boss_nbr_2); lbC00A0EE @ main.asm#L7049 (die handler).
      */
     { 3, {
-        { 57, 107, 256, 4, 0 },  /* primary   — lbW009254 @ lbW05F7A8 */
-        { 57, 107, 512, 4, 1 },  /* secondary — lbW009294 @ lbW063DB8 (fallback pos) */
-        { 57, 107, 256, 4, 1 },  /* secondary — lbW0092D4 @ lbW063DB8 (fallback pos) */
+        { 14,  60, 256, 4, 0 },  /* primary   — lbW009254 @ lbW05F7A8 */
+        { 86, 100, 512, 4, 1 },  /* secondary — lbW009294 @ lbW063DB8 */
+        { 86, 100, 256, 4, 1 },  /* secondary — lbW0092D4 @ lbW063DB8 */
         {0,0,0,0,0},{0,0,0,0,0},{0,0,0,0,0},{0,0,0,0,0}
     }},
 
