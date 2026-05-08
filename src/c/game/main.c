@@ -352,9 +352,18 @@ void level_game_loop_external(void)
                             /* Boss: 96×128 sprite, no hatch animation, no alt-walk
                              * (boss uses palette flash instead — handled in AI).
                              * Walk frame clamped to [0, BOSS_WALK_FRAMES-1].
-                             * Ref: lbL0095CC / lbW019A8E entries 80-82 @ main.asm. */
-                            int boss_frame = (anim_frame < BOSS_WALK_FRAMES) ? anim_frame : 0;
-                            sprite_draw_boss(boss_frame, sx, sy);
+                             * Ref: lbL0095CC / lbW019A8E entries 80-82 @ main.asm.
+                             *
+                             * Only the PRIMARY boss (boss_rank==0) has a visible sprite.
+                             * Secondary/turret aliens (boss_rank>0) have a null BOB table
+                             * pointer in the ASM structs (lbW009154/9194/9294/92D4/9354/
+                             * 9394), making them invisible — they are extra HP hit-zones
+                             * that ride on top of the primary's sprite.
+                             * Ref: lbW009154 offset 12 = dc.w 0,0,... @ main.asm#L6077. */
+                            if (g_aliens[i].boss_rank == 0) {
+                                int boss_frame = (anim_frame < BOSS_WALK_FRAMES) ? anim_frame : 0;
+                                sprite_draw_boss(boss_frame, sx, sy);
+                            }
                         } else if (g_aliens[i].hatch_timer > HATCH_ANIM_WALK_THRESHOLD) {
                             int hf = (HATCH_ANIM_TIMER_INIT - g_aliens[i].hatch_timer) / 2;
                             if (hf < 3) {
