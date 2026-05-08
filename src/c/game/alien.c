@@ -1720,7 +1720,7 @@ void aliens_collisions_with_players(void)
  * Ref: patch_boss_door → lbC00A860 @ main.asm#L7170-L7190;
  *      lbW009114 offsets 4,6 = $26,$60 = 38,96 @ main.asm#L6114.
  */
-#define BOSS_SPAWN_OFFSET_X  200   /* ≈12 tiles ahead of trigger (16 px/tile) */
+#define BOSS_SPAWN_OFFSET_X  200   /* ≈12.5 tiles ahead of trigger (16 px/tile) */
 #define BOSS_SPAWN_OFFSET_Y    0   /* same row as trigger */
 
 void alien_boss_trigger(int trigger_wx, int trigger_wy)
