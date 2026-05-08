@@ -1683,13 +1683,28 @@ void aliens_collisions_with_players(void)
                  *      @ main.asm#L7650-L7652. */
                 player_take_damage(&g_players[pi], 2);
 
-                /* Transition the alien to its dying state so it plays the
-                 * explosion animation and is removed from future collision
-                 * checks.  Mirrors the lbC00A582 "touches player" branch that
-                 * eventually calls set_alien_default_vars @ main.asm#L7280. */
-                alien_kill(ai);
+                /* In the ASM, aliens_collisions_with_players NEVER kills an
+                 * alien — it only sets 52(a0)=1 (touch flag) and damages the
+                 * player, then returns (move.w #1,52(a0) / rts @
+                 * main.asm#L7656-L7657).  The actual alien death-from-contact
+                 * is driven by the alien's own AI via an internal touch counter
+                 * (lbC00A582 / 58(a0)).
+                 *
+                 * For boss aliens (is_boss=1) this is especially critical:
+                 * lbC009CE2 has NO "die from player contact" path — the boss is
+                 * only killed when its strength reaches 0 via a weapon hit
+                 * (lbC00AC0E: move.w #1,56(a0)) or when its companion alien2
+                 * dies (lbL008D2E check at lbC009CE2).  Calling alien_kill() on
+                 * a boss from here would immediately trigger level_start_
+                 * destruction() the moment the boss spawns near the player.
+                 *
+                 * Normal aliens: keep the simplified immediate-kill for now,
+                 * which is a close-enough approximation of the touch counter. */
+                if (!g_aliens[ai].is_boss) {
+                    alien_kill(ai);
+                }
 
-                break;  /* alien is now dying; stop checking other players */
+                break;  /* stop checking other players for this alien */
             }
         }
     }
