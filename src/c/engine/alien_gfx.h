@@ -131,6 +131,36 @@
 #define ALIEN_DEATH_ROW2_Y     224  /* second row y = 0xE0; 6 frames */
 
 /*
+ * Boss alien (is_boss=1) sprite atlas layout.
+ *
+ * The Amiga game renders boss aliens using hardware sprites (copper list), not
+ * BOBs — the BOB animation list (lbL0095CC) contains all-zero entries
+ * (dcb.l 12,0) which are invisible in the BOB system.  The actual 96×128 pixel
+ * boss sprite data is stored in the BO atlas at y=256, frames 0-2 laid out
+ * horizontally:
+ *
+ *   Frame 0: x=  0, y=256, w=96, h=128   (lbW019A8E entry 80: $00,$100,$60,$80)
+ *   Frame 1: x= 96, y=256, w=96, h=128   (lbW019A8E entry 81: $60,$100,$60,$80)
+ *   Frame 2: x=192, y=256, w=96, h=128   (lbW019A8E entry 82: $C0,$100,$60,$80)
+ *
+ * Walk animation cycles through frames 0→1→2→1 (same as normal aliens).
+ * In the C port the boss is rendered directly from the BO atlas using these
+ * coordinates.  Center offset: the boss pos_x/pos_y is the CENTRE of the
+ * sprite, so blit at (pos_x - BOSS_SPRITE_W/2, pos_y - BOSS_SPRITE_H/2).
+ *
+ * Collision probe offsets (C centre-based, = ASM offset − half_size):
+ *   RIGHT : nx + (100-48) = nx+52  ;  y probes: ay-70, ay-60, ay-48
+ *   LEFT  : nx + ( -6-48) = nx-54  ;  (same y probes)
+ *   DOWN  : ny + (112-64) = ny+48  ;  x probes: ax-44, ax+2, ax+42
+ *   UP    : ny + (-10-64) = ny-74  ;  (same x probes)
+ * Source: lbW00A2FA/lbW00A306/lbW00A312/lbW00A31E @ main.asm#L7093-L7096.
+ */
+#define BOSS_SPRITE_W           96   /* pixels wide  (= 0x60) */
+#define BOSS_SPRITE_H          128   /* pixels tall  (= 0x80) */
+#define BOSS_ATLAS_Y           256   /* y of the boss sprite row in atlas (= 0x100) */
+#define BOSS_WALK_FRAMES         3   /* 3 walk frames per direction (same cycle as normal) */
+
+/*
  * Load the BO file at path, decode 5 sequential bitplanes to an indexed-color
  * atlas buffer (320×384 bytes, one byte = color index 0-31).
  * atlas_type: ALIEN_ATLAS_COMPACT or ALIEN_ATLAS_LEGACY.

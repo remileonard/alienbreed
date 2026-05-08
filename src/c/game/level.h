@@ -48,6 +48,16 @@ typedef struct {
      * triggered via the normal path).
      */
     int   timer_seconds;
+    /*
+     * Boss number for this level (0 = no boss).
+     * Set by init_level_N in main.asm: `move.w #N,boss_nbr`.
+     *   boss_nbr 1 → lbW009114 (AI lbC009CE2, level 5/index 4)
+     *   boss_nbr 2 → lbW009254 (AI lbC009CE2, levels 7/8/index 6-7)
+     *   boss_nbr 3 → lbW009374 (AI lbC009CE2, level 12/index 11)
+     *   boss_nbr 4 → lbW009014 (AI lbC009AFC, level 10/index 9)
+     * Ref: init_level_5/7/8/10/12 @ main.asm#L1089,1129,1154,1186,1217.
+     */
+    int   boss_nbr;
 } LevelDef;
 
 extern const LevelDef k_level_defs[NUM_LEVELS];
@@ -66,6 +76,7 @@ extern int  g_map_overview_on;
 extern int  g_game_running_flag;
 extern int  g_exit_unlocked;         /* 1 = exit tile is passable (Ref: main.asm#L5189) */
 extern int  g_boss_active;           /* 1 while a boss encounter is in progress */
+extern int  g_boss_nbr;             /* boss_nbr for current level (0=none; mirrors ASM boss_nbr) */
 /* When >= 0, jump to this level index at next level transition (enter_level_N_holocode in main.asm). */
 extern int  g_holocode_jump_level;
 

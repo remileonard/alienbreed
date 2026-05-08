@@ -45,17 +45,19 @@ typedef struct {
      * Ref: lbW009414 / lbL00969C @ main.asm#L6059-L6168; tile dispatch
      * lbC0049D6 (tile 0x29 → lbW008FD4) and lbC004A28 (lbW009414). */
     int   is_facehugger;
-    /* Boss flag — reserved for the dedicated boss issue.
-     * Actual bosses are spawned exclusively by tile_boss_trigger (a separate
-     * tile from tile 0x0A) using dedicated ASM structs with special AI:
-     *   boss_nbr 1 → lbW009114 (AI lbC009CE2, level 5)
-     *   boss_nbr 2 → lbW009254 (AI lbC009CE2, levels 7/8)
-     *   boss_nbr 3 → lbW009374 (level 12)
-     *   boss_nbr 4 → lbW009014 (AI lbC009AFC, level 10)
+    /* Boss flag — set to 1 when this alien is a true boss (not a large regular
+     * alien from tile 0x0A).  Actual bosses are spawned exclusively by
+     * alien_boss_trigger() and use lbC009CE2/lbC009AFC AI, larger collision
+     * probes (96×128 px), and higher HP.
+     *   boss_nbr 1 → lbW009114 (AI lbC009CE2, level 5/index 4)
+     *   boss_nbr 2 → lbW009254 (AI lbC009CE2, levels 7/8/index 6-7)
+     *   boss_nbr 3 → lbW009374 (AI lbC009CE2, level 12/index 11)
+     *   boss_nbr 4 → lbW009014 (AI lbC009AFC, level 10/index 9)
      * The large aliens spawned by tile 0x0A (TILE_FACEHUGGER_HATCH) on
      * non-level-12 levels (lbW008F94 / lbW009094) are regular large aliens
-     * sharing the standard AI (lbC00987E) — they are NOT bosses.
-     * Ref: tile_boss_trigger @ main.asm#L5632, boss_nbr_1..4 handlers. */
+     * sharing the standard AI (lbC00987E) — they are NOT bosses (is_boss=0).
+     * Ref: tile_boss_trigger @ main.asm#L5632; boss_nbr_1..4 handlers;
+     *      alien_boss_trigger() for C spawning. */
     int   is_boss;
     /* Pathfinding state */
     int   target_x, target_y;
@@ -113,6 +115,25 @@ void aliens_collisions_with_players(void);
 
 /* Kill an alien at index i (awards score, plays SFX). */
 void alien_kill(int i);
+
+/*
+ * Trigger the boss encounter for the current level.
+ * Called when a player steps on TILE_BOSS_TRIGGER (0x3D).
+ * Mirrors tile_boss_trigger → boss_nbr_1..4 @ main.asm#L5632-L5742.
+ *
+ * (trigger_wx, trigger_wy): world pixel position of the 0x3D tile.
+ *
+ * Actions (per ASM):
+ *   1. Guard: do nothing if g_boss_active is already 1.
+ *   2. Switch music to boss_tune (audio_play_music("boss")).
+ *   3. Play VOICE_DANGER sample.
+ *   4. Kill all currently living non-boss aliens (set_all_aliens_to_default).
+ *   5. Spawn boss alien(s) near the trigger tile.
+ *   6. Set g_boss_active = 1.
+ *
+ * Ref: tile_boss_trigger / boss_nbr_1 @ main.asm#L5632,L5716.
+ */
+void alien_boss_trigger(int trigger_wx, int trigger_wy);
 
 /*
  * Register a one-shot spawn point at (wx, wy).

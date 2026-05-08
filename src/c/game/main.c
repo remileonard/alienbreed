@@ -306,8 +306,9 @@ void level_game_loop_external(void)
                 if (g_aliens[i].alive == 0) continue;
                 int sx = g_aliens[i].pos_x - g_camera_x;
                 int sy = g_aliens[i].pos_y - g_camera_y;
-                /* pos_x/pos_y is the centre; sprite extends ±16 px around it. */
-                if (sx > -48 && sx < SCREEN_W + 16 && sy > -48 && sy < SCREEN_H + 16) {
+                /* Viewport culling: boss aliens are 96×128 px, normal are 32×30.
+                 * Use a conservative 128 px margin to cover both cases. */
+                if (sx > -128 && sx < SCREEN_W + 128 && sy > -128 && sy < SCREEN_H + 128) {
                     if (g_aliens[i].alive == 2) {
                         /* Dying: render explosion animation.
                          * Ref: lbL018C2E @ main.asm#L13907; 16 frames at delay=0. */
@@ -329,13 +330,32 @@ void level_game_loop_external(void)
                          * (last 2 ticks) is a normal walk frame.
                          * Ref: lbC00A568 / lbL01B6F6 @ main.asm#L7272-7278,14544.
                          *
+                         * Boss aliens (is_boss=1) use sprite_draw_boss(), a 96×128
+                         * sprite at atlas y=256 (lbW019A8E entries 80-82).
+                         * Bosses skip the hatch animation (they appear directly).
+                         * Ref: lbL0095CC / lbL015CEA @ main.asm (all-zero BOB list).
+                         *
                          * Face huggers (is_facehugger=1) use 16×16 sprites from
                          * atlas x=256-304 via sprite_draw_facehugger(), bypassing
                          * both the hatch animation (lbL01BC0A uses the same 32×32
                          * zoom frames as large aliens) and the 32×30 walk path.
                          * Ref: lbW009414 / lbL00969C @ main.asm#L6059,L6315.
                          */
-                        if (g_aliens[i].hatch_timer > HATCH_ANIM_WALK_THRESHOLD) {
+                        int anim_tick  = g_aliens[i].anim_counter % 4;
+                        int anim_frame = k_walk_cycle[anim_tick];
+                        if (g_aliens[i].hit_flag) {
+                            anim_frame = ALIEN_WALK_FRAMES; /* ALT WALK */
+                            g_aliens[i].hit_flag--;
+                        }
+
+                        if (g_aliens[i].is_boss) {
+                            /* Boss: 96×128 sprite, no hatch animation, no alt-walk
+                             * (boss uses palette flash instead — handled in AI).
+                             * Walk frame clamped to [0, BOSS_WALK_FRAMES-1].
+                             * Ref: lbL0095CC / lbW019A8E entries 80-82 @ main.asm. */
+                            int boss_frame = (anim_frame < BOSS_WALK_FRAMES) ? anim_frame : 0;
+                            sprite_draw_boss(boss_frame, sx, sy);
+                        } else if (g_aliens[i].hatch_timer > HATCH_ANIM_WALK_THRESHOLD) {
                             int hf = (HATCH_ANIM_TIMER_INIT - g_aliens[i].hatch_timer) / 2;
                             if (hf < 3) {
                                 sprite_draw_alien_hatch(hf, sx, sy);
@@ -347,12 +367,6 @@ void level_game_loop_external(void)
                                     sprite_draw_alien(g_aliens[i].direction, 0, sx, sy);
                             }
                         } else {
-                            int anim_tick  = g_aliens[i].anim_counter % 4;
-                            int anim_frame = k_walk_cycle[anim_tick];
-                            if (g_aliens[i].hit_flag) {
-                                anim_frame = ALIEN_WALK_FRAMES; /* ALT WALK */
-                                g_aliens[i].hit_flag--;
-                            }
                             if (g_aliens[i].is_facehugger)
                                 sprite_draw_facehugger(g_aliens[i].direction, anim_frame, sx, sy);
                             else

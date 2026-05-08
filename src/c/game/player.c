@@ -516,8 +516,17 @@ void check_tile_interaction(Player *p)
         break;
 
     case TILE_BOSS_TRIGGER:
-        /* Tile 0x3D: trigger boss encounter (Ref: main.asm#L5632). */
+        /* Tile 0x3D: trigger boss encounter (Ref: tile_boss_trigger / boss_nbr_N
+         * @ main.asm#L5632; boss_nbr_1 example @ main.asm#L5716-L5742).
+         * Replace the tile first so it can only fire once (the trigger becomes
+         * a floor tile after activation, matching ASM tilemap_replace_tile call).
+         * Then spawn the boss encounter near the trigger tile position. */
         tilemap_replace_tile(&g_cur_map, col, row);
+        {
+            int trigger_wx = col * MAP_TILE_W;
+            int trigger_wy = row * MAP_TILE_H;
+            alien_boss_trigger(trigger_wx, trigger_wy);
+        }
         break;
 
     /* -----------------------------------------------------------------

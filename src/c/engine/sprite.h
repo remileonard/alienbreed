@@ -124,6 +124,25 @@ void sprite_draw_alien_hatch(int hatch_frame, int x, int y);
  */
 void sprite_draw_facehugger(int direction, int anim_frame, int x, int y);
 
+/*
+ * Draw a boss alien sprite at screen position (x, y).
+ *
+ * The boss is a large 96×128 px creature stored in the BO atlas at y=256.
+ * Three walk frames are laid out horizontally:
+ *   Frame 0: atlas x=  0  (lbW019A8E entry 80: $00,$100,$60,$80)
+ *   Frame 1: atlas x= 96  (lbW019A8E entry 81: $60,$100,$60,$80)
+ *   Frame 2: atlas x=192  (lbW019A8E entry 82: $C0,$100,$60,$80)
+ *
+ * anim_frame: 0, 1, or 2 — index into the 3-frame walk cycle (0→1→2→1).
+ * (x, y)    : screen position of the boss centre.
+ *
+ * In the Amiga original the boss was rendered via hardware sprites (copper
+ * list), not BOBs — the BOB entries for boss aliens are all-zero (invisible).
+ * This function draws the boss directly from the BO atlas.
+ * Ref: lbW019A8E entries 80-82 @ main.asm#L14240-L14242.
+ */
+void sprite_draw_boss(int anim_frame, int x, int y);
+
 /* Total number of player sprites available (both players, 1-based in game = 1-80) */
 #define PLAYER_SPRITE_TOTAL 80
 
