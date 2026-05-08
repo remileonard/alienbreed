@@ -28,6 +28,7 @@ WORD  g_global_aliens_extra_strength = 0;
 static int s_cached_player_x[MAX_PLAYERS];
 static int s_cached_player_y[MAX_PLAYERS];
 static int s_cached_player_alive[MAX_PLAYERS];
+static int s_cached_player_dying[MAX_PLAYERS]; /* death_counter > 0: in death anim */
 static int s_target_refresh_countdown = 0;
 
 /*
@@ -35,13 +36,20 @@ static int s_target_refresh_countdown = 0;
  *
  * lbW009C62: retreat countdown.  Loaded with 40 by the random trigger
  *   (rand(300) < 2).  Decremented each frame while > 0.  When it hits 0
- *   the "permanent retreat if player alive" path (lbC009D80-lbC009D98) runs.
+ *   the "re-set if player dying" path (lbC009D80-lbC009D98) runs.
  *
  * lbL009C64: retreat direction flag.
- *   0 = chase (move TOWARD player) — only active when both players are dead.
- *   1 = retreat (move AWAY from player) — active whenever any player is alive.
+ *   0 = chase (move TOWARD player) — default when player is alive and playing.
+ *   1 = retreat (move AWAY from player):
+ *       - set by random trigger (1/150 per frame) for 40 frames; and
+ *       - set when any player's death_counter > 0 (death animation in progress).
  *   When retreating the boss moves without the ±4 px near-player threshold
  *   used in chase mode (mirrors the lbC009EB2/lbC009EFC inversion paths).
+ *
+ * The oscillation: boss normally chases; randomly retreats ~every 3 s for
+ * ~0.8 s; also retreats briefly while the player's death animation plays.
+ * The lbW005D64/lbW006504 variables checked at lbC009D80 are the player
+ * death_counter fields (set to 200 on death, not the alive flags).
  *
  * Ref: lbC009CE2 @ main.asm#L6811-L6853.
  */
@@ -621,6 +629,7 @@ void alien_init_variables(void)
     memset(s_cached_player_x,     0, sizeof(s_cached_player_x));
     memset(s_cached_player_y,     0, sizeof(s_cached_player_y));
     memset(s_cached_player_alive, 0, sizeof(s_cached_player_alive));
+    memset(s_cached_player_dying, 0, sizeof(s_cached_player_dying));
     g_alien_count = 0;
     s_spawn_count = 0;
     s_target_refresh_countdown = 0;
@@ -1320,10 +1329,18 @@ static void boss_move(int self_idx, Alien *a)
         if (s_boss_retreat_countdown > 0) {
             s_boss_retreat_countdown--;
         } else {
-            /* lbC009D80: clear flag; lbC009D98: re-set if any player alive. */
+            /*
+             * lbC009D80: clear retreat flag (chase mode by default).
+             * lbC009D98: re-set to retreat ONLY if any player's death_counter>0.
+             *
+             * lbW005D64 / lbW006504 are the player death_counter fields (set to
+             * 200 on death, NOT the alive flags). When the player is alive and
+             * playing normally death_counter==0, so the boss CHASES.  During
+             * the death animation (death_counter>0) the boss retreats.
+             */
             s_boss_retreat_flag = 0;
             for (int i = 0; i < MAX_PLAYERS; i++) {
-                if (s_cached_player_alive[i]) {
+                if (s_cached_player_dying[i]) {
                     s_boss_retreat_flag = 1;
                     break;
                 }
@@ -1406,8 +1423,7 @@ static void boss_move(int self_idx, Alien *a)
     } else {
         /*
          * 4b. CHASE mode (lbL009C64=0) — boss moves TOWARD player.
-         *     Only active when both players are dead (no player to target,
-         *     so this path is effectively a no-op in practice).
+         *     Default mode when the player is alive and playing normally.
          *     Threshold 4 px mirrors `cmp.w #4,d4` @ main.asm#L6926.
          *
          *     lbW00A2FA (LEFT):  x=−6, y=−6/4/16 → C: x−54, y−70/−60/−48
@@ -1488,6 +1504,7 @@ void alien_update_all(void)
             s_cached_player_alive[i] = g_players[i].alive;
             s_cached_player_x[i]    = g_players[i].pos_x;
             s_cached_player_y[i]    = g_players[i].pos_y;
+            s_cached_player_dying[i] = (g_players[i].death_counter > 0);
         }
     }
 
