@@ -58,6 +58,35 @@ typedef struct {
      * Ref: init_level_5/7/8/10/12 @ main.asm#L1089,1129,1154,1186,1217.
      */
     int   boss_nbr;
+    /*
+     * Boss main-body spawn tile in the map (IFF/0-based row and column).
+     * Derived from the map-buffer pointer passed as `a3` to patch_boss_door
+     * in the boss_nbr_N handler (main.asm#L5716-L5713):
+     *
+     *   boss_nbr 1: lbW0619E8  → IFF (row=49, col=104)  [level 5,  L4MA]
+     *   boss_nbr 2: lbW05F7A8  → IFF (row=57, col=107)  [levels 7/8, L6/L7MA]
+     *   boss_nbr 3: lbW062872  → IFF (row=52, col=103)  [level 12, LBMA]
+     *   boss_nbr 4: lbW06188C  → IFF (row=46, col=97)   [level 10, L9MA]
+     *
+     * The pixel position is: x = boss_spawn_col * MAP_TILE_W,
+     *                        y = boss_spawn_row * MAP_TILE_H.
+     * -1 means no fixed spawn position (use find_boss_spawn fallback).
+     *
+     * HOW THE IFF COORDINATES WERE DERIVED:
+     * In the original binary, cur_map_top (the map ring buffer) is at hunk0
+     * offset 0x20830, cur_map_datas at 0x20B18 (= cur_map_top + 3*248).
+     * Each row is 248 bytes wide (120 tile-words + 4 padding words).
+     * `lea lbWxxxxxx, a3` loads a pointer that is a hunk0 self-reference
+     * into this buffer.  The IFF row/col are:
+     *   offset = ptr_value - 0x20830
+     *   buffer_row = offset / 248          (includes the 3 header rows)
+     *   IFF_row    = buffer_row - 3
+     *   IFF_col    = (offset % 248) / 2
+     * The C port has no header rows so IFF coordinates map directly.
+     * Ref: patch_boss_door @ main.asm#L7418; boss_nbr_N @ main.asm#L5664.
+     */
+    int   boss_spawn_row;
+    int   boss_spawn_col;
 } LevelDef;
 
 extern const LevelDef k_level_defs[NUM_LEVELS];

@@ -1794,20 +1794,25 @@ static int find_boss_spawn(int trigger_wx, int trigger_wy,
  *
  * Mirrors tile_boss_trigger → boss_nbr_N dispatch @ main.asm#L5632-L5742.
  *
- * (trigger_wx, trigger_wy): world pixel position of the 0x3D tile.
+ * (trigger_wx, trigger_wy): world pixel position of the 0x3D tile (unused
+ * except as a fallback when no fixed spawn tile is defined for the level).
  *
- * The boss spawn position is determined by scanning the map from the trigger
- * tile (see find_boss_spawn above) rather than using a fixed offset.  The scan
- * walks in the Y direction first (Y = up/down = "in front of" the player along
- * the corridor) so the boss reliably appears inside the boss room, not outside.
- *
- * In the original ASM, the exact spawn position is encoded as a pointer to a
- * tile in the map binary data (lbW0619E8 / lbW05F7A8 etc.):
- *   boss_pixel_x = col * 16 + type_struct[+4]   (type_struct[4]=38 for boss 1)
- *   boss_pixel_y = row * 16 + type_struct[+6]   (type_struct[6]=96 for boss 1)
- * The C port approximates this by scanning for the nearest valid open area.
- * Ref: patch_boss_door → lbC00A860 @ main.asm#L7170-L7190;
- *      lbW009114 offsets 4,6 = $26,$60 = 38,96 @ main.asm#L6114.
+ * Boss spawn position — exact ASM method:
+ * In the original binary, each boss_nbr_N handler passes a direct pointer
+ * into the map ring buffer (cur_map_top) to patch_boss_door as register a3:
+ *   boss_nbr_1: lea lbW0619E8, a3    → IFF (row=49, col=104) in L4MA
+ *   boss_nbr_2: lea lbW05F7A8, a3    → IFF (row=57, col=107) in L6/L7MA
+ *   boss_nbr_3: lea lbW062872, a3    → IFF (row=52, col=103) in LBMA
+ *   boss_nbr_4: lea lbW06188C, a3    → IFF (row=46, col=97)  in L9MA
+ * patch_boss_door then computes:
+ *   offset = a3 − cur_map_top_ptr
+ *   col = (offset % 248) / 2,  row = offset / 248  (buffer row = IFF row + 3)
+ *   pixel_x = col * 16 + 48(a1)   (48(a1) = 12 for boss types 1-3)
+ *   pixel_y = row * 16 + 50(a1)   (50(a1) =  4 for boss types 1-3)
+ * The C port has no 3-row header, so buffer_row = IFF_row directly.
+ * The per-level spawn tile is stored in LevelDef::boss_spawn_row/col;
+ * pixel_x = boss_spawn_col * MAP_TILE_W,  pixel_y = boss_spawn_row * MAP_TILE_H.
+ * Ref: patch_boss_door @ main.asm#L7418-L7466; boss_nbr_N @ main.asm#L5664.
  */
 
 void alien_boss_trigger(int trigger_wx, int trigger_wy)
@@ -1835,13 +1840,19 @@ void alien_boss_trigger(int trigger_wx, int trigger_wy)
     }
 
     /*
-     * Find a valid boss spawn position by scanning the map from the trigger
-     * tile (see find_boss_spawn above).  The scan prioritises Y directions
-     * (up/down = forward along the corridor) so the boss lands inside the
-     * boss room, never outside.
+     * Compute the boss spawn position from the map tile stored in LevelDef.
+     * This mirrors the ASM exactly: the pointer lbW0619E8/etc. in the map
+     * buffer encodes (row, col) → pixel = tile × tile_size.
+     * Fall back to find_boss_spawn() only for levels without a fixed tile.
      */
     int boss_wx, boss_wy;
-    find_boss_spawn(trigger_wx, trigger_wy, &boss_wx, &boss_wy);
+    const LevelDef *def = &k_level_defs[g_cur_level];
+    if (def->boss_spawn_row >= 0 && def->boss_spawn_col >= 0) {
+        boss_wx = def->boss_spawn_col * MAP_TILE_W;
+        boss_wy = def->boss_spawn_row * MAP_TILE_H;
+    } else {
+        find_boss_spawn(trigger_wx, trigger_wy, &boss_wx, &boss_wy);
+    }
 
     /* Spawn the main boss alien (index 0 in the encounter group).
      * This corresponds to alien1_struct using type struct lbW009114/etc.
