@@ -55,9 +55,13 @@ static int s_target_refresh_countdown = 0;
  *     34(a1)=8  → FACEHUGGER_BASE_HP = 8
  *
  * --- Boss (is_boss=1) ---
- *   Primary struct: lbW009114 @ main.asm#L6114 (boss_nbr=1, lvl5; AI lbC009CE2)
- *     32(a1)=4  → BOSS_SPEED = 4
- *     34(a1)=$100=256 → BOSS_BASE_HP = 256
+ *   Each boss_nbr spawns a group of 3 (boss_nbr 1-3) or 7 (boss_nbr 4) aliens.
+ *   Stats per struct type (ASM offset 32=speed, 34=hp):
+ *     boss_nbr 1: lbW009114(4,$100=256), lbW009154(4,$100=256), lbW009194(4,$100=256)
+ *     boss_nbr 2: lbW009254(4,$100=256), lbW009294(4,$200=512), lbW0092D4(4,$100=256)
+ *     boss_nbr 3: lbW009314(4,$140=320), lbW009354(5,$140=320), lbW009394(5,$140=320)
+ *     boss_nbr 4: lbW009014(0,$40=64) ×7  (patrol AI lbC009AFC; speed=0 in struct,
+ *                 but C uses BOSS_SPEED=4 as functional approximation)
  */
 
 /* --- Normal large alien --- */
@@ -68,9 +72,115 @@ static const WORD NORMAL_MAX_SPEED  =   2;  /* lbW008F94+32 */
 static const WORD FACEHUGGER_BASE_HP   =  8;  /* lbW009414+34 = 8 */
 static const WORD FACEHUGGER_MAX_SPEED =  4;  /* lbW009414+32 */
 
-/* --- Boss (is_boss=1) --- */
-static const WORD BOSS_BASE_HP =  256;  /* lbW009114+34 = $100 */
-static const WORD BOSS_SPEED   =    4;  /* lbW009114+32 */
+/* Default boss speed (used when is_boss=1 via standard spawn_alien_at path). */
+static const WORD BOSS_SPEED = 4;  /* lbW009114+32 = 4 */
+
+/*
+ * Per-boss encounter spawn table — mirrors the boss_nbr_N handlers in
+ * tile_boss_trigger @ main.asm#L5664-L5796.
+ *
+ * Each entry describes one alien in the boss group:
+ *   row, col  : IFF tile coordinates (pixel = row/col × MAP_TILE_H/W).
+ *               Derived from the ASM map-buffer address passed to patch_boss_door:
+ *                 offset = addr - cur_map_top_ptr
+ *                 IFF_row = (offset/248) - 3  (buffer has 3 header rows, C has none)
+ *                 col     = (offset%248) / 2
+ *               boss_nbr_2 secondary: lbW063DB8 falls outside MAP_ROWS=96 in the C
+ *               port (IFF_row≈130 in the L6MA buffer), so the main boss position is
+ *               used as a fallback.
+ *   hp        : base HP from struct+34 (global_aliens_extra_strength added at spawn).
+ *   speed     : base speed from struct+32 (boss_nbr_4 ASM speed=0; C uses 4 instead
+ *               as a functional stand-in for the missing lbC009AFC patrol AI).
+ *   boss_rank : 0=primary (lbC009CE2/lbC009AFC AI; triggers self-destruct on death),
+ *               1+=secondary (lbC009C68 AI; tracks primary's position each frame).
+ *
+ * ASM references:
+ *   boss_nbr_1 @ main.asm#L5716: 3 aliens, alien1=lbW0619E8, alien2/3=lbW064204
+ *   boss_nbr_2 @ main.asm#L5744: 3 aliens, alien1=lbW05F7A8, alien2/3=lbW063DB8
+ *   boss_nbr_3 @ main.asm#L5767: 3 aliens, all=lbW062872
+ *   boss_nbr_4 @ main.asm#L5664: 7 aliens (lbW06188C … lbW0627FC)
+ */
+typedef struct { int row; int col; WORD hp; WORD speed; int boss_rank; } BossSpawnDef;
+typedef struct { int count; BossSpawnDef defs[7]; } BossGroup;
+
+/* Highest valid boss_nbr (boss_nbr=4 → 7 patrol aliens, lbC009AFC). */
+#define MAX_BOSS_NBR 4
+
+static const BossGroup k_boss_groups[5] = {
+    /* [0] unused */
+    { 0, {{0,0,0,0,0}} },
+
+    /*
+     * boss_nbr=1 (level 5, L4MA):
+     *   alien1: lbW009114 @ lbW0619E8 → IFF(49,104); AI lbC009CE2; HP=$100 speed=4
+     *   alien2: lbW009154 @ lbW064204 → IFF(91, 30); AI lbC009C68; HP=$100 speed=4
+     *   alien3: lbW009194 @ lbW064204 → IFF(91, 30); AI lbC009C68; HP=$100 speed=4
+     * boss_nbr_1 also calls patch_tiles(lbL020196,lbW062D52) to close entry door.
+     * Ref: main.asm#L5716-L5742.
+     */
+    { 3, {
+        { 49, 104, 256, 4, 0 },  /* primary  — lbW009114 @ lbW0619E8 */
+        { 91,  30, 256, 4, 1 },  /* secondary — lbW009154 @ lbW064204 */
+        { 91,  30, 256, 4, 1 },  /* secondary — lbW009194 @ lbW064204 */
+        {0,0,0,0,0},{0,0,0,0,0},{0,0,0,0,0},{0,0,0,0,0}
+    }},
+
+    /*
+     * boss_nbr=2 (level 7, L6MA):
+     *   alien1: lbW009254 @ lbW05F7A8 → IFF(57,107); AI lbC009CE2; HP=$100 speed=4
+     *   alien2: lbW009294 @ lbW063DB8 → IFF_row≈130 (out of C MAP_ROWS=96);
+     *           fallback: use main pos (57,107); AI lbC009C68; HP=$200=512 speed=4
+     *   alien3: lbW0092D4 @ lbW063DB8 → same fallback; HP=$100 speed=4
+     * Ref: main.asm#L5744-L5765.
+     */
+    { 3, {
+        { 57, 107, 256, 4, 0 },  /* primary   — lbW009254 @ lbW05F7A8 */
+        { 57, 107, 512, 4, 1 },  /* secondary — lbW009294 @ lbW063DB8 (fallback pos) */
+        { 57, 107, 256, 4, 1 },  /* secondary — lbW0092D4 @ lbW063DB8 (fallback pos) */
+        {0,0,0,0,0},{0,0,0,0,0},{0,0,0,0,0},{0,0,0,0,0}
+    }},
+
+    /*
+     * boss_nbr=3 (level 12, LBMA):
+     *   alien1: lbW009314 @ lbW062872 → IFF(52,103); AI lbC009CE2; HP=$140=320 speed=4
+     *   alien2: lbW009354 @ lbW062872 → same pos;    AI lbC009C68; HP=$140=320 speed=5
+     *   alien3: lbW009394 @ lbW062872 → same pos;    AI lbC009C68; HP=$140=320 speed=5
+     * boss_nbr_3 also calls patch_tiles twice to close doors.
+     * Ref: main.asm#L5767-L5796.
+     */
+    { 3, {
+        { 52, 103, 320, 4, 0 },  /* primary   — lbW009314 @ lbW062872 */
+        { 52, 103, 320, 5, 1 },  /* secondary — lbW009354 @ lbW062872 */
+        { 52, 103, 320, 5, 1 },  /* secondary — lbW009394 @ lbW062872 */
+        {0,0,0,0,0},{0,0,0,0,0},{0,0,0,0,0},{0,0,0,0,0}
+    }},
+
+    /*
+     * boss_nbr=4 (level 10, L9MA):
+     *   7 patrol bosses using lbW009014 (AI lbC009AFC; HP=$40=64; speed=0 in ASM
+     *   struct but C uses 4 as stand-in for the patrol AI).  All are rank=0 since
+     *   lbC009AFC has no lbC009F62 self-destruct branch; exit is via lbW0004EE.
+     *   Positions derived from ASM map-buffer addresses relative to anchor
+     *   lbW06188C (IFF row=46, col=97), map_start=0x05E852:
+     *     lbW06188C → buffer_row=49, IFF_row=46, col=97
+     *     lbW061AFC → buffer_row=52, IFF_row=49, col=37
+     *     lbW061D6C → buffer_row=54, IFF_row=51, col=101
+     *     lbW061FDC → buffer_row=57, IFF_row=54, col=41
+     *     lbW06224C → buffer_row=59, IFF_row=56, col=105
+     *     lbW06258C → buffer_row=63, IFF_row=60, col=25
+     *     lbW0627FC → buffer_row=65, IFF_row=62, col=89
+     * Ref: boss_nbr_4 @ main.asm#L5664-L5714.
+     */
+    { 7, {
+        { 46,  97, 64, 4, 0 },  /* lbW06188C */
+        { 49,  37, 64, 4, 0 },  /* lbW061AFC */
+        { 51, 101, 64, 4, 0 },  /* lbW061D6C */
+        { 54,  41, 64, 4, 0 },  /* lbW061FDC */
+        { 56, 105, 64, 4, 0 },  /* lbW06224C */
+        { 60,  25, 64, 4, 0 },  /* lbW06258C */
+        { 62,  89, 64, 4, 0 },  /* lbW0627FC */
+    }}
+};
 
 /*
  * Projectile struct — extends simple position/velocity with weapon-specific
@@ -436,6 +546,7 @@ static int spawn_alien_at(int wx, int wy, int alien_type,
     a->death_frame   = 0;
     a->is_facehugger = is_facehugger;
     a->is_boss       = is_boss;
+    a->boss_rank     = 0;   /* default: primary / not-a-boss */
 
     /*
      * Per-class speed and HP initialisation — mirrors the three code paths
@@ -453,16 +564,18 @@ static int spawn_alien_at(int wx, int wy, int alien_type,
      *                (= lbW009414+34 = 8 + extra)
      *
      *   Boss          (is_boss=1):
+     *     Default speed/HP for the boss class; overridden by caller for
+     *     per-struct values from k_boss_groups (see alien_boss_trigger).
      *     speed    = BOSS_SPEED (= lbW009114+32 = 4; exact — no random in ASM)
-     *     strength = BOSS_BASE_HP + g_global_aliens_extra_strength
-     *                (= lbW009114+34 = $100 = 256 + extra)
+     *     strength = 256 + g_global_aliens_extra_strength
+     *                (= lbW009114+34 = $100 = 256 + extra; overridden after return)
      */
     if (is_facehugger) {
         a->speed    = FACEHUGGER_MAX_SPEED;
         a->strength = (WORD)(FACEHUGGER_BASE_HP + g_global_aliens_extra_strength);
     } else if (is_boss) {
         a->speed    = BOSS_SPEED;
-        a->strength = (WORD)(BOSS_BASE_HP + g_global_aliens_extra_strength);
+        a->strength = (WORD)(256 + g_global_aliens_extra_strength);
     } else {
         a->speed    = NORMAL_MAX_SPEED;
         a->strength = (WORD)(NORMAL_BASE_HP + g_global_aliens_extra_strength);
@@ -1122,7 +1235,7 @@ static void boss_move(int self_idx, Alien *a)
     if (dir_bits > 0 && dir_bits < 16 && k_dir_table[dir_bits] >= 0)
         a->direction = k_dir_table[dir_bits];
 
-    (void)self_idx;  /* self-overlap check not needed for the single boss */
+    (void)self_idx;  /* self-overlap check not needed for boss movement */
 }
 
 void alien_update_all(void)
@@ -1173,10 +1286,30 @@ void alien_update_all(void)
 
         WORD prev_x = g_aliens[i].pos_x;
         WORD prev_y = g_aliens[i].pos_y;
-        if (g_aliens[i].is_boss)
-            boss_move(i, &g_aliens[i]);
-        else
+        if (g_aliens[i].is_boss) {
+            if (g_aliens[i].boss_rank > 0) {
+                /*
+                 * Secondary boss (turret) — mirrors lbC009C68 @ main.asm#L6777.
+                 * The secondary alien has no movement AI of its own: it copies
+                 * the primary boss's (boss_rank=0) position every frame so that
+                 * it stays on top of the main boss and acts as a separate-HP
+                 * hit-zone.  Velocity is zeroed (clr.l 34(a0)/clr.l 38(a0)).
+                 */
+                for (int j = 0; j < g_alien_count; j++) {
+                    if (j == i) continue;
+                    if (g_aliens[j].alive == 1 && g_aliens[j].is_boss &&
+                        g_aliens[j].boss_rank == 0) {
+                        g_aliens[i].pos_x = g_aliens[j].pos_x;
+                        g_aliens[i].pos_y = g_aliens[j].pos_y;
+                        break;
+                    }
+                }
+            } else {
+                boss_move(i, &g_aliens[i]);
+            }
+        } else {
             alien_move(i, &g_aliens[i]);
+        }
         /* Only advance the walk-cycle animation when the alien actually moved.
          * If it is physically blocked (by a wall or another alien) its position
          * stays the same and we do NOT tick the counter, so the sprite freezes
@@ -1792,27 +1925,24 @@ static int find_boss_spawn(int trigger_wx, int trigger_wy,
 /*
  * Trigger the boss encounter for the current level.
  *
- * Mirrors tile_boss_trigger → boss_nbr_N dispatch @ main.asm#L5632-L5742.
+ * Mirrors tile_boss_trigger → boss_nbr_N dispatch @ main.asm#L5632-L5796.
  *
- * (trigger_wx, trigger_wy): world pixel position of the 0x3D tile (unused
- * except as a fallback when no fixed spawn tile is defined for the level).
+ * ASM overview:
+ *   1. tile_boss_trigger (L5632): guards, starts boss music, dispatches on boss_nbr.
+ *   2. boss_nbr_N handler: calls set_all_aliens_to_default, then calls
+ *      patch_boss_door for each alien in the encounter group (3 or 7 aliens).
+ *   3. patch_boss_door (L7418): computes pixel position from map-buffer pointer
+ *      (a3), sets alien speed from struct+32, HP from struct+34.
+ *      pixel_x = (offset%248)*8 + struct+48 (= col*16 + 12)
+ *      pixel_y = (offset/248)*16 + struct+50 (= row*16 +  4)
+ *      The C port stores IFF row/col directly (no 3-row header offset).
  *
- * Boss spawn position — exact ASM method:
- * In the original binary, each boss_nbr_N handler passes a direct pointer
- * into the map ring buffer (cur_map_top) to patch_boss_door as register a3:
- *   boss_nbr_1: lea lbW0619E8, a3    → IFF (row=49, col=104) in L4MA
- *   boss_nbr_2: lea lbW05F7A8, a3    → IFF (row=57, col=107) in L6/L7MA
- *   boss_nbr_3: lea lbW062872, a3    → IFF (row=52, col=103) in LBMA
- *   boss_nbr_4: lea lbW06188C, a3    → IFF (row=46, col=97)  in L9MA
- * patch_boss_door then computes:
- *   offset = a3 − cur_map_top_ptr
- *   col = (offset % 248) / 2,  row = offset / 248  (buffer row = IFF row + 3)
- *   pixel_x = col * 16 + 48(a1)   (48(a1) = 12 for boss types 1-3)
- *   pixel_y = row * 16 + 50(a1)   (50(a1) =  4 for boss types 1-3)
- * The C port has no 3-row header, so buffer_row = IFF_row directly.
- * The per-level spawn tile is stored in LevelDef::boss_spawn_row/col;
- * pixel_x = boss_spawn_col * MAP_TILE_W,  pixel_y = boss_spawn_row * MAP_TILE_H.
- * Ref: patch_boss_door @ main.asm#L7418-L7466; boss_nbr_N @ main.asm#L5664.
+ * Boss group sizes and HP/speed from ASM structs:
+ *   boss_nbr=1 (L5716): 3 aliens — lbW009114(256,4), lbW009154(256,4), lbW009194(256,4)
+ *   boss_nbr=2 (L5744): 3 aliens — lbW009254(256,4), lbW009294(512,4), lbW0092D4(256,4)
+ *   boss_nbr=3 (L5767): 3 aliens — lbW009314(320,4), lbW009354(320,5), lbW009394(320,5)
+ *   boss_nbr=4 (L5664): 7 aliens — lbW009014(64,0 →C:4) ×7
+ * Full spawn table in k_boss_groups[] above.
  */
 
 void alien_boss_trigger(int trigger_wx, int trigger_wy)
@@ -1835,7 +1965,7 @@ void alien_boss_trigger(int trigger_wx, int trigger_wy)
 
     /* Guard: boss already active or level has no boss. */
     if (g_boss_active) return;
-    if (g_boss_nbr == 0) return;
+    if (g_boss_nbr == 0 || g_boss_nbr > MAX_BOSS_NBR) return;
 
     /*
      * Switch to boss music and play the "danger" voice sample.
@@ -1856,28 +1986,52 @@ void alien_boss_trigger(int trigger_wx, int trigger_wy)
     }
 
     /*
-     * Compute the boss spawn position from the map tile stored in LevelDef.
-     * This mirrors the ASM exactly: the pointer lbW0619E8/etc. in the map
-     * buffer encodes (row, col) → pixel = tile × tile_size.
-     * Fall back to find_boss_spawn() only for levels without a fixed tile.
+     * Spawn the full boss encounter group for this level's boss_nbr.
+     *
+     * Each alien in the group is defined by k_boss_groups[g_boss_nbr].
+     * Positions come from the IFF row/col stored in each BossSpawnDef (derived
+     * from the ASM map-buffer pointer lbWxxxxxx passed to patch_boss_door).
+     * HP and speed override the defaults set by spawn_alien_at().
+     * boss_rank=0: primary boss (AI lbC009CE2 → boss_move());
+     * boss_rank>0: secondary/turret (AI lbC009C68 → follows primary each frame).
+     *
+     * Fallback: if no k_boss_groups entry exists (boss_nbr out of range or
+     * row/col = -1 via LevelDef), use find_boss_spawn().
+     * Ref: patch_boss_door @ main.asm#L7418; boss_nbr_N @ main.asm#L5664.
      */
-    int boss_wx, boss_wy;
-    const LevelDef *def = &k_level_defs[g_cur_level];
-    if (def->boss_spawn_row >= 0 && def->boss_spawn_col >= 0) {
-        boss_wx = def->boss_spawn_col * MAP_TILE_W;
-        boss_wy = def->boss_spawn_row * MAP_TILE_H;
-    } else {
-        find_boss_spawn(trigger_wx, trigger_wy, &boss_wx, &boss_wy);
-    }
+    const BossGroup *grp = &k_boss_groups[g_boss_nbr];
 
-    /* Spawn the main boss alien (index 0 in the encounter group).
-     * This corresponds to alien1_struct using type struct lbW009114/etc.
-     * Ref: boss_nbr_1: lea alien1_struct/lea lbW009114/bsr patch_boss_door
-     *      @ main.asm#L5727-L5730. */
-    spawn_alien_at(boss_wx, boss_wy,
-                   1,   /* alien_type = 1 (boss type struct index) */
-                   0,   /* is_facehugger = 0 */
-                   1);  /* is_boss = 1 */
+    if (grp->count > 0) {
+        for (int k = 0; k < grp->count; k++) {
+            const BossSpawnDef *def = &grp->defs[k];
+            int wx = def->col * MAP_TILE_W;
+            int wy = def->row * MAP_TILE_H;
+            /* Clamp to map bounds — safety net for secondary positions that may
+             * be slightly outside the C map (e.g. boss_nbr_2 fallback). */
+            if (wx < 0) wx = 0;
+            if (wy < 0) wy = 0;
+            if (wx > (MAP_COLS - 1) * MAP_TILE_W) wx = (MAP_COLS - 1) * MAP_TILE_W;
+            if (wy > (MAP_ROWS - 1) * MAP_TILE_H) wy = (MAP_ROWS - 1) * MAP_TILE_H;
+            int idx = spawn_alien_at(wx, wy, 1, 0, 1);
+            if (idx >= 0) {
+                /* Override defaults with per-struct HP and speed from k_boss_groups. */
+                g_aliens[idx].strength  = (WORD)(def->hp + g_global_aliens_extra_strength);
+                g_aliens[idx].speed     = def->speed;
+                g_aliens[idx].boss_rank = def->boss_rank;
+            }
+        }
+    } else {
+        /* Fallback for unconfigured levels: spawn one boss at find_boss_spawn(). */
+        int bx, by;
+        const LevelDef *ld = &k_level_defs[g_cur_level];
+        if (ld->boss_spawn_row >= 0 && ld->boss_spawn_col >= 0) {
+            bx = ld->boss_spawn_col * MAP_TILE_W;
+            by = ld->boss_spawn_row * MAP_TILE_H;
+        } else {
+            find_boss_spawn(trigger_wx, trigger_wy, &bx, &by);
+        }
+        spawn_alien_at(bx, by, 1, 0, 1);
+    }
 
     /* Mark boss encounter as active.
      * Mirrors: move.w #1,lbW0004EA @ main.asm#L5740. */
@@ -1898,19 +2052,22 @@ void alien_kill(int i)
     /*
      * Boss death handling — mirrors lbC009F62 @ main.asm#L6991.
      *
-     * When the main boss (is_boss=1) is killed:
+     * Only the PRIMARY boss (boss_rank=0) triggers the full boss-death sequence:
      *   1. Clear g_boss_active (clr.w lbW0004EA @ main.asm#L6993).
      *   2. Kill all remaining companion boss aliens so they don't linger.
-     *   3. boss_nbr=1: self-destruct is triggered by the boss AI checking
-     *      `56(a0)` in lbC009CE2 (move.w #1,self_destruct_initiated @ main.asm#L6818).
-     *      For simplicity in the C port we trigger it directly here.
-     *   4. boss_nbr=2 or 3: also trigger self-destruct (lbC00A0EE / lbC00A1BA
-     *      @ main.asm#L7049-L7067 set self_destruct_initiated=1).
-     *   5. boss_nbr=4: no self-destruct, exit is handled elsewhere.
+     *   3. boss_nbr=1: self-destruct triggered by AI lbC009CE2 (L6818).
+     *   4. boss_nbr=2 or 3: self-destruct via lbC00A0EE/lbC00A1BA (L7049/L7067).
+     *   5. boss_nbr=4: no self-destruct; exit is handled via lbW0004EE elsewhere.
+     *
+     * Secondary bosses (boss_rank>0, AI lbC009C68) have no death handler —
+     * they just disappear.  Self-destruct is NOT triggered when they die.
+     * Ref: lbC009C68 @ main.asm#L6777 (no branch to lbC009F62).
      */
-    if (g_aliens[i].is_boss) {
+    if (g_aliens[i].is_boss && g_aliens[i].boss_rank == 0) {
         g_boss_active = 0;
-        /* Kill companion boss aliens (alien2, alien3 equivalents). */
+        /* Kill all companion boss aliens (secondary turrets, other primaries).
+         * Mirrors: companions deactivated as a side-effect of the boss-death
+         * sequence (the game state that drives them is cleared). */
         for (int j = 0; j < g_alien_count; j++) {
             if (j == i) continue;
             if (g_aliens[j].alive == 1 && g_aliens[j].is_boss) {

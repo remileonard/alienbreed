@@ -59,6 +59,19 @@ typedef struct {
      * Ref: tile_boss_trigger @ main.asm#L5632; boss_nbr_1..4 handlers;
      *      alien_boss_trigger() for C spawning. */
     int   is_boss;
+    /*
+     * Rank within the boss encounter group spawned by alien_boss_trigger():
+     *   0 = primary boss (alien1_struct in ASM — AI lbC009CE2 or lbC009AFC).
+     *       Killing this alien resets g_boss_active and triggers the level
+     *       self-destruct for boss_nbr 1-3 (mirrors lbC009F62 / lbC00A0EE /
+     *       lbC00A1BA @ main.asm#L6991 / L7049 / L7067).
+     *   1+ = secondary / turret alias (alien2_struct/alien3_struct in ASM —
+     *        AI lbC009C68 @ main.asm#L6777).  These track the primary boss
+     *        position every frame (lbC009C68 copies alien1_struct.pos_x/y).
+     *        Their death does NOT trigger self-destruct.
+     * Always 0 for non-boss aliens (is_boss=0).
+     */
+    int   boss_rank;
     /* Pathfinding state */
     int   target_x, target_y;
     /*
@@ -119,19 +132,25 @@ void alien_kill(int i);
 /*
  * Trigger the boss encounter for the current level.
  * Called when a player steps on TILE_BOSS_TRIGGER (0x3D).
- * Mirrors tile_boss_trigger → boss_nbr_1..4 @ main.asm#L5632-L5742.
+ * Mirrors tile_boss_trigger → boss_nbr_1..4 @ main.asm#L5632-L5796.
  *
  * (trigger_wx, trigger_wy): world pixel position of the 0x3D tile.
  *
  * Actions (per ASM):
- *   1. Guard: do nothing if g_boss_active is already 1.
- *   2. Switch music to boss_tune (audio_play_music("boss")).
- *   3. Play VOICE_DANGER sample.
- *   4. Kill all currently living non-boss aliens (set_all_aliens_to_default).
- *   5. Spawn boss alien(s) near the trigger tile.
- *   6. Set g_boss_active = 1.
+ *   1. Erase all TILE_BOSS_TRIGGER tiles from the map.
+ *   2. Guard: do nothing if g_boss_active is already 1.
+ *   3. Switch music to boss_tune (audio_play_music("boss")).
+ *   4. Play VOICE_DANGER sample.
+ *   5. Kill all currently living non-boss aliens (set_all_aliens_to_default).
+ *   6. Spawn the full boss group for g_boss_nbr (3 or 7 aliens) from
+ *      k_boss_groups[], each with per-struct HP, speed, and boss_rank.
+ *   7. Set g_boss_active = 1.
  *
- * Ref: tile_boss_trigger / boss_nbr_1 @ main.asm#L5632,L5716.
+ * Boss groups (from k_boss_groups in alien.c):
+ *   boss_nbr=1 (L5716): 3 aliens (lbW009114/lbW009154/lbW009194)
+ *   boss_nbr=2 (L5744): 3 aliens (lbW009254/lbW009294/lbW0092D4)
+ *   boss_nbr=3 (L5767): 3 aliens (lbW009314/lbW009354/lbW009394)
+ *   boss_nbr=4 (L5664): 7 patrol aliens (lbW009014 ×7)
  */
 void alien_boss_trigger(int trigger_wx, int trigger_wy);
 
