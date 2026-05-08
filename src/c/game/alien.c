@@ -31,6 +31,24 @@ static int s_cached_player_alive[MAX_PLAYERS];
 static int s_target_refresh_countdown = 0;
 
 /*
+ * Boss retreat state — mirrors lbW009C62 (countdown) and lbL009C64 (flag).
+ *
+ * lbW009C62: retreat countdown.  Loaded with 40 by the random trigger
+ *   (rand(300) < 2).  Decremented each frame while > 0.  When it hits 0
+ *   the "permanent retreat if player alive" path (lbC009D80-lbC009D98) runs.
+ *
+ * lbL009C64: retreat direction flag.
+ *   0 = chase (move TOWARD player) — only active when both players are dead.
+ *   1 = retreat (move AWAY from player) — active whenever any player is alive.
+ *   When retreating the boss moves without the ±4 px near-player threshold
+ *   used in chase mode (mirrors the lbC009EB2/lbC009EFC inversion paths).
+ *
+ * Ref: lbC009CE2 @ main.asm#L6811-L6853.
+ */
+static int s_boss_retreat_countdown = 0;
+static int s_boss_retreat_flag      = 0;
+
+/*
  * Per-class alien combat stats — sourced directly from the spawning data
  * structs in main.asm.
  *
@@ -606,6 +624,8 @@ void alien_init_variables(void)
     g_alien_count = 0;
     s_spawn_count = 0;
     s_target_refresh_countdown = 0;
+    s_boss_retreat_countdown   = 0;
+    s_boss_retreat_flag        = 0;
 }
 
 /*
@@ -1276,7 +1296,42 @@ static void boss4_orbit_move(Alien *a)
  */
 static void boss_move(int self_idx, Alien *a)
 {
-    /* 1. Find nearest living player (same as alien_move). */
+    /*
+     * 1. Retreat timer logic — mirrors lbC009CE2 @ main.asm#L6825-L6853.
+     *
+     * Only the primary boss (boss_rank=0) drives the shared retreat state.
+     * Secondary aliases (boss_rank>0) just use whatever state the primary set.
+     *
+     * Each frame when the primary runs:
+     *   a. rand(300) is checked only when the countdown is currently 0.
+     *      If rand < 2 (1/150 chance) → start retreat: flag=1, countdown=40.
+     *   b. If countdown > 0: decrement it.
+     *   c. If countdown == 0 (lbC009D80-lbC009D98): clear flag then re-set to 1
+     *      if any player is alive.  Net result: boss always retreats while any
+     *      player is alive; only chases when both players are dead.
+     */
+    if (a->boss_rank == 0) {
+        if (s_boss_retreat_countdown == 0) {
+            if ((rand() % 300) < 2) {
+                s_boss_retreat_flag      = 1;
+                s_boss_retreat_countdown = 40;
+            }
+        }
+        if (s_boss_retreat_countdown > 0) {
+            s_boss_retreat_countdown--;
+        } else {
+            /* lbC009D80: clear flag; lbC009D98: re-set if any player alive. */
+            s_boss_retreat_flag = 0;
+            for (int i = 0; i < MAX_PLAYERS; i++) {
+                if (s_cached_player_alive[i]) {
+                    s_boss_retreat_flag = 1;
+                    break;
+                }
+            }
+        }
+    }
+
+    /* 2. Find nearest living player (same as alien_move). */
     int tx = -1, ty = -1;
     int best = 0x7FFFFFFF;
     for (int i = 0; i < MAX_PLAYERS; i++) {
@@ -1288,60 +1343,112 @@ static void boss_move(int self_idx, Alien *a)
     }
     if (tx < 0) return;
 
-    /* 2. Apply the ASM target offset: boss aims toward (player_pos − 24, − 104).
-     *    sub.w #24,d4 / sub.w #104,d5 @ main.asm#L6915-L6916.
-     *    This shifts the "seek point" from the player centre into the player's
-     *    body area relative to the boss size. */
+    /* 3. Apply the ASM target offset: boss aims toward (player_pos − 24, − 104).
+     *    sub.w #24,d4 / sub.w #104,d5 @ main.asm#L6915-L6916. */
     tx -= 24;
     ty -= 104;
 
-    int spd     = (int)a->speed;
-    int ax      = (int)a->pos_x;
-    int ay      = (int)a->pos_y;
+    int spd      = (int)a->speed;
+    int ax       = (int)a->pos_x;
+    int ay       = (int)a->pos_y;
     int dir_bits = 0;
 
-    /* 3. X movement using boss-sized probes.
-     *    lbW00A2FA (LEFT):  x=−6, y=−6/4/16 → C: x−54, y−70/−60/−48
-     *    lbW00A306 (RIGHT): x=100, y=−6/4/16 → C: x+52, y−70/−60/−48
-     *    Threshold 4 px mirrors `cmp.w #4,d4` @ main.asm#L6926. */
     int dx = tx - ax;
-    if (dx > 4) {
-        int nx = ax + spd;
-        if (!alien_solid_at(nx + 52, ay - 70) &&
-            !alien_solid_at(nx + 52, ay - 48) &&
-            !alien_solid_at(nx + 52, ay - 60)) {
-            ax = nx;
-            dir_bits |= 4;  /* right */
-        }
-    } else if (dx < -4) {
-        int nx = ax - spd;
-        if (!alien_solid_at(nx - 54, ay - 70) &&
-            !alien_solid_at(nx - 54, ay - 48) &&
-            !alien_solid_at(nx - 54, ay - 60)) {
-            ax = nx;
-            dir_bits |= 8;  /* left */
-        }
-    }
-
-    /* 4. Y movement using boss-sized probes.
-     *    lbW00A312 (UP):   x=4/50/90, y=−10 → C: x−44/+2/+42, y−74
-     *    lbW00A31E (DOWN): x=4/50/90, y=112 → C: x−44/+2/+42, y+48 */
     int dy = ty - ay;
-    if (dy > 4) {
-        int ny = ay + spd;
-        if (!alien_solid_at(ax - 44, ny + 48) &&
-            !alien_solid_at(ax +  2, ny + 48) &&
-            !alien_solid_at(ax + 42, ny + 48)) {
-            ay = ny;
-            dir_bits |= 1;  /* down */
+
+    if (s_boss_retreat_flag) {
+        /*
+         * 4a. RETREAT mode (lbL009C64=1) — boss moves AWAY from player.
+         *     No ±4 px dead-zone: boss moves even when right next to the player.
+         *     Mirrors lbC009EA8/lbC009EB2 (X) and lbC009EF2/lbC009EFC (Y) paths.
+         *
+         *     lbW00A2FA/A306/A312/A31E collision probes remain identical.
+         */
+        /* X: if player is to the right (dx > 0) → go LEFT (away). */
+        if (dx > 0) {
+            int nx = ax - spd;
+            if (!alien_solid_at(nx - 54, ay - 70) &&
+                !alien_solid_at(nx - 54, ay - 48) &&
+                !alien_solid_at(nx - 54, ay - 60)) {
+                ax = nx;
+                dir_bits |= 8;  /* left */
+            }
+        } else if (dx < 0) {
+            /* Player is to the left → go RIGHT (away). */
+            int nx = ax + spd;
+            if (!alien_solid_at(nx + 52, ay - 70) &&
+                !alien_solid_at(nx + 52, ay - 48) &&
+                !alien_solid_at(nx + 52, ay - 60)) {
+                ax = nx;
+                dir_bits |= 4;  /* right */
+            }
         }
-    } else if (dy < -4) {
-        int ny = ay - spd;
-        if (!alien_solid_at(ax - 44, ny - 74) &&
-            !alien_solid_at(ax +  2, ny - 74) &&
-            !alien_solid_at(ax + 42, ny - 74)) {
-            ay = ny;
-            dir_bits |= 2;  /* up */
+
+        /* Y: if player is below (dy > 0) → go UP (away). */
+        if (dy > 0) {
+            int ny = ay - spd;
+            if (!alien_solid_at(ax - 44, ny - 74) &&
+                !alien_solid_at(ax +  2, ny - 74) &&
+                !alien_solid_at(ax + 42, ny - 74)) {
+                ay = ny;
+                dir_bits |= 2;  /* up */
+            }
+        } else if (dy < 0) {
+            /* Player is above → go DOWN (away). */
+            int ny = ay + spd;
+            if (!alien_solid_at(ax - 44, ny + 48) &&
+                !alien_solid_at(ax +  2, ny + 48) &&
+                !alien_solid_at(ax + 42, ny + 48)) {
+                ay = ny;
+                dir_bits |= 1;  /* down */
+            }
+        }
+    } else {
+        /*
+         * 4b. CHASE mode (lbL009C64=0) — boss moves TOWARD player.
+         *     Only active when both players are dead (no player to target,
+         *     so this path is effectively a no-op in practice).
+         *     Threshold 4 px mirrors `cmp.w #4,d4` @ main.asm#L6926.
+         *
+         *     lbW00A2FA (LEFT):  x=−6, y=−6/4/16 → C: x−54, y−70/−60/−48
+         *     lbW00A306 (RIGHT): x=100, y=−6/4/16 → C: x+52, y−70/−60/−48
+         *     lbW00A312 (UP):   x=4/50/90, y=−10  → C: x−44/+2/+42, y−74
+         *     lbW00A31E (DOWN): x=4/50/90, y=112  → C: x−44/+2/+42, y+48
+         */
+        if (dx > 4) {
+            int nx = ax + spd;
+            if (!alien_solid_at(nx + 52, ay - 70) &&
+                !alien_solid_at(nx + 52, ay - 48) &&
+                !alien_solid_at(nx + 52, ay - 60)) {
+                ax = nx;
+                dir_bits |= 4;  /* right */
+            }
+        } else if (dx < -4) {
+            int nx = ax - spd;
+            if (!alien_solid_at(nx - 54, ay - 70) &&
+                !alien_solid_at(nx - 54, ay - 48) &&
+                !alien_solid_at(nx - 54, ay - 60)) {
+                ax = nx;
+                dir_bits |= 8;  /* left */
+            }
+        }
+
+        if (dy > 4) {
+            int ny = ay + spd;
+            if (!alien_solid_at(ax - 44, ny + 48) &&
+                !alien_solid_at(ax +  2, ny + 48) &&
+                !alien_solid_at(ax + 42, ny + 48)) {
+                ay = ny;
+                dir_bits |= 1;  /* down */
+            }
+        } else if (dy < -4) {
+            int ny = ay - spd;
+            if (!alien_solid_at(ax - 44, ny - 74) &&
+                !alien_solid_at(ax +  2, ny - 74) &&
+                !alien_solid_at(ax + 42, ny - 74)) {
+                ay = ny;
+                dir_bits |= 2;  /* up */
+            }
         }
     }
 
@@ -1358,7 +1465,7 @@ static void boss_move(int self_idx, Alien *a)
     if (dir_bits > 0 && dir_bits < 16 && k_dir_table[dir_bits] >= 0)
         a->direction = k_dir_table[dir_bits];
 
-    (void)self_idx;  /* self-overlap check not needed for boss movement */
+    (void)self_idx;
 }
 
 void alien_update_all(void)
