@@ -2341,6 +2341,27 @@ void alien_kill(int i)
                 g_aliens[j].death_frame = 0;
             }
         }
+        /* Open the boss exit passage for boss_nbr=2.
+         * Mirrors: patch_tiles(lbL02087E, lbW060644) @ main.asm#L7046-L7048.
+         *
+         * lbW060644 is at cur_map_top + 7332 bytes → buffer_row=29, col=70.
+         * IFF/C row = buffer_row − 3 border rows = 26, col=70.
+         * lbL02087E patches byte offsets −2 (col−1=69) and 0 (col=70) for two
+         * consecutive rows (row stride = 248 bytes = 1 map row).
+         * lbL01715A/lbL01718A are both dcb.l 12,0 → write tile word 0x0000
+         * (tile_idx=0, attr=0x00 = blank floor).
+         *
+         * In L6MA (level 7): the four tiles have attr=0x00 but non-standard
+         * tile_idx values that render as pipe/duct graphics — a visual fix.
+         * In L7MA (level 8): tile (27,70) has attr=0x01 (wall) — a physical fix.
+         */
+        if (g_boss_nbr == 2) {
+            g_cur_map.tiles[26][69] = 0x0000;
+            g_cur_map.tiles[26][70] = 0x0000;
+            g_cur_map.tiles[27][69] = 0x0000;
+            g_cur_map.tiles[27][70] = 0x0000;
+        }
+
         /* Trigger self-destruct for boss_nbr 1, 2, 3.
          * Ref: move.w #1,self_destruct_initiated @ main.asm#L6818 (nbr1),
          *      L7050 (nbr2), L7067 (nbr3). */
