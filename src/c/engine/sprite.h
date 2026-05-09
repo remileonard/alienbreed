@@ -143,6 +143,28 @@ void sprite_draw_facehugger(int direction, int anim_frame, int x, int y);
  */
 void sprite_draw_boss(int anim_frame, int x, int y);
 
+/*
+ * Draw a boss_nbr=4 reactor-shield satellite crescent at screen position (x, y).
+ *
+ * Used for level 10's 7 orbiting reactor-shield elements.  Unlike boss_nbr 1-3
+ * which use a single large 96×128 sprite, each satellite is a small 32×27 px
+ * crescent shape stored in the LEGACY atlas (L1BO) at y=256 / y=288.
+ *
+ * Layout in the LEGACY atlas (lbW01945E entries 88-103 @ main.asm#L14114-L14129):
+ *   animation frame 0: atlas y = BOSS4_SAT_ATLAS_Y       (256)
+ *   animation frame 1: atlas y = BOSS4_SAT_ATLAS_Y + 32  (288)
+ *   direction column : atlas x = direction * BOSS4_SAT_SPRITE_W
+ *
+ * direction : 0-7 compass (N=0, NE=1, E=2, SE=3, S=4, SW=5, W=6, NW=7).
+ * anim_frame: 0 or 1 (cycles independently of direction).
+ * (x, y)   : screen centre of the satellite.
+ *
+ * In the Amiga original the satellite was rendered via hardware sprites
+ * (copper list SPR2/SPR3 attached pair); the C port reads it from the atlas.
+ * Ref: lbC009AFC @ main.asm#L6640 (satellite AI, copper-list position write).
+ */
+void sprite_draw_boss4_satellite(int direction, int anim_frame, int x, int y);
+
 /* Total number of player sprites available (both players, 1-based in game = 1-80) */
 #define PLAYER_SPRITE_TOTAL 80
 

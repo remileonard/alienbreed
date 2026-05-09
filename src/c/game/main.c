@@ -349,20 +349,33 @@ void level_game_loop_external(void)
                         }
 
                         if (g_aliens[i].is_boss) {
-                            /* Boss: 96×128 sprite, no hatch animation, no alt-walk
-                             * (boss uses palette flash instead — handled in AI).
-                             * Walk frame clamped to [0, BOSS_WALK_FRAMES-1].
-                             * Ref: lbL0095CC / lbW019A8E entries 80-82 @ main.asm.
+                            /* Boss: no hatch animation.
                              *
                              * Only the PRIMARY boss (boss_rank==0) has a visible sprite.
                              * Secondary/turret aliens (boss_rank>0) have a null BOB table
                              * pointer in the ASM structs (lbW009154/9194/9294/92D4/9354/
                              * 9394), making them invisible — they are extra HP hit-zones
                              * that ride on top of the primary's sprite.
-                             * Ref: lbW009154 offset 12 = dc.w 0,0,... @ main.asm#L6077. */
+                             * Ref: lbW009154 offset 12 = dc.w 0,0,... @ main.asm#L6077.
+                             *
+                             * boss_nbr 1/2/3 → large 96×128 creature (lbW019A8E entries
+                             * 80-82, y=256 in COMPACT atlas, 3 walk frames horizontal).
+                             *
+                             * boss_nbr 4 → seven reactor-shield satellite crescents.
+                             * Each satellite is a 32×27 px crescent drawn from the LEGACY
+                             * atlas (L1BO) at y=256 (frame 0) or y=288 (frame 1),
+                             * column = direction * 32 (8 compass directions).
+                             * Ref: lbW01945E entries 88-103 @ main.asm#L14114-L14129;
+                             * satellite AI lbC009AFC @ main.asm#L6640. */
                             if (g_aliens[i].boss_rank == 0) {
-                                int boss_frame = (anim_frame < BOSS_WALK_FRAMES) ? anim_frame : 0;
-                                sprite_draw_boss(boss_frame, sx, sy);
+                                if (g_boss_nbr == 4) {
+                                    int sat_frame = (g_aliens[i].anim_counter / 2) % BOSS4_SAT_FRAMES;
+                                    sprite_draw_boss4_satellite(g_aliens[i].direction,
+                                                               sat_frame, sx, sy);
+                                } else {
+                                    int boss_frame = (anim_frame < BOSS_WALK_FRAMES) ? anim_frame : 0;
+                                    sprite_draw_boss(boss_frame, sx, sy);
+                                }
                             }
                         } else if (g_aliens[i].hatch_timer > HATCH_ANIM_WALK_THRESHOLD) {
                             int hf = (HATCH_ANIM_TIMER_INIT - g_aliens[i].hatch_timer) / 2;

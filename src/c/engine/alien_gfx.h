@@ -131,7 +131,7 @@
 #define ALIEN_DEATH_ROW2_Y     224  /* second row y = 0xE0; 6 frames */
 
 /*
- * Boss alien (is_boss=1) sprite atlas layout.
+ * Boss alien (is_boss=1) sprite atlas layout — boss_nbr 1/2/3 (large creature).
  *
  * The Amiga game renders boss aliens using hardware sprites (copper list), not
  * BOBs — the BOB animation list (lbL0095CC) contains all-zero entries
@@ -159,6 +159,30 @@
 #define BOSS_SPRITE_H          128   /* pixels tall  (= 0x80) */
 #define BOSS_ATLAS_Y           256   /* y of the boss sprite row in atlas (= 0x100) */
 #define BOSS_WALK_FRAMES         3   /* 3 walk frames per direction (same cycle as normal) */
+
+/*
+ * Boss_nbr=4 satellite (reactor-shield) sprite atlas layout — LEGACY atlas only.
+ *
+ * Level 10 uses the LEGACY atlas (L1BO).  Unlike the large boss creature (which
+ * stores a 96×128 walk sprite at y=256 in COMPACT atlases), the LEGACY atlas
+ * stores 8-directional satellite crescent sprites at y=256 and y=288:
+ *
+ *   y=256 ($100): animation frame 0, 8 directions, x = direction * 32
+ *   y=288 ($120): animation frame 1, 8 directions, x = direction * 32
+ *
+ * Each crescent is 32 × 27 pixels ($20 × $1B).
+ * Ref: lbW01945E entries 88-95 (y=256) and 96-103 (y=288) @ main.asm#L14114-L14129.
+ *
+ * The Amiga game renders these via hardware sprites (copper list, SPR2/SPR3 pair).
+ * In the C port they are read directly from the decoded LEGACY atlas.
+ * The satellite AI (lbC009AFC) computes 16 direction sub-steps; the C port maps
+ * this to 8 compass directions via boss4_orbit_move() in alien.c.
+ */
+#define BOSS4_SAT_SPRITE_W      32   /* pixels wide  (= ALIEN_SPRITE_W = 0x20) */
+#define BOSS4_SAT_SPRITE_H      27   /* pixels tall  (= 0x1B) */
+#define BOSS4_SAT_ATLAS_Y      256   /* y of first satellite frame row (= 0x100) */
+#define BOSS4_SAT_FRAME_STRIDE  32   /* y-stride between animation frames */
+#define BOSS4_SAT_FRAMES         2   /* 2 animation frames (y=256 and y=288) */
 
 /*
  * Load the BO file at path, decode 5 sequential bitplanes to an indexed-color
