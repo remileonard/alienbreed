@@ -2344,22 +2344,32 @@ void alien_kill(int i)
         /* Open the boss exit passage for boss_nbr=2.
          * Mirrors: patch_tiles(lbL02087E, lbW060644) @ main.asm#L7046-L7048.
          *
-         * lbW060644 is at cur_map_top + 7332 bytes → buffer_row=29, col=70.
-         * IFF/C row = buffer_row − 3 border rows = 26, col=70.
-         * lbL02087E patches byte offsets −2 (col−1=69) and 0 (col=70) for two
-         * consecutive rows (row stride = 248 bytes = 1 map row).
-         * lbL01715A/lbL01718A are both dcb.l 12,0 → write tile word 0x0000
-         * (tile_idx=0, attr=0x00 = blank floor).
+         * The ASM patches lbW060644 (buffer_row=29, col=70 from cur_map_top)
+         * and the adjacent tile (col=69) for two consecutive rows using the
+         * lbL02087E table (lbL01715A/lbL01718A: dcb.l 12,0 → write 0x0000).
          *
-         * In L6MA (level 7): the four tiles have attr=0x00 but non-standard
-         * tile_idx values that render as pipe/duct graphics — a visual fix.
-         * In L7MA (level 8): tile (27,70) has attr=0x01 (wall) — a physical fix.
+         * In L6MA (level 7, g_cur_level==6): the boss exit door is a vertical
+         * wall of four solid tiles (0x0581, attr=0x01) at col=68, rows 17-20.
+         * These are the "different-looking" tiles observed in-game at
+         * x:68 y:17, x:68 y:18, x:68 y:19, x:68 y:20.
+         *
+         * In L7MA (level 8, g_cur_level==7): the blocking tile is at (27,70)
+         * (0x16C1, attr=0x01). Tiles (26,69-70) and (27,69) are already floor.
          */
         if (g_boss_nbr == 2) {
-            g_cur_map.tiles[26][69] = 0x0000;
-            g_cur_map.tiles[26][70] = 0x0000;
-            g_cur_map.tiles[27][69] = 0x0000;
-            g_cur_map.tiles[27][70] = 0x0000;
+            if (g_cur_level == 6) {
+                /* Level 7 (L6MA): clear the four solid wall tiles at col=68 */
+                g_cur_map.tiles[17][68] = 0x0000;
+                g_cur_map.tiles[18][68] = 0x0000;
+                g_cur_map.tiles[19][68] = 0x0000;
+                g_cur_map.tiles[20][68] = 0x0000;
+            } else {
+                /* Level 8 (L7MA): tile (27,70) is solid; others already floor */
+                g_cur_map.tiles[26][69] = 0x0000;
+                g_cur_map.tiles[26][70] = 0x0000;
+                g_cur_map.tiles[27][69] = 0x0000;
+                g_cur_map.tiles[27][70] = 0x0000;
+            }
         }
 
         /* Trigger self-destruct for boss_nbr 1, 2, 3.
