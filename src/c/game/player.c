@@ -460,14 +460,6 @@ void check_tile_interaction(Player *p)
     pickup_tile_at(p, col, row);
     UBYTE attr = tilemap_attr(&g_cur_map, col, row);
 
-    /* During the self-destruct sequence, all one-way tiles become passable.
-     * Mirrors the pass_thru_walls check at tile_one_way_* / tile_one_deadly_way_*
-     * @ main.asm#L5451-L5846: when pass_thru_walls != 0 the handler just returns
-     * with no push force and no directional kill so the player can reach the exit.
-     * In the C port the equivalent flag is g_self_destruct_initiated. */
-    if (g_self_destruct_initiated && TILE_IS_ONEWAY(attr))
-        return;
-
     /* -----------------------------------------------------------------
      * Non-pickup tile effects: applied at the centre probe position only.
      * ----------------------------------------------------------------- */
@@ -516,10 +508,27 @@ void check_tile_interaction(Player *p)
         break;
 
     case TILE_DESTRUCT_TRIGGER:
-        /* Tile 0x15: start self-destruct sequence (Ref: main.asm#L5500). */
+        /* Tile 0x15: start self-destruct sequence (Ref: main.asm#L5500 / lbC008424).
+         *
+         * For boss_nbr==4 (level 10) the ASM also clears the attribute bits of
+         * three specific wall tiles that block the escape route:
+         *
+         *   and.w  #$FFC0,lbW062366  → (col=79, row=56) attr 0x01→0x00
+         *   and.w  #$FFC0,lbW062368  → (col=80, row=56) attr 0x01→0x00
+         *   and.w  #$FFC0,lbW062460  → (col=80, row=57) attr 0x00      (nop)
+         *
+         * Coordinate derivation: first_row = cur_map_top + 3*124*2 = 0x05EC88;
+         * offset = lbW062366-first_row = 14046; row=14046/248=56, col=(14046%248)/2=79.
+         * Ref: lbC008424 @ main.asm#L5507-L5513.
+         */
         if (!g_self_destruct_initiated) {
             level_start_destruction();
             tilemap_replace_tile(&g_cur_map, col, row);
+            if (g_boss_nbr == 4) {
+                tilemap_replace_tile(&g_cur_map, 79, 56);
+                tilemap_replace_tile(&g_cur_map, 80, 56);
+                tilemap_replace_tile(&g_cur_map, 80, 57);
+            }
         }
         break;
 
