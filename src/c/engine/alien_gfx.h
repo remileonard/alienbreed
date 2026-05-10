@@ -131,6 +131,60 @@
 #define ALIEN_DEATH_ROW2_Y     224  /* second row y = 0xE0; 6 frames */
 
 /*
+ * Boss alien (is_boss=1) sprite atlas layout — boss_nbr 1/2/3 (large creature).
+ *
+ * The Amiga game renders boss aliens using hardware sprites (copper list), not
+ * BOBs — the BOB animation list (lbL0095CC) contains all-zero entries
+ * (dcb.l 12,0) which are invisible in the BOB system.  The actual 96×128 pixel
+ * boss sprite data is stored in the BO atlas at y=256, frames 0-2 laid out
+ * horizontally:
+ *
+ *   Frame 0: x=  0, y=256, w=96, h=128   (lbW019A8E entry 80: $00,$100,$60,$80)
+ *   Frame 1: x= 96, y=256, w=96, h=128   (lbW019A8E entry 81: $60,$100,$60,$80)
+ *   Frame 2: x=192, y=256, w=96, h=128   (lbW019A8E entry 82: $C0,$100,$60,$80)
+ *
+ * Walk animation cycles through frames 0→1→2→1 (same as normal aliens).
+ * In the C port the boss is rendered directly from the BO atlas using these
+ * coordinates.  Center offset: the boss pos_x/pos_y is the CENTRE of the
+ * sprite, so blit at (pos_x - BOSS_SPRITE_W/2, pos_y - BOSS_SPRITE_H/2).
+ *
+ * Collision probe offsets (C centre-based, = ASM offset − half_size):
+ *   RIGHT : nx + (100-48) = nx+52  ;  y probes: ay-70, ay-60, ay-48
+ *   LEFT  : nx + ( -6-48) = nx-54  ;  (same y probes)
+ *   DOWN  : ny + (112-64) = ny+48  ;  x probes: ax-44, ax+2, ax+42
+ *   UP    : ny + (-10-64) = ny-74  ;  (same x probes)
+ * Source: lbW00A2FA/lbW00A306/lbW00A312/lbW00A31E @ main.asm#L7093-L7096.
+ */
+#define BOSS_SPRITE_W           96   /* pixels wide  (= 0x60) */
+#define BOSS_SPRITE_H          128   /* pixels tall  (= 0x80) */
+#define BOSS_ATLAS_Y           256   /* y of the boss sprite row in atlas (= 0x100) */
+#define BOSS_WALK_FRAMES         3   /* 3 walk frames per direction (same cycle as normal) */
+
+/*
+ * Boss_nbr=4 satellite (reactor-shield) sprite atlas layout — LEGACY atlas only.
+ *
+ * Level 10 uses the LEGACY atlas (L1BO).  Unlike the large boss creature (which
+ * stores a 96×128 walk sprite at y=256 in COMPACT atlases), the LEGACY atlas
+ * stores 8-directional satellite crescent sprites at y=256 and y=288:
+ *
+ *   y=256 ($100): animation frame 0, 8 directions, x = direction * 32
+ *   y=288 ($120): animation frame 1, 8 directions, x = direction * 32
+ *
+ * Each crescent is 32 × 27 pixels ($20 × $1B).
+ * Ref: lbW01945E entries 88-95 (y=256) and 96-103 (y=288) @ main.asm#L14114-L14129.
+ *
+ * The Amiga game renders these via hardware sprites (copper list, SPR2/SPR3 pair).
+ * In the C port they are read directly from the decoded LEGACY atlas.
+ * The satellite AI (lbC009AFC) computes 16 direction sub-steps; the C port maps
+ * this to 8 compass directions via boss4_orbit_move() in alien.c.
+ */
+#define BOSS4_SAT_SPRITE_W      32   /* pixels wide  (= ALIEN_SPRITE_W = 0x20) */
+#define BOSS4_SAT_SPRITE_H      27   /* pixels tall  (= 0x1B) */
+#define BOSS4_SAT_ATLAS_Y      256   /* y of first satellite frame row (= 0x100) */
+#define BOSS4_SAT_FRAME_STRIDE  32   /* y-stride between animation frames */
+#define BOSS4_SAT_FRAMES         2   /* 2 animation frames (y=256 and y=288) */
+
+/*
  * Load the BO file at path, decode 5 sequential bitplanes to an indexed-color
  * atlas buffer (320×384 bytes, one byte = color index 0-31).
  * atlas_type: ALIEN_ATLAS_COMPACT or ALIEN_ATLAS_LEGACY.

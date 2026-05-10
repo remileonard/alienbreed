@@ -45,18 +45,33 @@ typedef struct {
      * Ref: lbW009414 / lbL00969C @ main.asm#L6059-L6168; tile dispatch
      * lbC0049D6 (tile 0x29 → lbW008FD4) and lbC004A28 (lbW009414). */
     int   is_facehugger;
-    /* Boss flag — reserved for the dedicated boss issue.
-     * Actual bosses are spawned exclusively by tile_boss_trigger (a separate
-     * tile from tile 0x0A) using dedicated ASM structs with special AI:
-     *   boss_nbr 1 → lbW009114 (AI lbC009CE2, level 5)
-     *   boss_nbr 2 → lbW009254 (AI lbC009CE2, levels 7/8)
-     *   boss_nbr 3 → lbW009374 (level 12)
-     *   boss_nbr 4 → lbW009014 (AI lbC009AFC, level 10)
+    /* Boss flag — set to 1 when this alien is a true boss (not a large regular
+     * alien from tile 0x0A).  Actual bosses are spawned exclusively by
+     * alien_boss_trigger() and use lbC009CE2/lbC009AFC AI, larger collision
+     * probes (96×128 px), and higher HP.
+     *   boss_nbr 1 → lbW009114 (AI lbC009CE2, level 5/index 4)
+     *   boss_nbr 2 → lbW009254 (AI lbC009CE2, levels 7/8/index 6-7)
+     *   boss_nbr 3 → lbW009374 (AI lbC009CE2, level 12/index 11)
+     *   boss_nbr 4 → lbW009014 (AI lbC009AFC, level 10/index 9)
      * The large aliens spawned by tile 0x0A (TILE_FACEHUGGER_HATCH) on
      * non-level-12 levels (lbW008F94 / lbW009094) are regular large aliens
-     * sharing the standard AI (lbC00987E) — they are NOT bosses.
-     * Ref: tile_boss_trigger @ main.asm#L5632, boss_nbr_1..4 handlers. */
+     * sharing the standard AI (lbC00987E) — they are NOT bosses (is_boss=0).
+     * Ref: tile_boss_trigger @ main.asm#L5632; boss_nbr_1..4 handlers;
+     *      alien_boss_trigger() for C spawning. */
     int   is_boss;
+    /*
+     * Rank within the boss encounter group spawned by alien_boss_trigger():
+     *   0 = primary boss (alien1_struct in ASM — AI lbC009CE2 or lbC009AFC).
+     *       Killing this alien resets g_boss_active and triggers the level
+     *       self-destruct for boss_nbr 1-3 (mirrors lbC009F62 / lbC00A0EE /
+     *       lbC00A1BA @ main.asm#L6991 / L7049 / L7067).
+     *   1+ = secondary / turret alias (alien2_struct/alien3_struct in ASM —
+     *        AI lbC009C68 @ main.asm#L6777).  These track the primary boss
+     *        position every frame (lbC009C68 copies alien1_struct.pos_x/y).
+     *        Their death does NOT trigger self-destruct.
+     * Always 0 for non-boss aliens (is_boss=0).
+     */
+    int   boss_rank;
     /* Pathfinding state */
     int   target_x, target_y;
     /*
@@ -84,6 +99,14 @@ typedef struct {
     int   evade_y;
     int   blocked_axis;
     int   stuck_counter;
+    /*
+     * Orbit waypoint index for boss_nbr=4 (level 10 reactor shield elements).
+     * Mirrors the 72(a0) current-waypoint pointer in lbC009AFC @ main.asm#L6640.
+     * Initialised to boss_rank * 9 (evenly spaced around the 62-entry orbit
+     * circle) by alien_boss_trigger(); advanced +1 per frame, wraps at 62→0.
+     * Unused for non boss_nbr=4 aliens.
+     */
+    int   orbit_idx;
 } Alien;
 
 extern Alien g_aliens[MAX_ALIENS];
@@ -113,6 +136,31 @@ void aliens_collisions_with_players(void);
 
 /* Kill an alien at index i (awards score, plays SFX). */
 void alien_kill(int i);
+
+/*
+ * Trigger the boss encounter for the current level.
+ * Called when a player steps on TILE_BOSS_TRIGGER (0x3D).
+ * Mirrors tile_boss_trigger → boss_nbr_1..4 @ main.asm#L5632-L5796.
+ *
+ * (trigger_wx, trigger_wy): world pixel position of the 0x3D tile.
+ *
+ * Actions (per ASM):
+ *   1. Erase all TILE_BOSS_TRIGGER tiles from the map.
+ *   2. Guard: do nothing if g_boss_active is already 1.
+ *   3. Switch music to boss_tune (audio_play_music("boss")).
+ *   4. Play VOICE_DANGER sample.
+ *   5. Kill all currently living non-boss aliens (set_all_aliens_to_default).
+ *   6. Spawn the full boss group for g_boss_nbr (3 or 7 aliens) from
+ *      k_boss_groups[], each with per-struct HP, speed, and boss_rank.
+ *   7. Set g_boss_active = 1.
+ *
+ * Boss groups (from k_boss_groups in alien.c):
+ *   boss_nbr=1 (L5716): 3 aliens (lbW009114/lbW009154/lbW009194)
+ *   boss_nbr=2 (L5744): 3 aliens (lbW009254/lbW009294/lbW0092D4)
+ *   boss_nbr=3 (L5767): 3 aliens (lbW009314/lbW009354/lbW009394)
+ *   boss_nbr=4 (L5664): 7 patrol aliens (lbW009014 ×7)
+ */
+void alien_boss_trigger(int trigger_wx, int trigger_wy);
 
 /*
  * Register a one-shot spawn point at (wx, wy).

@@ -48,6 +48,45 @@ typedef struct {
      * triggered via the normal path).
      */
     int   timer_seconds;
+    /*
+     * Boss number for this level (0 = no boss).
+     * Set by init_level_N in main.asm: `move.w #N,boss_nbr`.
+     *   boss_nbr 1 → lbW009114 (AI lbC009CE2, level 5/index 4)
+     *   boss_nbr 2 → lbW009254 (AI lbC009CE2, levels 7/8/index 6-7)
+     *   boss_nbr 3 → lbW009374 (AI lbC009CE2, level 12/index 11)
+     *   boss_nbr 4 → lbW009014 (AI lbC009AFC, level 10/index 9)
+     * Ref: init_level_5/7/8/10/12 @ main.asm#L1089,1129,1154,1186,1217.
+     */
+    int   boss_nbr;
+    /*
+     * Boss main-body spawn tile in the map (IFF/0-based row and column).
+     * Derived from the map-buffer pointer passed as `a3` to patch_boss_door
+     * in the boss_nbr_N handler (main.asm#L5716-L5713):
+     *
+     *   boss_nbr 1: lbW0619E8  → IFF (row=49, col=104)  [level 5,  L4MA]
+     *   boss_nbr 2: lbW05F7A8  → IFF (row=57, col=107)  [levels 7/8, L6/L7MA]
+     *   boss_nbr 3: lbW062872  → IFF (row=52, col=103)  [level 12, LBMA]
+     *   boss_nbr 4: lbW06188C  → IFF (row=46, col=97)   [level 10, L9MA]
+     *
+     * The pixel position is: x = boss_spawn_col * MAP_TILE_W,
+     *                        y = boss_spawn_row * MAP_TILE_H.
+     * -1 means no fixed spawn position (use find_boss_spawn fallback).
+     *
+     * HOW THE IFF COORDINATES WERE DERIVED:
+     * In the original binary, cur_map_top (the map ring buffer) is at hunk0
+     * offset 0x20830, cur_map_datas at 0x20B18 (= cur_map_top + 3*248).
+     * Each row is 248 bytes wide (120 tile-words + 4 padding words).
+     * `lea lbWxxxxxx, a3` loads a pointer that is a hunk0 self-reference
+     * into this buffer.  The IFF row/col are:
+     *   offset = ptr_value - 0x20830
+     *   buffer_row = offset / 248          (includes the 3 header rows)
+     *   IFF_row    = buffer_row - 3
+     *   IFF_col    = (offset % 248) / 2
+     * The C port has no header rows so IFF coordinates map directly.
+     * Ref: patch_boss_door @ main.asm#L7418; boss_nbr_N @ main.asm#L5664.
+     */
+    int   boss_spawn_row;
+    int   boss_spawn_col;
 } LevelDef;
 
 extern const LevelDef k_level_defs[NUM_LEVELS];
@@ -66,6 +105,7 @@ extern int  g_map_overview_on;
 extern int  g_game_running_flag;
 extern int  g_exit_unlocked;         /* 1 = exit tile is passable (Ref: main.asm#L5189) */
 extern int  g_boss_active;           /* 1 while a boss encounter is in progress */
+extern int  g_boss_nbr;             /* boss_nbr for current level (0=none; mirrors ASM boss_nbr) */
 /* When >= 0, jump to this level index at next level transition (enter_level_N_holocode in main.asm). */
 extern int  g_holocode_jump_level;
 

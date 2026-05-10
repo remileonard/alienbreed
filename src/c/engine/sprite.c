@@ -432,3 +432,57 @@ int sprite_get_player_raw(int idx, const UBYTE **pixels, int *w, int *h)
     *h      = s_player[idx].h;
     return 0;
 }
+
+/* Draw a boss alien walk frame at screen position (x, y).
+ * Boss sprites are 96×128 px, stored at atlas y=256, three frames horizontal:
+ *   Frame 0: x=  0  Frame 1: x= 96  Frame 2: x=192
+ * Walk cycle is 0→1→2→1 (same pattern as normal aliens).
+ * (x, y) is the boss centre; sprite is blitted at (x - 48, y - 64).
+ * Ref: lbW019A8E entries 80-82 @ main.asm#L14240-L14242.
+ * Note: the Amiga original used hardware sprites for boss rendering — the
+ * BOB entries in lbL0095CC / lbL015CEA etc. are all-zero (invisible in BOB
+ * system).  The C port reads the boss sprite directly from the BO atlas. */
+void sprite_draw_boss(int anim_frame, int x, int y)
+{
+    const UBYTE *atlas = alien_gfx_get_atlas();
+    if (!atlas) return;
+
+    if (anim_frame < 0) anim_frame = 0;
+    if (anim_frame >= BOSS_WALK_FRAMES) anim_frame = BOSS_WALK_FRAMES - 1;
+
+    int atlas_x = anim_frame * BOSS_SPRITE_W;
+    int atlas_y = BOSS_ATLAS_Y;
+
+    const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
+    /* (x, y) is the boss centre; blit at top-left offset by half the sprite. */
+    video_blit(src, ALIEN_ATLAS_W,
+               x - BOSS_SPRITE_W / 2, y - BOSS_SPRITE_H / 2,
+               BOSS_SPRITE_W, BOSS_SPRITE_H, 0);
+}
+
+/* Draw a boss_nbr=4 reactor-shield satellite crescent at screen position (x, y).
+ * Satellite sprites are 32×27 px, stored in the LEGACY atlas (L1BO) at:
+ *   atlas_x = direction * BOSS4_SAT_SPRITE_W   (0-7 compass, 0=N through 7=NW)
+ *   atlas_y = BOSS4_SAT_ATLAS_Y + anim_frame * BOSS4_SAT_FRAME_STRIDE
+ *             (frame 0 at y=256, frame 1 at y=288)
+ * Ref: lbW01945E entries 88-103 @ main.asm#L14114-L14129 (LEGACY atlas).
+ * lbC009AFC AI @ main.asm#L6640 (satellite orbit / copper-list position write). */
+void sprite_draw_boss4_satellite(int direction, int anim_frame, int x, int y)
+{
+    const UBYTE *atlas = alien_gfx_get_atlas();
+    if (!atlas) return;
+
+    if (direction  < 0) direction  = 0;
+    if (direction  >= ALIEN_DIR_COUNT) direction  = ALIEN_DIR_COUNT - 1;
+    if (anim_frame < 0) anim_frame = 0;
+    if (anim_frame >= BOSS4_SAT_FRAMES) anim_frame = BOSS4_SAT_FRAMES - 1;
+
+    int atlas_x = direction  * BOSS4_SAT_SPRITE_W;
+    int atlas_y = BOSS4_SAT_ATLAS_Y + anim_frame * BOSS4_SAT_FRAME_STRIDE;
+
+    const UBYTE *src = atlas + (size_t)(atlas_y * ALIEN_ATLAS_W + atlas_x);
+    /* Centre the satellite on its world position. */
+    video_blit(src, ALIEN_ATLAS_W,
+               x - BOSS4_SAT_SPRITE_W / 2, y - BOSS4_SAT_SPRITE_H / 2,
+               BOSS4_SAT_SPRITE_W, BOSS4_SAT_SPRITE_H, 0);
+}

@@ -124,6 +124,47 @@ void sprite_draw_alien_hatch(int hatch_frame, int x, int y);
  */
 void sprite_draw_facehugger(int direction, int anim_frame, int x, int y);
 
+/*
+ * Draw a boss alien sprite at screen position (x, y).
+ *
+ * The boss is a large 96×128 px creature stored in the BO atlas at y=256.
+ * Three walk frames are laid out horizontally:
+ *   Frame 0: atlas x=  0  (lbW019A8E entry 80: $00,$100,$60,$80)
+ *   Frame 1: atlas x= 96  (lbW019A8E entry 81: $60,$100,$60,$80)
+ *   Frame 2: atlas x=192  (lbW019A8E entry 82: $C0,$100,$60,$80)
+ *
+ * anim_frame: 0, 1, or 2 — index into the 3-frame walk cycle (0→1→2→1).
+ * (x, y)    : screen position of the boss centre.
+ *
+ * In the Amiga original the boss was rendered via hardware sprites (copper
+ * list), not BOBs — the BOB entries for boss aliens are all-zero (invisible).
+ * This function draws the boss directly from the BO atlas.
+ * Ref: lbW019A8E entries 80-82 @ main.asm#L14240-L14242.
+ */
+void sprite_draw_boss(int anim_frame, int x, int y);
+
+/*
+ * Draw a boss_nbr=4 reactor-shield satellite crescent at screen position (x, y).
+ *
+ * Used for level 10's 7 orbiting reactor-shield elements.  Unlike boss_nbr 1-3
+ * which use a single large 96×128 sprite, each satellite is a small 32×27 px
+ * crescent shape stored in the LEGACY atlas (L1BO) at y=256 / y=288.
+ *
+ * Layout in the LEGACY atlas (lbW01945E entries 88-103 @ main.asm#L14114-L14129):
+ *   animation frame 0: atlas y = BOSS4_SAT_ATLAS_Y       (256)
+ *   animation frame 1: atlas y = BOSS4_SAT_ATLAS_Y + 32  (288)
+ *   direction column : atlas x = direction * BOSS4_SAT_SPRITE_W
+ *
+ * direction : 0-7 compass (N=0, NE=1, E=2, SE=3, S=4, SW=5, W=6, NW=7).
+ * anim_frame: 0 or 1 (cycles independently of direction).
+ * (x, y)   : screen centre of the satellite.
+ *
+ * In the Amiga original the satellite was rendered via hardware sprites
+ * (copper list SPR2/SPR3 attached pair); the C port reads it from the atlas.
+ * Ref: lbC009AFC @ main.asm#L6640 (satellite AI, copper-list position write).
+ */
+void sprite_draw_boss4_satellite(int direction, int anim_frame, int x, int y);
+
 /* Total number of player sprites available (both players, 1-based in game = 1-80) */
 #define PLAYER_SPRITE_TOTAL 80
 
