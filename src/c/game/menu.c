@@ -643,11 +643,14 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
                     if (flash_idx >= FLASH_TABLE_LEN) flash_idx = 0;
                 }
                 {
-                    /* flash_table values are grey (r=g=b); extract brightness 0-15.
-                     * Neutral point is 7 (≈0x777).  delta = brightness - 7 shifts
-                     * all channels up (brighter) or down (darker) together. */
-                    int brightness = (k_flash_table[flash_idx] >> 8) & 0xF;
-                    int delta      = brightness - 7;
+                    /* k_flash_table entries are all grey (R=G=B), e.g. 0x444..0xAAA.
+                     * Average all three channels for robustness in case any entry
+                     * ever becomes non-grey.  Neutral = 7 (≈0x777); delta shifts
+                     * every channel of every palette entry up (brighter) or down
+                     * (darker) by the same amount, preserving anti-aliasing. */
+                    UWORD fv  = k_flash_table[flash_idx];
+                    int   avg = (((fv >> 8) & 0xF) + ((fv >> 4) & 0xF) + (fv & 0xF)) / 3;
+                    int   delta = avg - 7;
                     for (int j = 0; j < 8; j++) {
                         UWORD base = k_palette_menu[j];
                         int r = ((base >> 8) & 0xF) + delta;
@@ -666,7 +669,10 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
                     TextCtx ctx;
                     /* Selected item uses palette slots 32-39 (brightness-shifted
                      * copy of k_palette_menu) to flash while preserving all shades.
-                     * Non-selected items use the normal slots 16-23. */
+                     * Non-selected items use the normal slots 16-23.
+                     * x=84: text_menu dc.w 16,112 + display_text add.w #68,d0 → 84.
+                     * (The earlier fill_rect used 68 which was wrong; 84 corrects
+                     * the text X-position to match the original assembly.) */
                     int coff = (i == cur_item) ? 32 : 16;
                     typewriter_init_ctx(&ctx, &font, g_framebuffer, 320, 84, item_y);
                     ctx.color_offset = coff;
