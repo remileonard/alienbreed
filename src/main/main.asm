@@ -180,14 +180,14 @@ lev5irq:            movem.l  d0-d7/a0-a6,-(sp)
 
 ; -----------------------------------------------------
 
-lbW0003A2:          dc.w     1
+music_master_disable:          dc.w     1
 music_enabled:      dc.w     0
-lbW0004B2:          dc.w     0
+render_ready_flag:          dc.w     0
 lbW0004B4:          dc.w     0
 frame_flipflop:     dc.w     0
 old_intena:         dc.w     0
-lbW0004BA:          dc.w     0
-lbW0004BC:          dc.w     0
+game_tick_ready:    dc.w     0
+vbl_sub_counter:          dc.w     0
 old_lev3irq:        dc.l     0
 game_running_flag:  dc.w     0
 lbW0004C4:          dc.w     0
@@ -195,16 +195,16 @@ run_intex_ptr:      dc.l     0
 in_intex_map_flag:  dc.w     0
 player_using_intex: dc.l     0
 lbW0004D6:          dc.w     8
-lbW0004D8:          dc.w     0,1,0
+self_destruct_trigger:          dc.w     0,1,0
 audio_dmacon:       dc.w     0
 lbW0004E0:          dc.w     0
 lbW0004E2:          dc.w     0
 lbW0004E4:          dc.w     0
-lbW0004E6:          dc.w     0
+fire_door_activated:          dc.w     0
 map_overview_on:    dc.w     0
-lbW0004EA:          dc.w     0
+boss_active_flag:          dc.w     0
 select_speed_boss:  dc.w     0
-lbW0004EE:          dc.w     0
+boss4_active_flag:          dc.w     0
 share_credits:      dc.w     0
 input_enabled:      dc.w     0
 done_holocode_jump: dc.w     0
@@ -321,9 +321,9 @@ level_2:            move.l   #level_2,cur_level
                     jsr      init_aliens_variables
                     bsr      finalize_level
                     bsr      game_level_loop
-                    clr.w    lbW002AC0
+                    clr.w    alarm_buttons_pressed
                     clr.l    lbL00E756
-                    move.w   #0,lbW002AC2
+                    move.w   #0,alarm_system_active
                     jsr      jump_to_level
 
                     ; level 4
@@ -520,8 +520,8 @@ run_end:            jsr      stop_sound
 
 game_level_loop:    jsr      destruction_sequence
                     move.w   #1,game_running_flag
-                    clr.w    lbW0004BA
-lbC000E0E:          tst.w    lbW0004BA
+                    clr.w    game_tick_ready
+lbC000E0E:          tst.w    game_tick_ready
                     beq.b    lbC000E0E
                     bsr      lbC003EFC
                     jsr      lbC00ACE4
@@ -529,19 +529,19 @@ lbC000E0E:          tst.w    lbW0004BA
                     jsr      lbC0097F6
                     cmp.b    #7,timer_digit_lo
                     bne.b    lbC000E56
-                    subq.w   #1,lbW002E04
+                    subq.w   #1,lvl9_auto_destruct_counter
                     bne.b    lbC000E56
-                    move.w   #1,lbW0004D8
+                    move.w   #1,self_destruct_trigger
                     move.w   #1,self_destruct_initiated
-lbC000E56:          tst.w    lbW002AC2
+lbC000E56:          tst.w    alarm_system_active
                     beq.b    lbC000E8C
-                    cmp.w    #3,lbW002AC0
+                    cmp.w    #3,alarm_buttons_pressed
                     bmi.b    lbC000E8C
-                    move.w   #1,lbW0004D8
+                    move.w   #1,self_destruct_trigger
                     move.w   #1,self_destruct_initiated
-                    clr.w    lbW002AC2
+                    clr.w    alarm_system_active
                     clr.l    lbL00E756
-                    clr.w    lbW002AC0
+                    clr.w    alarm_buttons_pressed
 lbC000E8C:          jsr      aliens_collisions_with_weapons
                     jsr      aliens_collisions_with_players
                     jsr      lbC00E8F0
@@ -551,7 +551,7 @@ lbC000E8C:          jsr      aliens_collisions_with_weapons
                     jsr      lbC00D17E
                     jsr      print_more_6_keys_sign
                     bsr      lbC006C7A
-                    move.w   #1,lbW0004B2
+                    move.w   #1,render_ready_flag
                     tst.w    flag_jump_to_gameover+2
                     bne      trigger_game_over
 
@@ -750,18 +750,18 @@ reset_game_variables:
                     clr.w    reactor_right_done
                     clr.w    exit_unlocked
                     clr.w    boss_nbr
-                    lea      lbL00D29A,a0
+                    lea      alien_spawn_queue_an,a0
                     clr.l    (a0)+
                     clr.l    (a0)+
                     clr.l    (a0)+
                     clr.l    (a0)+
-                    lea      lbL00D2AA,a0
+                    lea      alien_spawn_queue_bo,a0
                     clr.l    (a0)+
                     clr.l    (a0)+
                     clr.l    (a0)+
                     clr.l    (a0)+
-                    clr.w    lbW002AC0
-                    clr.w    lbW002AC2
+                    clr.w    alarm_buttons_pressed
+                    clr.w    alarm_system_active
                     clr.l    lbL00E756
                     clr.l    cur_credits
                     clr.l    aliens_killed
@@ -824,7 +824,7 @@ lbC0014E8:          moveq    #1,d0
                     move.b   d0,player_2_input
                     tst.w    in_intex_map_flag
                     bne      lbC001518
-                    cmp.w    #1,lbW0004BC
+                    cmp.w    #1,vbl_sub_counter
                     bne.b    lbC00152C
 lbC001518:          jsr      keyboard_handler
                     jsr      retrieve_holocode_by_keyboard
@@ -862,16 +862,16 @@ count_elapsed_seconds:
                     tst.w    lbW023E9C
                     beq.b    lbC0015F2
                     subq.w   #1,lbW023E9C
-lbC0015F2:          tst.w    lbW0003A2
+lbC0015F2:          tst.w    music_master_disable
                     bne.b    lbC00160A
                     tst.w    frame_flipflop
                     beq.b    lbC00160A
                     jsr      lbC00EE2E
-lbC00160A:          addq.w   #1,lbW0004BC
-                    cmp.w    #2,lbW0004BC
+lbC00160A:          addq.w   #1,vbl_sub_counter
+                    cmp.w    #2,vbl_sub_counter
                     bmi.b    lbC001640
-                    clr.w    lbW0004BC
-                    move.w   #1,lbW0004BA
+                    clr.w    vbl_sub_counter
+                    move.w   #1,game_tick_ready
                     tst.w    music_enabled
                     bne.b    lbC00163E
                     jsr      trigger_sample_from_struct
@@ -1036,7 +1036,7 @@ init_level_1:       move.w   #1,exit_unlocked
 
 init_level_2:       clr.w    exit_unlocked
                     clr.w    select_speed_boss
-                    clr.w    lbW0004EA
+                    clr.w    boss_active_flag
                     move.w   #20,lbW0005AA
                     clr.l    level_flag
                     move.b   #6,timer_digit_hi
@@ -1049,13 +1049,13 @@ init_level_2:       clr.w    exit_unlocked
                     jsr      search_starting_position
                     bra      set_players_starting_pos
 
-init_level_3:       clr.w    lbW002AC0
-                    move.w   #1,lbW002AC2
+init_level_3:       clr.w    alarm_buttons_pressed
+                    move.w   #1,alarm_system_active
                     clr.l    lbL00E756
-                    clr.w    lbW0004EE
+                    clr.w    boss4_active_flag
                     clr.w    exit_unlocked
                     clr.w    select_speed_boss
-                    clr.w    lbW0004EA
+                    clr.w    boss_active_flag
                     move.w   #20,lbW0005AA
                     move.l   #512,level_flag
                     move.b   #4,timer_digit_hi
@@ -1063,7 +1063,7 @@ init_level_3:       clr.w    lbW002AC0
                     move.l   #level_palette1,cur_palette_ptr
                     move.l   #lbW01A1A2,lbL000554
                     move.l   #lbW01D21A,lbL000558
-                    clr.w    lbW0004E6
+                    clr.w    fire_door_activated
                     move.l   #500,lbL01FDAA
                     jsr      lbC00EE8A
                     jsr      load_level_3
@@ -1072,7 +1072,7 @@ init_level_3:       clr.w    lbW002AC0
 
 init_level_4:       move.w   #1,exit_unlocked
                     clr.w    select_speed_boss
-                    clr.w    lbW0004EA
+                    clr.w    boss_active_flag
                     move.w   #20,lbW0005AA
                     move.l   #768,level_flag
                     move.b   #9,timer_digit_hi
@@ -1088,7 +1088,7 @@ init_level_4:       move.w   #1,exit_unlocked
 init_level_5:       clr.w    exit_unlocked
                     move.w   #1,boss_nbr
                     clr.w    select_speed_boss
-                    clr.w    lbW0004EA
+                    clr.w    boss_active_flag
                     move.w   #20,lbW0005AA
                     move.l   #768,level_flag
                     move.b   #9,timer_digit_hi
@@ -1103,7 +1103,7 @@ init_level_5:       clr.w    exit_unlocked
 
 init_level_6:       move.w   #1,exit_unlocked                   ; that was silly man
                     clr.w    select_speed_boss
-                    clr.w    lbW0004EA
+                    clr.w    boss_active_flag
                     move.w   #20,lbW0005AA
                     move.l   #512,level_flag
                     sf.b     timer_digit_hi                     ; triggered by the evil 1up
@@ -1128,7 +1128,7 @@ init_level_6:       move.w   #1,exit_unlocked                   ; that was silly
 init_level_7:       clr.w    exit_unlocked
                     move.w   #2,boss_nbr
                     clr.w    select_speed_boss
-                    clr.w    lbW0004EA
+                    clr.w    boss_active_flag
                     move.w   #20,lbW0005AA
                     move.l   #256,level_flag
                     move.b   #9,timer_digit_hi
@@ -1153,7 +1153,7 @@ init_level_7:       clr.w    exit_unlocked
 init_level_8:       move.w   #1,exit_unlocked
                     move.w   #2,boss_nbr                           ; not used i think
                     clr.w    select_speed_boss
-                    clr.w    lbW0004EA
+                    clr.w    boss_active_flag
                     move.w   #20,lbW0005AA
                     move.l   #256,level_flag
                     move.b   #6,timer_digit_hi
@@ -1168,10 +1168,10 @@ init_level_8:       move.w   #1,exit_unlocked
 
 init_level_9:       move.w   #1,exit_unlocked
                     clr.w    select_speed_boss
-                    clr.w    lbW0004EA
+                    clr.w    boss_active_flag
                     move.w   #20,lbW0005AA
                     move.l   #256,level_flag
-                    move.w   #300,lbW002E04
+                    move.w   #300,lvl9_auto_destruct_counter
                     move.b   #7,timer_digit_hi
                     move.b   #7,timer_digit_lo
                     move.l   #level_palette1,cur_palette_ptr
@@ -1185,9 +1185,9 @@ init_level_9:       move.w   #1,exit_unlocked
 init_level_10:      clr.w    exit_unlocked
                     move.w   #4,boss_nbr
                     clr.w    select_speed_boss
-                    clr.w    lbW0004EA
+                    clr.w    boss_active_flag
                     move.w   #20,lbW0005AA
-                    clr.w    lbW0004EE
+                    clr.w    boss4_active_flag
                     clr.l    level_flag
                     move.b   #8,timer_digit_hi
                     sf.b     timer_digit_lo
@@ -1215,10 +1215,10 @@ init_level_11:      move.w   #1,exit_unlocked
 
 init_level_12:      move.w   #DEBUG,map_overview_on
                     move.w   #3,boss_nbr
-                    clr.w    lbW0004EE
+                    clr.w    boss4_active_flag
                     clr.w    exit_unlocked
                     clr.w    select_speed_boss
-                    clr.w    lbW0004EA
+                    clr.w    boss_active_flag
                     move.w   #20,lbW0005AA
                     move.l   #1024,level_flag                        ; map not available
                     move.b   #1,timer_digit_hi
@@ -1226,17 +1226,17 @@ init_level_12:      move.w   #DEBUG,map_overview_on
                     move.l   #level_palette1,cur_palette_ptr
                     move.l   #lbW01A922,lbL000554
                     move.l   #lbW01E1FA,lbL000558
-                    clr.w    lbW0004E6
+                    clr.w    fire_door_activated
                     move.l   #500,lbL01FDAA
                     jsr      lbC00EE8A
                     jsr      load_level_12
                     jsr      search_starting_position
                     bra      set_players_starting_pos
 
-lbW002AC0:          dc.w     0
-lbW002AC2:          dc.w     0
+alarm_buttons_pressed:          dc.w     0
+alarm_system_active:          dc.w     0
 
-lbW002E04:          dc.w     0
+lvl9_auto_destruct_counter:          dc.w     0
 
 jump_to_intex:      tst.l    run_intex_ptr
                     beq      void
@@ -2569,7 +2569,7 @@ lbC0049D6:          tst.w    music_enabled
 
 lbC0049EA:          tst.w    music_enabled
                     bne      void
-                    move.l   #lbW008F94,lbL00D226
+                    move.l   #lbW008F94,next_alien_spawn_struct_ptr
                     bra      lbC00D22A
 
 lbC004A04:          lea      lbW009054(pc),a1
@@ -2578,10 +2578,10 @@ lbC004A04:          lea      lbW009054(pc),a1
 lbC004A0E:          lea      lbW0090D4(pc),a1
                     bra      lbC00A718
 
-lbC004A18:          move.l   #lbW009094,lbL00D226
+lbC004A18:          move.l   #lbW009094,next_alien_spawn_struct_ptr
                     bra      lbC00D22A
 
-lbC004A28:          move.l   #lbW009414,lbL00D226
+lbC004A28:          move.l   #lbW009414,next_alien_spawn_struct_ptr
                     bra      lbC00D22A
 
 lbC004A38:          cmp.w    #2,boss_nbr
@@ -5425,12 +5425,12 @@ tile_facehuggers_hatch:
                     beq      lbC008302
                     rts
 
-lbC0082C0:          move.l   #lbW008F94,lbL00D226
+lbC0082C0:          move.l   #lbW008F94,next_alien_spawn_struct_ptr
                     bra.b    lbC0082D8
 
-lbC0082CE:          move.l   #lbW009094,lbL00D226
+lbC0082CE:          move.l   #lbW009094,next_alien_spawn_struct_ptr
 lbC0082D8:          move.l   a0,-(sp)
-                    lea      lbL00D29A(pc),a0
+                    lea      alien_spawn_queue_an(pc),a0
                     bsr      lbC00D22A
                     move.l   (sp)+,a0
                     move.w   #SAMPLE_HATCHING_ALIEN,sample_to_play
@@ -5438,9 +5438,9 @@ lbC0082D8:          move.l   a0,-(sp)
                     lea      lbL0200F2,a2
                     bra      patch_tiles
 
-lbC008302:          move.l   #lbW009414,lbL00D226
+lbC008302:          move.l   #lbW009414,next_alien_spawn_struct_ptr
                     move.l   a0,-(sp)
-                    lea      lbL00D29A(pc),a0
+                    lea      alien_spawn_queue_an(pc),a0
                     bsr      lbC00D22A
                     move.l   (sp)+,a0
                     move.w   #SAMPLE_HATCHING_ALIEN,sample_to_play
@@ -5490,7 +5490,7 @@ tile_deadly_hole:   tst.w    274(a0)
                     rts
 
 lbC0083DE:          move.w   #1,self_destruct_initiated
-                    move.w   #1,lbW0004D8
+                    move.w   #1,self_destruct_trigger
                     movem.l  d0-d7/a0-a6,-(sp)
                     lea      lbL0201EE,a2
                     bsr      patch_tiles
@@ -5502,9 +5502,9 @@ tile_start_destruction:
                     beq      lbC0083DE
                     cmp.w    #4,boss_nbr
                     beq.b    lbC008424
-                    tst.w    lbW0004EA
+                    tst.w    boss_active_flag
                     bne      void
-lbC008424:          move.w   #1,lbW0004D8
+lbC008424:          move.w   #1,self_destruct_trigger
                     move.w   #1,self_destruct_initiated
                     move.l   #32000,lbL01FDAA
                     and.w    #$FFC0,lbW062366
@@ -5553,11 +5553,11 @@ lbW00853C:          dc.w     0
 
 lbC00853E:          tst.w    lbW007B46
                     beq      void
-                    tst.w    lbW0004E6
+                    tst.w    fire_door_activated
                     bne      void
                     tst.l    level_flag
                     bne      void
-                    move.w   #1,lbW0004E6
+                    move.w   #1,fire_door_activated
                     lea      lbW062296,a3
                     move.l   a3,-(sp)
                     bsr      lbC00AE2E
@@ -5629,9 +5629,9 @@ lbC008654:          tst.w    328(a0)
                     clr.w    PLAYER_HEALTH(a0)
                     rts
 
-tile_boss_trigger:  tst.w    lbW0004D8
+tile_boss_trigger:  tst.w    self_destruct_trigger
                     bne      void
-                    tst.w    lbW0004EA
+                    tst.w    boss_active_flag
                     bne      void
                     move.w   #1,select_speed_boss
                     movem.l  d0-d7/a0-a6,-(sp)
@@ -5661,11 +5661,11 @@ tile_boss_trigger:  tst.w    lbW0004D8
 
 boss_nbr:           dc.w     1
 
-boss_nbr_4:         tst.w    lbW0004D8
+boss_nbr_4:         tst.w    self_destruct_trigger
                     bne      lbC00885C
-                    tst.w    lbW0004EE
+                    tst.w    boss4_active_flag
                     bne      lbC00885C
-                    move.w   #1,lbW0004EE
+                    move.w   #1,boss4_active_flag
                     bsr      set_all_aliens_to_default
                     lea      alien1_struct(pc),a0
                     move.l   #lbW0256B4,72(a0)
@@ -5709,11 +5709,11 @@ boss_nbr_4:         tst.w    lbW0004D8
                     lea      lbW009014(pc),a1
                     lea      lbW0627FC,a3
                     bsr      patch_boss_door
-lbC00885C:          move.w   #1,lbW0004EA
+lbC00885C:          move.w   #1,boss_active_flag
                     movem.l  (sp)+,d0-d7/a0-a6
                     rts
 
-boss_nbr_1:         tst.w    lbW0004D8
+boss_nbr_1:         tst.w    self_destruct_trigger
                     bne.b    lbC0088F0
                     lea      alien1_struct(pc),a0
                     cmp.l    #lbW009114,26(a0)
@@ -5728,7 +5728,7 @@ boss_nbr_1:         tst.w    lbW0004D8
                     lea      lbW009114(pc),a1
                     lea      lbW0619E8,a3
                     bsr      patch_boss_door
-                    clr.w    lbW009C62
+                    clr.w    boss_retreat_countdown
                     lea      alien2_struct(pc),a0
                     lea      lbW009154(pc),a1
                     lea      lbW064204,a3
@@ -5737,11 +5737,11 @@ boss_nbr_1:         tst.w    lbW0004D8
                     lea      lbW009194(pc),a1
                     lea      lbW064204,a3
                     bsr      patch_boss_door
-lbC0088F0:          move.w   #1,lbW0004EA
+lbC0088F0:          move.w   #1,boss_active_flag
                     movem.l  (sp)+,d0-d7/a0-a6
                     rts
 
-boss_nbr_2:         tst.w    lbW0004D8
+boss_nbr_2:         tst.w    self_destruct_trigger
                     bne      lbC008974
                     lea      alien1_struct(pc),a0
                     cmp.l    #lbW009254,26(a0)
@@ -5751,7 +5751,7 @@ boss_nbr_2:         tst.w    lbW0004D8
                     lea      lbW009254(pc),a1
                     lea      lbW05F7A8,a3
                     bsr      patch_boss_door
-                    clr.w    lbW009C62
+                    clr.w    boss_retreat_countdown
                     lea      alien2_struct(pc),a0
                     lea      lbW009294(pc),a1
                     lea      lbW063DB8,a3
@@ -5760,11 +5760,11 @@ boss_nbr_2:         tst.w    lbW0004D8
                     lea      lbW0092D4(pc),a1
                     lea      lbW063DB8,a3
                     bsr      patch_boss_door
-lbC008974:          move.w   #1,lbW0004EA
+lbC008974:          move.w   #1,boss_active_flag
                     movem.l  (sp)+,d0-d7/a0-a6
                     rts
 
-boss_nbr_3:         tst.w    lbW0004D8
+boss_nbr_3:         tst.w    self_destruct_trigger
                     bne.b    lbC008AE0
                     lea      alien1_struct(pc),a0
                     cmp.l    #lbW009254,26(a0)
@@ -5782,7 +5782,7 @@ boss_nbr_3:         tst.w    lbW0004D8
                     lea      lbW009314(pc),a1
                     lea      lbW062872,a3
                     bsr      patch_boss_door
-                    clr.w    lbW009C62
+                    clr.w    boss_retreat_countdown
                     lea      alien2_struct(pc),a0
                     lea      lbW009354(pc),a1
                     lea      lbW062872,a3
@@ -5791,7 +5791,7 @@ boss_nbr_3:         tst.w    lbW0004D8
                     lea      lbW009394(pc),a1
                     lea      lbW062872,a3
                     bsr      patch_boss_door
-lbC008AE0:          move.w   #1,lbW0004EA
+lbC008AE0:          move.w   #1,boss_active_flag
                     movem.l  (sp)+,d0-d7/a0-a6
                     rts
 
@@ -6395,12 +6395,12 @@ lbL00976C:          dc.l     lbL01BE96
 
 lbL0097EA:          dcb.w    4,0
 
-lbW0097F2:          dc.w     20
+alien_target_refresh_rate:          dc.w     20
 lbW0097F4:          dc.w     0
 
 lbC0097F6:          subq.w   #1,lbW0097F4
                     bpl.b    lbC00984A
-                    move.w   lbW0097F2(pc),lbW0097F4
+                    move.w   alien_target_refresh_rate(pc),lbW0097F4
                     move.w   player_1_pos_x(pc),d0
                     move.w   player_1_pos_y(pc),d1
                     tst.w    player_1_alive
@@ -6770,8 +6770,8 @@ lbC009C58:          move.b   #16,d0
                     exg      d1,d0
 lbC009C60:          rts
 
-lbW009C62:          dc.w     0
-lbL009C64:          dc.l     0
+boss_retreat_countdown:          dc.w     0
+boss_retreat_flag:          dc.l     0
 
 ; alien struct in a0
 lbC009C68:          tst.w    8(a0)
@@ -6783,8 +6783,8 @@ lbC009C68:          tst.w    8(a0)
 lbC009C84:          tst.w    52(a0)
                     beq.b    lbC009C9E
                     clr.w    52(a0)
-                    move.w   #1,lbL009C64
-                    move.w   #10,lbW009C62
+                    move.w   #1,boss_retreat_flag
+                    move.w   #10,boss_retreat_countdown
 lbC009C9E:          move.l   26(a0),a1
                     move.l   0(a0),a2
                     clr.l    34(a0)
@@ -6804,8 +6804,8 @@ lbC009C9E:          move.l   26(a0),a1
                     move.l   #$CCC0CCC,(a6)
                     rts
 
-lbW009CDE:          dc.w     0
-lbW009CE0:          dc.w     0
+boss_anim_counter:          dc.w     0
+boss_roar_trigger:          dc.w     0
 
 ; alien struct in a0
 lbC009CE2:          tst.w    lbL008D2E
@@ -6825,32 +6825,32 @@ lbC009CF2:          tst.w    56(a0)
                     movem.l  d0-d7/a0-a6,-(sp)
                     move.l   #300,d0
                     bsr      rand
-                    tst.w    lbW009C62
+                    tst.w    boss_retreat_countdown
                     bne.b    lbC009D50
                     cmp.w    #2,d0
                     bpl.b    lbC009D50
-                    move.w   #1,lbL009C64
-                    move.w   #40,lbW009C62
+                    move.w   #1,boss_retreat_flag
+                    move.w   #40,boss_retreat_countdown
 lbC009D50:          cmp.w    #6,d0
                     bpl.b    lbC009D6C
-                    clr.w    lbW009CE0
+                    clr.w    boss_roar_trigger
                     cmp.w    #3,d0
                     bmi.b    lbC009D6C
-                    move.w   #1,lbW009CE0
+                    move.w   #1,boss_roar_trigger
 lbC009D6C:          movem.l  (sp)+,d0-d7/a0-a6
-                    tst.w    lbW009C62
+                    tst.w    boss_retreat_countdown
                     beq.b    lbC009D80
-                    subq.w   #1,lbW009C62
+                    subq.w   #1,boss_retreat_countdown
                     bra.b    lbC009DA0
 
-lbC009D80:          clr.w    lbL009C64
+lbC009D80:          clr.w    boss_retreat_flag
                     tst.w    lbW005D64
                     bne.b    lbC009D98
                     tst.w    lbW006504
                     bne.b    lbC009D98
                     bra.b    lbC009DA0
 
-lbC009D98:          move.w   #1,lbL009C64
+lbC009D98:          move.w   #1,boss_retreat_flag
 lbC009DA0:          cmp.l    #1024,level_flag
                     bne.b    lbC009DCE
                     move.l   cur_palette_ptr,a5
@@ -6867,13 +6867,13 @@ lbC009DCE:          move.l   cur_palette_ptr,a5
                     beq.b    lbC009E1A
                     clr.w    50(a0)
                     move.w   #$FFF,lbW09A212
-lbC009DEE:          addq.w   #1,lbW009CDE
-                    cmp.w    #6,lbW009CDE
+lbC009DEE:          addq.w   #1,boss_anim_counter
+                    cmp.w    #6,boss_anim_counter
                     bne.b    lbC009E1A
-                    clr.w    lbW009CDE
+                    clr.w    boss_anim_counter
                     ; 55 or 56
                     move.w   #55,d0
-                    add.w    lbW009CE0(pc),d0
+                    add.w    boss_roar_trigger(pc),d0
                     move.w   d0,sample_to_play
                     jsr      trigger_sample
 
@@ -6918,7 +6918,7 @@ lbC009E6A:          movem.w  (sp)+,d6/d7
                     move.w   12(a0),d1
                     sub.w    d6,d4
                     bmi.b    lbC009EA8
-                    tst.w    lbL009C64
+                    tst.w    boss_retreat_flag
                     bne.b    lbC009EB2
 lbC009E8A:          tst.w    d4
                     bpl.b    lbC009E90
@@ -6932,7 +6932,7 @@ lbC009E90:          cmp.w    #4,d4
                     move.w   #4,d0
                     bra.b    lbC009EC2
 
-lbC009EA8:          tst.w    lbL009C64
+lbC009EA8:          tst.w    boss_retreat_flag
                     bne.b    lbC009E8A
 lbC009EB2:          move.w   #256,42(a0)
                     tst.w    d1
@@ -6942,7 +6942,7 @@ lbC009EB2:          move.w   #256,42(a0)
 lbC009EC2:          move.w   14(a0),d1
                     sub.w    d7,d5
                     bmi.b    lbC009EF2
-                    tst.w    lbL009C64
+                    tst.w    boss_retreat_flag
                     bne.b    lbC009EFC
 lbC009ED4:          tst.w    d5
                     bpl.b    lbC009EDA
@@ -6956,7 +6956,7 @@ lbC009EDA:          cmp.w    #4,d5
                     or.w     #1,d0
                     bra.b    lbC009F0E
 
-lbC009EF2:          tst.w    lbL009C64
+lbC009EF2:          tst.w    boss_retreat_flag
                     bne.b    lbC009ED4
 lbC009EFC:          move.w   #256,44(a0)
                     tst.w    d1
@@ -6988,10 +6988,10 @@ lbC009F52:          move.l   18(a0),a5
                     move.l   a6,40(a5)
 lbC009F60:          rts
 
-lbC009F62:          tst.w    lbW0004D8
+lbC009F62:          tst.w    self_destruct_trigger
                     bne      lbC00A5CC
-                    clr.w    lbW0004EA
-                    move.w   #1,lbW0004D8
+                    clr.w    boss_active_flag
+                    move.w   #1,self_destruct_trigger
                     movem.l  d0-d7/a0-a6,-(sp)
                     lea      alien2_struct(pc),a0
                     move.l   0(a0),a2
@@ -7046,7 +7046,7 @@ lbC00A056:          lea      lbL0201C2,a2
 lbC00A0EE:          lea      lbL02087E,a2
                     lea      lbW060644,a3
                     bsr      patch_tiles
-                    move.w   #1,lbW0004D8
+                    move.w   #1,self_destruct_trigger
                     move.w   #1,self_destruct_initiated
                     movem.l  (sp)+,d0-d7/a0-a6
                     bra      lbC00A5CC
@@ -7063,7 +7063,7 @@ lbC00A1BA:          lea      lbL020B52,a2
                     lea      lbL020B0A,a2
                     lea      lbL063DC6,a3
                     bsr      patch_tiles
-                    move.w   #1,lbW0004D8
+                    move.w   #1,self_destruct_trigger
                     move.w   #1,self_destruct_initiated
                     movem.l  (sp)+,d0-d7/a0-a6
                     bra      lbC00A5CC
@@ -7327,7 +7327,7 @@ lbC00A622:          move.l   26(a0),a1
                     rts
 
 set_alien_default_vars:
-                    clr.w    lbW0004EA
+                    clr.w    boss_active_flag
                     move.w   #-1,8(a0)
                     move.w   4(a0),d0
                     move.w   6(a0),d1
@@ -7383,7 +7383,7 @@ play_alien_hatching_sample:
                     dc.w     0
 
 lbC00A718:          clr.w    play_alien_hatching_sample
-                    tst.w    lbW0004B2
+                    tst.w    render_ready_flag
                     beq      lbC00A8D0
                     tst.w    lbL00A6A2
                     beq.b    lbC00A74C
@@ -7415,9 +7415,9 @@ lbC00A772:          tst.w    (a0)
                     bmi.b    lbC00A772
 lbC00A794:          sub.w    #alien2_struct-alien1_struct,a0
 
-patch_boss_door:    tst.w    lbW0004EA
+patch_boss_door:    tst.w    boss_active_flag
                     bne      return
-                    move.w   42(a1),lbW0097F2
+                    move.w   42(a1),alien_target_refresh_rate
                     move.l   cur_map_top_ptr,d0
                     move.l   a3,d1
                     sub.l    d0,d1
@@ -8552,9 +8552,9 @@ lbC00D17E:          move.w   map_pos_x+2(pc),d0
                     sub.w    #80,d2
                     move.w   d2,d3
                     add.w    #416,d3
-                    lea      lbL00D29A(pc),a0
+                    lea      alien_spawn_queue_an(pc),a0
                     bsr.b    lbC00D1B4
-                    lea      lbL00D2AA(pc),a0
+                    lea      alien_spawn_queue_bo(pc),a0
                     ; no rts
 
 lbC00D1B4:          tst.l    (a0)
@@ -8588,22 +8588,22 @@ lbC00D21A:          movem.l  (sp)+,d0-d3
 lbC00D220:          clr.l    0(a0)
                     rts
 
-lbL00D226:          dc.l     0
+next_alien_spawn_struct_ptr:          dc.l     0
 
 lbC00D22A:          movem.l  d0-d7/a0-a6,-(sp)
                     bsr.b    lbC00D236
                     movem.l  (sp)+,d0-d7/a0-a6
                     rts
 
-lbC00D236:          lea      lbL00D29A(pc),a0
+lbC00D236:          lea      alien_spawn_queue_an(pc),a0
                     tst.l    0(a0)
                     beq.b    lbC00D24C
-                    lea      lbL00D2AA(pc),a0
+                    lea      alien_spawn_queue_bo(pc),a0
                     tst.l    0(a0)
                     bne      return
-lbC00D24C:          cmp.l    lbL00D29A(pc),a3
+lbC00D24C:          cmp.l    alien_spawn_queue_an(pc),a3
                     beq      return
-                    cmp.l    lbL00D2AA(pc),a3
+                    cmp.l    alien_spawn_queue_bo(pc),a3
                     beq      return
                     move.l   a3,0(a0)
                     move.l   a3,d1
@@ -8613,7 +8613,7 @@ lbC00D24C:          cmp.l    lbL00D29A(pc),a3
                     swap     d0
                     lsl.w    #3,d0
                     lsl.w    #4,d1
-                    move.l   lbL00D226(pc),a3
+                    move.l   next_alien_spawn_struct_ptr(pc),a3
                     move.l   a3,12(a0)
                     add.w    48(a3),d0
                     add.w    50(a3),d1
@@ -8622,8 +8622,8 @@ lbC00D24C:          cmp.l    lbL00D29A(pc),a3
                     move.w   #20,8(a0)
                     rts
 
-lbL00D29A:          dc.l     0,0,50,0
-lbL00D2AA:          dc.l     0,0,50,0
+alien_spawn_queue_an:          dc.l     0,0,50,0
+alien_spawn_queue_bo:          dc.l     0,0,50,0
 
 set_all_aliens_to_default:
                     lea      alien1_struct(pc),a0
@@ -9645,7 +9645,7 @@ check_reactors:     tst.w    reactor_up_done
                     beq.b    patch_reactor
                     tst.w    reactor_right_done
                     beq.b    patch_reactor
-                    move.w   #1,lbW0004D8
+                    move.w   #1,self_destruct_trigger
                     move.w   #1,self_destruct_initiated
 
 patch_reactor:      movem.l  d0-d7/a0-a6,-(sp)
@@ -9826,9 +9826,9 @@ patch_fire_door_left_btn_alarm:
                     jsr      trigger_sample
                     cmp.l    lbL00E756(pc),a5
                     beq.b    lbC00E784
-                    tst.w    lbW002AC2
+                    tst.w    alarm_system_active
                     beq.b    lbC00E784
-                    addq.w   #1,lbW002AC0
+                    addq.w   #1,alarm_buttons_pressed
                     move.l   a5,lbL00E756
 lbC00E784:          move.l   a5,a3
                     lea      lbL020D92,a2
@@ -9849,9 +9849,9 @@ patch_fire_door_right_btn_alarm:
                     jsr      trigger_sample
                     cmp.l    lbL00E756(pc),a5
                     beq.b    lbC00E7EE
-                    tst.w    lbW002AC2
+                    tst.w    alarm_system_active
                     beq.b    lbC00E7EE
-                    addq.w   #1,lbW002AC0
+                    addq.w   #1,alarm_buttons_pressed
                     move.l   a5,lbL00E756
 lbC00E7EE:          lea      lbL020D92,a2
                     bsr      patch_tiles
@@ -16160,18 +16160,18 @@ disable_interrupts: move.w   #INTF_INTEN,CUSTOM+INTENA
                     rts
 
 init_level_variables:
-                    clr.w    lbW0004D8
-                    clr.w    lbW0004B2
+                    clr.w    self_destruct_trigger
+                    clr.w    render_ready_flag
                     clr.w    flag_end_level
                     clr.w    in_destruction_sequence_flag
                     jsr      lbC00E8D8
                     jsr      set_all_aliens_to_default
-                    lea      lbL00D29A,a0
+                    lea      alien_spawn_queue_an,a0
                     clr.l    (a0)+
                     clr.l    (a0)+
                     clr.l    (a0)+
                     clr.l    (a0)+
-                    lea      lbL00D2AA,a0
+                    lea      alien_spawn_queue_bo,a0
                     clr.l    (a0)+
                     clr.l    (a0)+
                     clr.l    (a0)+
@@ -16449,7 +16449,7 @@ level_palette2:     dcb.w    32,0
 
 ; -----------------------------------------------------
 
-start_music:        tst.w    lbW0003A2
+start_music:        tst.w    music_master_disable
                     beq      lbC022B92
                     clr.w    lbW0004E0
                     clr.w    audio_dmacon
@@ -16481,7 +16481,7 @@ lbC022B74:          clr.b    (a0)+
                     move.w   #1,lbW0004C4
 lbC022B92:          rts
 
-stop_sound:         tst.w    lbW0003A2
+stop_sound:         tst.w    music_master_disable
                     beq      lbC022C30
                     clr.w    lbW0004E0
                     moveq    #SAMPLE_EMPTY,d0
@@ -17315,7 +17315,7 @@ lbC024352:          add.l    #36,a0
                     dbf      d7,lbC02433E
                     rts
 
-bpmusic:            tst.w    lbW0003A2
+bpmusic:            tst.w    music_master_disable
                     beq      return2
                     tst.w    lbW0004C4
                     beq      return2
