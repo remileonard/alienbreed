@@ -105,6 +105,16 @@ int  g_alarm_last_row           = -1;
 static int s_destruct_tick_ctr = 0;
 
 /*
+ * Level 9 automatic self-destruct counter (mirrors lbW002E04 @ main.asm#L1239).
+ * Initialised to 300 for level 9 in level_finalize(); 0 for all other levels.
+ * Decremented once per game tick (25 Hz); when it reaches 0, self-destruct
+ * fires automatically (Ref: game_level_loop @ main.asm#L530-L535:
+ *   cmp.b #7,timer_digit_lo / subq.w #1,lbW002E04 / bne … /
+ *   move.w #1,self_destruct_initiated).
+ */
+static int s_lvl9_auto_destruct_counter = 0;
+
+/*
  * Voice IDs for the per-second countdown, indexed by remaining seconds (1–8).
  * Mirrors the requirement: when the timer reaches 8 the voice announces each
  * second until 1 ("lorsque le compte à rebours arrive à 8 …").
@@ -472,6 +482,19 @@ void level_check_destruction(void)
         g_alarm_last_row        = -1;
         level_start_destruction();
     }
+
+    /*
+     * Level 9 automatic self-destruct timer (lbW002E04 @ main.asm#L530-L535).
+     * init_level_9 sets lbW002E04=300; every game tick it is decremented.
+     * When the counter reaches 0, the self-destruct fires automatically.
+     * The assembly identifies level 9 by checking timer_digit_lo==7, which is
+     * unique to level 9.  In the C port we use the explicit level index instead.
+     */
+    if (g_cur_level == 8 && s_lvl9_auto_destruct_counter > 0 && !g_self_destruct_initiated) {
+        s_lvl9_auto_destruct_counter--;
+        if (s_lvl9_auto_destruct_counter == 0)
+            level_start_destruction();
+    }
 }
 
 void level_check_gameover(void)
@@ -517,6 +540,14 @@ void level_finalize(void)
      * (lbC000E56 @ main.asm#L536-L544).
      */
     g_alarm_system_active = (g_cur_level == 2) ? 1 : 0; /* level 3 is index 2 (0-based) */
+
+    /*
+     * Level 9 automatic self-destruct counter (lbW002E04 @ main.asm#L1239).
+     * init_level_9 @ main.asm#L1174: move.w #300,lbW002E04.
+     * Every game tick the main loop decrements this; when it reaches 0, the
+     * self-destruct sequence starts automatically (no player action required).
+     */
+    s_lvl9_auto_destruct_counter = (g_cur_level == 8) ? 300 : 0; /* level 9 is index 8 */
 }
 
 void level_run(int level_idx)
