@@ -4,7 +4,7 @@ cd "$(dirname "$0")"
 
 BUILD="${BUILD:-./build}"
 
-mkdir -p assets/sprites assets/samples assets/voices assets/music assets/gfx assets/fonts assets/maps assets/tiles
+mkdir -p assets/sprites assets/samples assets/voices assets/music assets/gfx assets/fonts assets/maps assets/tiles assets/anim
 
 echo "=== Converting level maps ==="
 # L?MA: T7MP format map files — parsed to extract tile data, palettes, IFFP path.
@@ -138,6 +138,15 @@ cp game/boss.soundmon assets/music/boss.soundmon
 cp game/level.soundmon assets/music/level.soundmon
 cp game/title.soundmon assets/music/title.soundmon
 echo "  Copied 3 music files"
+
+echo "=== Copying gameover animation ==="
+f=src/gameover/anim/gameover.anim
+if [ -f "$f" ]; then
+    cp "$f" assets/anim/gameover.anim
+    echo "  gameover.anim -> OK"
+else
+    echo "  gameover.anim -> SKIP (not found)"
+fi
 
 echo ""
 echo "=== DONE ==="
