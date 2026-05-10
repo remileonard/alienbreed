@@ -462,11 +462,12 @@ void sprite_draw_boss(int anim_frame, int x, int y)
 
 /* Draw a boss_nbr=4 reactor-shield satellite crescent at screen position (x, y).
  * Satellite sprites are 32×27 px, stored in the LEGACY atlas (L1BO) at:
- *   atlas_x = direction * BOSS4_SAT_SPRITE_W   (0-7 compass, 0=N through 7=NW)
+ *   atlas_x = direction * BOSS4_SAT_SPRITE_W   (0-7, where direction = d1 % 8)
  *   atlas_y = BOSS4_SAT_ATLAS_Y + anim_frame * BOSS4_SAT_FRAME_STRIDE
- *             (frame 0 at y=256, frame 1 at y=288)
- * Ref: lbW01945E entries 88-103 @ main.asm#L14114-L14129 (LEGACY atlas).
- * lbC009AFC AI @ main.asm#L6640 (satellite orbit / copper-list position write). */
+ *             (frame 0 at y=320, frame 1 at y=352, where anim_frame = d1 / 8)
+ * The full-colour (blue) sprites at y=320/352 are atlas entries 64-71/72-79 (lbW01945E).
+ * Ref: lbW01945E entries 64-79 @ main.asm#L14098-L14113 (LEGACY atlas).
+ * lbC009AFC AI @ main.asm#L6640 (satellite orbit); lbC009BC4 @ main.asm#L6756 (d1 computation). */
 void sprite_draw_boss4_satellite(int direction, int anim_frame, int x, int y)
 {
     const UBYTE *atlas = alien_gfx_get_atlas();
