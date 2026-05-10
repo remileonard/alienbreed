@@ -460,6 +460,14 @@ void check_tile_interaction(Player *p)
     pickup_tile_at(p, col, row);
     UBYTE attr = tilemap_attr(&g_cur_map, col, row);
 
+    /* During the self-destruct sequence, all one-way tiles become passable.
+     * Mirrors the pass_thru_walls check at tile_one_way_* / tile_one_deadly_way_*
+     * @ main.asm#L5451-L5846: when pass_thru_walls != 0 the handler just returns
+     * with no push force and no directional kill so the player can reach the exit.
+     * In the C port the equivalent flag is g_self_destruct_initiated. */
+    if (g_self_destruct_initiated && TILE_IS_ONEWAY(attr))
+        return;
+
     /* -----------------------------------------------------------------
      * Non-pickup tile effects: applied at the centre probe position only.
      * ----------------------------------------------------------------- */
