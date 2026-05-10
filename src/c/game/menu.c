@@ -69,6 +69,19 @@ static const UWORD k_palette_menu_red[8] = {
     0x000, 0x822, 0xA31, 0x811, 0xF44, 0x833, 0xA22, 0x852
 };
 
+/* Flash colour table (matches colors_flash_table in menu.asm).
+ * menu_flash cycles through these every FLASH_SLOWDOWN frames, changing
+ * the background colour of the highlighted menu row from dark grey to
+ * light grey and back.  The -1 sentinel in the ASM causes wrap-around;
+ * here we simply use the table length and a modulo index. */
+static const UWORD k_flash_table[] = {
+    0x444, 0x555, 0x666, 0x777, 0x888, 0x999, 0xAAA, 0xAAA,
+    0x999, 0x888, 0x777, 0x666, 0x555, 0x444, 0x333, 0x333
+};
+#define FLASH_TABLE_LEN  ((int)(sizeof(k_flash_table)/sizeof(k_flash_table[0])))
+/* Advance the flash index every 3 frames (matches slowdown_flash=3 in menu.asm) */
+#define FLASH_SLOWDOWN   3
+
 /* Combined 32-entry working palette (built from the four blocks above) */
 static UWORD s_pal[32];
 
@@ -554,6 +567,10 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
         char label_sc[32];
         int  last_np = -1, last_sc = -1;   /* detect changes */
 
+        /* Flash (highlight bar pulse) state — mirrors menu_flash in menu.asm */
+        int flash_slow  = 0;   /* frame counter 0..FLASH_SLOWDOWN-1            */
+        int flash_idx   = 0;   /* current index into k_flash_table             */
+
         /* Phase 3 state:                                               *
          * credit_state: 0=typewriter+hold 350 frames, 1=fade→red,     *
          *               2=fade→black                                   */
@@ -598,12 +615,25 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
                 items[MENU_ITEM_START]         = "    START GAME    ";
 
                 /*
-                 * Screen layout (matches pos_in_menu*13 + 167 from menu.asm):
-                 *   item 0 at y=167, item 1 at y=180, item 2 (START) at y=193
+                 * Screen layout (from menu.asm display_text with text_menu
+                 * dc.w 16,112 → +12 added by display_text → y=124 in bitplane,
+                 * each subsequent line +13):
+                 *   item 0 at y=124, item 1 at y=137, item 2 (START) at y=150
                  * Text drawn using palette_menu (slots 16-23, offset=16).
+                 *
+                 * Flash effect: advance index into k_flash_table every
+                 * FLASH_SLOWDOWN frames and update the highlight bar's
+                 * palette entry (matches menu_flash in menu.asm).
                  */
+                if (++flash_slow >= FLASH_SLOWDOWN) {
+                    flash_slow = 0;
+                    flash_idx++;
+                    if (flash_idx >= FLASH_TABLE_LEN) flash_idx = 0;
+                }
+                video_set_palette_entry(22, k_flash_table[flash_idx]);
+
                 for (int i = 0; i < MENU_ITEMS; i++) {
-                    int item_y = 167 + i * 13;
+                    int item_y = 124 + i * 13;
                     if (i == cur_item)
                         video_fill_rect(68, item_y, 184, 12, 22);
                     TextCtx ctx;
