@@ -19,8 +19,12 @@ extern SDL_Window   *g_window;
 /* Indexed framebuffer: one byte per pixel, index into g_palette */
 extern UBYTE g_framebuffer[320 * 256];
 
-/* Current 32-color palette in ARGB8888 format */
-extern Uint32 g_palette[32];
+/* Current 64-color palette in ARGB8888 format.
+ * Entries 0-31  : main game / menu layers (logo, stars, text, copyright).
+ * Entries 32-63 : auxiliary slots; used e.g. by the menu to hold a
+ *                 brightness-shifted copy of the text palette for the
+ *                 selected item flash effect without clobbering entries 0-31. */
+extern Uint32 g_palette[64];
 
 /* Initialise SDL2 window + renderer. Returns 0 on success. */
 int  video_init(void);

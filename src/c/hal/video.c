@@ -10,7 +10,7 @@
 SDL_Renderer *g_renderer  = NULL;
 SDL_Window   *g_window    = NULL;
 UBYTE         g_framebuffer[320 * 256];
-Uint32        g_palette[32];
+Uint32        g_palette[64];
 
 /* Beam effect: scanline range where non-zero pixels are rendered white */
 int g_beam_y      = -1;
@@ -102,7 +102,7 @@ void video_upload_framebuffer(void)
     for (int y = 0; y < 256; y++) {
         int is_beam = (y >= beam_lo && y < beam_hi);
         for (int x = 0; x < 320; x++) {
-            UBYTE idx = src[x] & 0x1F;
+            UBYTE idx = src[x] & 0x3F;
             /* On beam scanlines, all non-zero color indices appear white —
              * mirrors the Amiga copper overwriting COLOR01-31 with $FFF. */
             dst[x] = (is_beam && idx != 0) ? white : g_palette[idx];
@@ -153,7 +153,7 @@ void video_clear(void)
 
 void video_set_palette_entry(int index, UWORD amiga_rgb)
 {
-    if (index < 0 || index >= 32) return;
+    if (index < 0 || index >= 64) return;
 
     /* Amiga palette: 0x0RGB — each channel 4 bits, expand to 8 bits by
      * duplicating the nibble: 0xF → 0xFF, 0x5 → 0x55 */
@@ -178,7 +178,7 @@ void video_set_palette(const UWORD *amiga_palette, int count)
 void video_plot_pixel(int x, int y, UBYTE color_index)
 {
     if (x < 0 || x >= 320 || y < 0 || y >= 256) return;
-    g_framebuffer[y * 320 + x] = color_index & 0x1F;
+    g_framebuffer[y * 320 + x] = color_index & 0x3F;
 }
 
 void video_blit(const UBYTE *src, int src_stride,
@@ -193,7 +193,7 @@ void video_blit(const UBYTE *src, int src_stride,
             if (dx < 0 || dx >= 320) continue;
             UBYTE c = src[x];
             if (transparent_index >= 0 && c == (UBYTE)transparent_index) continue;
-            g_framebuffer[dy * 320 + dx] = c & 0x1F;
+            g_framebuffer[dy * 320 + dx] = c & 0x3F;
         }
         src += src_stride;
     }
@@ -205,7 +205,7 @@ void video_fill_rect(int x, int y, int w, int h, UBYTE color_index)
         if (row < 0 || row >= 256) continue;
         for (int col = x; col < x + w; col++) {
             if (col < 0 || col >= 320) continue;
-            g_framebuffer[row * 320 + col] = color_index & 0x1F;
+            g_framebuffer[row * 320 + col] = color_index & 0x3F;
         }
     }
 }
