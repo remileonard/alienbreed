@@ -51,6 +51,9 @@
 /*   8-15  starfield    (stars_palette)                                */
 /*  16-23  menu text    (palette_menu, index 16 = transparent)         */
 /*  24-31  copyright    (copyright_palette, index 24 = transparent)    */
+/* Slots 32-39 are used as an auxiliary copy of the menu text palette  */
+/* with a brightness offset applied to flash the selected menu item    */
+/* while preserving all of its anti-aliasing shades.                   */
 /* ------------------------------------------------------------------ */
 static const UWORD k_palette_logo[8] = {
     0x000, 0x111, 0x100, 0x200, 0x400, 0x800, 0xD00, 0xF30
@@ -68,6 +71,26 @@ static const UWORD k_palette_copyright[8] = {
 static const UWORD k_palette_menu_red[8] = {
     0x000, 0x822, 0xA31, 0x811, 0xF44, 0x833, 0xA22, 0x852
 };
+
+/* Flash colour table (matches colors_flash_table in menu.asm).
+ * menu_flash cycles through these every FLASH_SLOWDOWN frames.  In the
+ * original ASM the copper changes COLOR00 (background) in the selected row,
+ * making the area behind the text pulse from dark to light grey and back.
+ * In the C port we replicate this by maintaining a second copy of the menu
+ * text palette (in g_palette slots 32-39) with a brightness offset derived
+ * from the current flash position; the selected item is rendered with
+ * color_offset=32 so it uses this shifted copy.  All 8 shades used by the
+ * font are shifted by the same amount, preserving the artist's anti-aliasing.
+ * Non-selected items use the normal palette (color_offset=16, entries 16-23).
+ * The -1 sentinel in the ASM causes wrap-around; here we use the table length
+ * and a modulo index. */
+static const UWORD k_flash_table[] = {
+    0x444, 0x555, 0x666, 0x777, 0x888, 0x999, 0xAAA, 0xAAA,
+    0x999, 0x888, 0x777, 0x666, 0x555, 0x444, 0x333, 0x333
+};
+#define FLASH_TABLE_LEN  ((int)(sizeof(k_flash_table)/sizeof(k_flash_table[0])))
+/* Advance the flash index every 3 frames (matches slowdown_flash=3 in menu.asm) */
+#define FLASH_SLOWDOWN   3
 
 /* Combined 32-entry working palette (built from the four blocks above) */
 static UWORD s_pal[32];
@@ -554,6 +577,10 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
         char label_sc[32];
         int  last_np = -1, last_sc = -1;   /* detect changes */
 
+        /* Flash (highlight bar pulse) state — mirrors menu_flash in menu.asm */
+        int flash_slow  = 0;   /* frame counter 0..FLASH_SLOWDOWN-1            */
+        int flash_idx   = 0;   /* current index into k_flash_table             */
+
         /* Phase 3 state:                                               *
          * credit_state: 0=typewriter+hold 350 frames, 1=fade→red,     *
          *               2=fade→black                                   */
@@ -598,17 +625,57 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
                 items[MENU_ITEM_START]         = "    START GAME    ";
 
                 /*
-                 * Screen layout (matches pos_in_menu*13 + 167 from menu.asm):
+                 * Screen layout (from menu.asm handle_menu: pos_in_menu*13+167
+                 * for the copper highlight scanline; text drawn via display_text
+                 * with text_menu dc.w 16,112 → add.w #68,d0 (x=84)):
                  *   item 0 at y=167, item 1 at y=180, item 2 (START) at y=193
-                 * Text drawn using palette_menu (slots 16-23, offset=16).
+                 * x=84 (text_menu initial x=16 + display_text add.w #68,d0).
+                 *
+                 * Flash effect: every FLASH_SLOWDOWN frames advance flash_idx.
+                 * Build g_palette entries 32-39 as brightness-shifted copies of
+                 * k_palette_menu (the same 8 colours, shifted by ±delta so all
+                 * shades move together, preserving anti-aliasing).  The selected
+                 * item is drawn with color_offset=32; non-selected use offset=16.
                  */
+                if (++flash_slow >= FLASH_SLOWDOWN) {
+                    flash_slow = 0;
+                    flash_idx++;
+                    if (flash_idx >= FLASH_TABLE_LEN) flash_idx = 0;
+                }
+                {
+                    /* k_flash_table entries are all grey (R=G=B), e.g. 0x444..0xAAA.
+                     * Average all three channels for robustness in case any entry
+                     * ever becomes non-grey.  Neutral = 7 (≈0x777); delta shifts
+                     * every channel of every palette entry up (brighter) or down
+                     * (darker) by the same amount, preserving anti-aliasing. */
+                    UWORD fv  = k_flash_table[flash_idx];
+                    int   avg = (((fv >> 8) & 0xF) + ((fv >> 4) & 0xF) + (fv & 0xF)) / 3;
+                    int   delta = avg - 7;
+                    for (int j = 0; j < 8; j++) {
+                        UWORD base = k_palette_menu[j];
+                        int r = ((base >> 8) & 0xF) + delta;
+                        int g = ((base >> 4) & 0xF) + delta;
+                        int b = ((base >> 0) & 0xF) + delta;
+                        if (r < 0) r = 0; if (r > 15) r = 15;
+                        if (g < 0) g = 0; if (g > 15) g = 15;
+                        if (b < 0) b = 0; if (b > 15) b = 15;
+                        video_set_palette_entry(32 + j,
+                            (UWORD)((r << 8) | (g << 4) | b));
+                    }
+                }
+
                 for (int i = 0; i < MENU_ITEMS; i++) {
                     int item_y = 167 + i * 13;
-                    if (i == cur_item)
-                        video_fill_rect(68, item_y, 184, 12, 22);
                     TextCtx ctx;
-                    typewriter_init_ctx(&ctx, &font, g_framebuffer, 320, 68, item_y);
-                    ctx.color_offset = 16;
+                    /* Selected item uses palette slots 32-39 (brightness-shifted
+                     * copy of k_palette_menu) to flash while preserving all shades.
+                     * Non-selected items use the normal slots 16-23.
+                     * x=84: text_menu dc.w 16,112 + display_text add.w #68,d0 → 84.
+                     * (The earlier fill_rect used 68 which was wrong; 84 corrects
+                     * the text X-position to match the original assembly.) */
+                    int coff = (i == cur_item) ? 32 : 16;
+                    typewriter_init_ctx(&ctx, &font, g_framebuffer, 320, 84, item_y);
+                    ctx.color_offset = coff;
                     typewriter_display(&ctx, items[i]);
                 }
 
