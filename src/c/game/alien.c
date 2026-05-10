@@ -1168,13 +1168,18 @@ static void alien_move(int self_idx, Alien *a)
  *
  * Mirrors lbW0256B4 @ main.asm#L18324-L18330 (lbW0256B4..lbW02578C then
  * dc.w -1,-1 as sentinel).  62 relative (X, Y) positions describe a complete
- * elliptical orbit around the reactor, approximately centred at (75, 75).
+ * circular orbit around the reactor, centred at relative (75, 75).
  *
  * In lbC009AFC the world offset is added after setting the position:
  *   add.w #1662, ALIEN_POS_X(a0)   (@ main.asm#L6730)
  *   add.w  #731, ALIEN_POS_Y(a0)
- * These constants map relative (0,0) to world pixel (1662, 731), placing the
- * orbit over the reactor room on level 10 (L9MA).
+ * The ASM values (1662, 731) were calibrated against the Amiga IFF map buffer
+ * which includes 3 header rows (48 px extra in Y).  The C port uses a headerless
+ * T7MP BODY, so the correct offsets are derived from the reactor tile centre in
+ * the C-port map (L9MA): 0x15 tiles at cols 107-111, rows 45-49 → centre tile
+ * (109, 47) → world pixel (1752, 760).  With the orbit centred at relative (75, 75):
+ *   BOSS4_ORBIT_WORLD_X = 1752 − 75 = 1677
+ *   BOSS4_ORBIT_WORLD_Y =  760 − 75 = 685
  *
  * The 7 shield-element aliens start at evenly-spaced offsets in the table:
  *   alien 0 (k=0): orbit index 0  (lbW0256B4)
@@ -1185,8 +1190,8 @@ static void alien_move(int self_idx, Alien *a)
  */
 #define BOSS4_ORBIT_COUNT   62
 #define BOSS4_ORBIT_STEP     9
-#define BOSS4_ORBIT_WORLD_X  1662
-#define BOSS4_ORBIT_WORLD_Y  731
+#define BOSS4_ORBIT_WORLD_X  1677   /* reactor centre X (1752) − orbit half-range (75) */
+#define BOSS4_ORBIT_WORLD_Y   685   /* reactor centre Y ( 760) − orbit half-range (75) */
 
 static const WORD k_boss4_orbit[BOSS4_ORBIT_COUNT][2] = {
     /* lbW0256B4 — alien 0 starts here */
@@ -1251,7 +1256,7 @@ static void boss4_orbit_move(Alien *a)
     int rx = (int)k_boss4_orbit[a->orbit_idx][0];  /* relative X */
     int ry = (int)k_boss4_orbit[a->orbit_idx][1];  /* relative Y */
 
-    /* Apply world offset: mirrors add.w #1662/731,ALIEN_POS_X/Y @ main.asm#L6681. */
+    /* Apply world offset so the orbit is centred on the reactor (world 1752, 760). */
     a->pos_x = (WORD)(rx + BOSS4_ORBIT_WORLD_X);
     a->pos_y = (WORD)(ry + BOSS4_ORBIT_WORLD_Y);
 
