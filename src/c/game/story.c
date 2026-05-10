@@ -235,7 +235,7 @@ void story_run(void)
 
     img_load(&planet, "assets/gfx/story_planet_320x256.raw");
     img_load(&title,  "assets/gfx/story_title_320x256.raw");
-    font_load(&font,  "assets/fonts/font_16x462.raw", 9, 11, 0);  /* TEXT_LETTER_WIDTH=9 from story.asm font_struct */
+    font_load(&font,  "assets/fonts/font_16x462.raw", 8, 11, 0);  /* TEXT_LETTER_WIDTH=9 from story.asm font_struct */
 
     /* ============================================================ */
     /* Phase 1: Planet + scrolling story text                       */
@@ -273,7 +273,7 @@ void story_run(void)
 
             video_clear();
             if (planet.pixels)
-                video_blit(planet.pixels, planet.w, 0, 0, 320, 256, -1);
+                video_blit(planet.pixels, planet.w, 0, 10, 320, 256, -1);
 
             /* Draw visible story lines.
              * Font pixel index 1 maps to k_colors_planet[1] = 0xFFF (white). */
@@ -284,7 +284,7 @@ void story_run(void)
                     if (!k_story_lines[i] || !k_story_lines[i][0]) continue;
                     TextCtx ctx;
                     typewriter_init_ctx(&ctx, &font,
-                                        g_framebuffer, 320, 8, ly);
+                                        g_framebuffer, 320, 2, ly);
                     typewriter_display(&ctx, k_story_lines[i]);
                 }
             }

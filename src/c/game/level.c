@@ -57,15 +57,15 @@ const LevelDef k_level_defs[NUM_LEVELS] = {
     /* lvl 1 */ { "L0AN", "L0BO", "L0MA",  0, "Level 1: Research Base",          "level", ALIEN_ATLAS_LEGACY,  0x1F,  60, 0,  -1,  -1 },
     /* lvl 2 */ { "L1AN", "L1BO", "L1MA",  0, "Level 2: Bio-Containment",        "level", ALIEN_ATLAS_COMPACT, 0x17,  60, 0,  -1,  -1 },
     /* lvl 3 */ { "L3AN", "L3BO", "L2MA",  0, "Level 3: Reactor Core",           "level", ALIEN_ATLAS_COMPACT, 0x1F,  40, 0,  -1,  -1 },
-    /* lvl 4 */ { "L4AN", "L4BO", "L3MA",  0, "Level 4: Alien Hive",             "boss",  ALIEN_ATLAS_COMPACT, 0x1F,  90, 0,  -1,  -1 },
+    /* lvl 4 */ { "L4AN", "L4BO", "L3MA",  0, "Level 4: Alien Hive",             "level", ALIEN_ATLAS_COMPACT, 0x1F,  90, 0,  -1,  -1 },
     /* lvl 5 */ { "L4AN", "L4BO", "L4MA",  0, "Level 5: Service Tunnels",        "level", ALIEN_ATLAS_COMPACT, 0x1F,  90, 1,  49, 104 }, /* lbW0619E8 */
-    /* lvl 6 */ { "L3AN", "L3BO", "L5MA",  0, "Level 6: Weapons Bay",            "boss",  ALIEN_ATLAS_COMPACT, 0x1F,   2, 0,  -1,  -1 }, /* sf.b hi; lo=2 */
+    /* lvl 6 */ { "L3AN", "L3BO", "L5MA",  0, "Level 6: Weapons Bay",            "level", ALIEN_ATLAS_COMPACT, 0x1F,   2, 0,  -1,  -1 }, /* sf.b hi; lo=2 */
     /* lvl 7 */ { "L3AN", "L2BO", "L6MA",  0, "Level 7: Upper Decks",            "level", ALIEN_ATLAS_COMPACT, 0x03,  99, 2,  14,  60 }, /* lbW05F7A8: buffer_row=14,col=60 */
-    /* lvl 8 */ { "L3AN", "L2BO", "L7MA",  0, "Level 8: Engine Room",            "boss",  ALIEN_ATLAS_COMPACT, 0x03,  60, 2,  14,  60 }, /* lbW05F7A8: buffer_row=14,col=60. boss_nbr=2 = reactor shield (3 orbiting boss aliens; killing primary OR destroying all reactor faces triggers destruction). Zone-boundary tiles 0x30-0x33 give "ZONE N" voice announcements. Ref: main.asm#L1154 / lbC00A0EE. */
+    /* lvl 8 */ { "L3AN", "L2BO", "L7MA",  0, "Level 8: Engine Room",            "level", ALIEN_ATLAS_COMPACT, 0x03,  60, 2,  14,  60 }, /* lbW05F7A8: buffer_row=14,col=60. boss_nbr=2 = reactor shield (3 orbiting boss aliens; killing primary OR destroying all reactor faces triggers destruction). Zone-boundary tiles 0x30-0x33 give "ZONE N" voice announcements. Ref: main.asm#L1154 / lbC00A0EE. */
     /* lvl 9 */ { "L2AN", "L2BO", "L8MA",  5, "Level 9: Alien Command",          "level", ALIEN_ATLAS_COMPACT, 0x03,  77, 0,  -1,  -1 },
-    /* lvl10 */ { "L1AN", "L1BO", "L9MA", 10, "Level 10: Central Hive",          "boss",  ALIEN_ATLAS_LEGACY,  0x17,  80, 4,  46,  97 }, /* lbW06188C */
+    /* lvl10 */ { "L1AN", "L1BO", "L9MA", 10, "Level 10: Central Hive",          "level", ALIEN_ATLAS_LEGACY,  0x17,  80, 4,  46,  97 }, /* lbW06188C */
     /* lvl11 */ { "L1AN", "L2BO", "LAMA", 15, "Level 11: Breeding Grounds",      "level", ALIEN_ATLAS_LEGACY,  0x17,  60, 0,  -1,  -1 },
-    /* lvl12 */ { "L5AN", "L5BO", "LBMA", 20, "Level 12: Final Confrontation",   "boss",  ALIEN_ATLAS_COMPACT, 0x1D,  14, 3,  52, 103 }, /* lbW062872 */
+    /* lvl12 */ { "L5AN", "L5BO", "LBMA", 20, "Level 12: Final Confrontation",   "level", ALIEN_ATLAS_COMPACT, 0x1D,  14, 3,  52, 103 }, /* lbW062872 */
 };
 
 /* ------------------------------------------------------------------ */
