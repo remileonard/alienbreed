@@ -70,9 +70,11 @@ static const UWORD k_palette_menu_red[8] = {
 };
 
 /* Flash colour table (matches colors_flash_table in menu.asm).
- * menu_flash cycles through these every FLASH_SLOWDOWN frames, changing
- * the background colour of the highlighted menu row from dark grey to
- * light grey and back.  The -1 sentinel in the ASM causes wrap-around;
+ * menu_flash cycles through these every FLASH_SLOWDOWN frames.  In the
+ * original ASM the copper changes COLOR00 (background) in the selected row;
+ * in the C port we instead cycle the text colour of the selected item
+ * (palette entry 22) through these grey shades, making the text pulse from
+ * dark to light and back.  The -1 sentinel in the ASM causes wrap-around;
  * here we simply use the table length and a modulo index. */
 static const UWORD k_flash_table[] = {
     0x444, 0x555, 0x666, 0x777, 0x888, 0x999, 0xAAA, 0xAAA,
@@ -615,15 +617,20 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
                 items[MENU_ITEM_START]         = "    START GAME    ";
 
                 /*
-                 * Screen layout (from menu.asm display_text with text_menu
-                 * dc.w 16,112 → +12 added by display_text → y=124 in bitplane,
-                 * each subsequent line +13):
-                 *   item 0 at y=124, item 1 at y=137, item 2 (START) at y=150
+                 * Screen layout (from menu.asm handle_menu: pos_in_menu*13+167
+                 * for the copper highlight scanline; text drawn via display_text
+                 * with text_menu dc.w 16,112 → add.w #68,d0 (x=84), +12 (y=167+12
+                 * not applied in C since we map directly to framebuffer y)):
+                 *   item 0 at y=167, item 1 at y=180, item 2 (START) at y=193
+                 * x=84 (text_menu initial x=16 + display_text add.w #68,d0).
                  * Text drawn using palette_menu (slots 16-23, offset=16).
                  *
                  * Flash effect: advance index into k_flash_table every
-                 * FLASH_SLOWDOWN frames and update the highlight bar's
-                 * palette entry (matches menu_flash in menu.asm).
+                 * FLASH_SLOWDOWN frames (matches menu_flash / slowdown_flash=3
+                 * in menu.asm). The selected item's text is drawn with
+                 * text_color=22 so it pulses through the flash grey shades.
+                 * Non-selected items use the normal text colour (color_offset=16,
+                 * text_color=-1). No highlight bar is drawn.
                  */
                 if (++flash_slow >= FLASH_SLOWDOWN) {
                     flash_slow = 0;
@@ -633,12 +640,11 @@ MenuResult menu_run(int *out_num_players, int *out_share_credits)
                 video_set_palette_entry(22, k_flash_table[flash_idx]);
 
                 for (int i = 0; i < MENU_ITEMS; i++) {
-                    int item_y = 124 + i * 13;
-                    if (i == cur_item)
-                        video_fill_rect(68, item_y, 184, 12, 22);
+                    int item_y = 167 + i * 13;
                     TextCtx ctx;
-                    typewriter_init_ctx(&ctx, &font, g_framebuffer, 320, 68, item_y);
+                    typewriter_init_ctx(&ctx, &font, g_framebuffer, 320, 84, item_y);
                     ctx.color_offset = 16;
+                    ctx.text_color   = (i == cur_item) ? 22 : -1; /* 22 pulses via k_flash_table */
                     typewriter_display(&ctx, items[i]);
                 }
 
