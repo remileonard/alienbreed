@@ -1168,13 +1168,18 @@ static void alien_move(int self_idx, Alien *a)
  *
  * Mirrors lbW0256B4 @ main.asm#L18324-L18330 (lbW0256B4..lbW02578C then
  * dc.w -1,-1 as sentinel).  62 relative (X, Y) positions describe a complete
- * elliptical orbit around the reactor, approximately centred at (75, 75).
+ * circular orbit around the reactor, centred at relative (75, 75).
  *
  * In lbC009AFC the world offset is added after setting the position:
  *   add.w #1662, ALIEN_POS_X(a0)   (@ main.asm#L6730)
  *   add.w  #731, ALIEN_POS_Y(a0)
- * These constants map relative (0,0) to world pixel (1662, 731), placing the
- * orbit over the reactor room on level 10 (L9MA).
+ * The ASM values (1662, 731) were calibrated against the Amiga IFF map buffer
+ * which includes 3 header rows (48 px extra in Y).  The C port uses a headerless
+ * T7MP BODY, so the correct offsets are derived from the reactor tile centre in
+ * the C-port map (L9MA): 0x15 tiles at cols 107-111, rows 45-49 → centre tile
+ * (109, 47) → world pixel (1752, 760).  With the orbit centred at relative (75, 75):
+ *   BOSS4_ORBIT_WORLD_X = 1752 − 75 = 1677
+ *   BOSS4_ORBIT_WORLD_Y =  760 − 75 = 685
  *
  * The 7 shield-element aliens start at evenly-spaced offsets in the table:
  *   alien 0 (k=0): orbit index 0  (lbW0256B4)
@@ -1185,8 +1190,8 @@ static void alien_move(int self_idx, Alien *a)
  */
 #define BOSS4_ORBIT_COUNT   62
 #define BOSS4_ORBIT_STEP     9
-#define BOSS4_ORBIT_WORLD_X  1662
-#define BOSS4_ORBIT_WORLD_Y  731
+#define BOSS4_ORBIT_WORLD_X  1677   /* reactor centre X (1752) − orbit half-range (75) */
+#define BOSS4_ORBIT_WORLD_Y   685   /* reactor centre Y ( 760) − orbit half-range (75) */
 
 static const WORD k_boss4_orbit[BOSS4_ORBIT_COUNT][2] = {
     /* lbW0256B4 — alien 0 starts here */
@@ -1228,10 +1233,18 @@ static const WORD k_boss4_orbit[BOSS4_ORBIT_COUNT][2] = {
  *   3. Set ALIEN_POS_X/Y from the waypoint entry.
  *   4. Add the world offset (1662, 731) so the orbit is placed over the reactor.
  *
- * The direction field is set via an approximate translation of the lbC009BC4
- * helper (@ main.asm#L6756): it computes the 8-direction compass bearing from
- * the current relative position toward the orbit centre (75, 75) so the shield
- * element faces the reactor as it orbits.
+ * Direction is computed via a faithful re-implementation of lbC009BC4
+ * (@ main.asm#L6756).  The helper returns d1 (0-15), a 16-step direction value
+ * that encodes both the atlas frame and the atlas column:
+ *
+ *   frame     = d1 / 8   → 0: atlas y=320 (southern half), 1: atlas y=352 (northern half)
+ *   atlas_dir = d1 % 8   → atlas column (x = atlas_dir * 32)
+ *
+ * d1 represents the bearing from the orbit centre to the satellite (the satellite's
+ * radial position), so the selected sprite always faces inward toward the reactor.
+ *
+ * The full d1 value (0-15) is stored in Alien.direction so the renderer can split
+ * it into frame and atlas column without additional state.
  */
 static void boss4_orbit_move(Alien *a)
 {
@@ -1243,35 +1256,82 @@ static void boss4_orbit_move(Alien *a)
     int rx = (int)k_boss4_orbit[a->orbit_idx][0];  /* relative X */
     int ry = (int)k_boss4_orbit[a->orbit_idx][1];  /* relative Y */
 
-    /* Apply world offset: mirrors add.w #1662/731,ALIEN_POS_X/Y @ main.asm#L6730. */
+    /* Apply world offset so the orbit is centred on the reactor (world 1752, 760). */
     a->pos_x = (WORD)(rx + BOSS4_ORBIT_WORLD_X);
     a->pos_y = (WORD)(ry + BOSS4_ORBIT_WORLD_Y);
 
     /*
-     * Approximate lbC009BC4 direction computation.
-     * The helper maps the vector from current position to centre (75,75) onto
-     * an 8-direction compass:
-     *   dx = 75 - rx,  dy = 75 - ry
-     * Each quadrant contributes directions 0-7 (N=0,NE=1,E=2,SE=3,S=4,SW=5,W=6,NW=7).
+     * Faithful re-implementation of lbC009BC4 @ main.asm#L6756.
+     *
+     * Inputs (from lbC009B30-B3A):
+     *   d0 = rx (relative orbit X, 0-150)
+     *   d1 = ry (relative orbit Y, 0-150)
+     *   d2 = 75 (orbit centre X)
+     *   d3 = 75 (orbit centre Y)
+     *
+     * The helper computes:
+     *   d2 = 75 - rx   (dx toward centre; positive = centre is to the right)
+     *   d3 = ry - 75   (positive when satellite is below centre)
+     *
+     * Quadrant assignment (d0=1-4), ratio-based sub-index (d1=0-4), then
+     * quadrant-specific adjustment yields final d1=0-15.
+     *
+     * Thresholds (ratio = |Δy|*192 / |Δx|):
+     *   >= 965 → d1=0 (nearly vertical)
+     *   >= 287 → d1=1
+     *   >= 128 → d1=2
+     *   >=  38 → d1=3
+     *   <   38 → d1=4 (nearly horizontal)
      */
-    int dx = 75 - rx;
-    int dy = 75 - ry;
-    int adx = (dx < 0) ? -dx : dx;
-    int ady = (dy < 0) ? -dy : dy;
-    int dir_bits = 0;
-    if (dy < 0) dir_bits |= 2;  /* moving up   (toward centre is upward)  */
-    else if (dy > 0) dir_bits |= 1;  /* moving down */
-    if (dx > 0) dir_bits |= 4;  /* moving right */
-    else if (dx < 0) dir_bits |= 8;  /* moving left */
-    /* Suppress the weaker axis when the other dominates (>2:1 ratio). */
-    if (adx > 0 && ady > adx * 2) dir_bits &= ~(4 | 8);
-    if (ady > 0 && adx > ady * 2) dir_bits &= ~(1 | 2);
-    static const int k_dir_table[16] = {
-        -1,  4,  0, -1,   2,  3,  1, -1,
-         6,  5,  7, -1,  -1, -1, -1, -1
-    };
-    if (dir_bits > 0 && dir_bits < 16 && k_dir_table[dir_bits] >= 0)
-        a->direction = k_dir_table[dir_bits];
+    int d2 = 75 - rx;  /* dx toward centre */
+    int d3 = ry - 75;  /* positive = satellite below centre */
+
+    int d1;
+    if (d2 == 0) {
+        /* Pure vertical axis (lbC009BFC): satellite directly above or below centre. */
+        d1 = (d3 < 0) ? 8 : 0;
+    } else {
+        /* Determine quadrant and absolute components. */
+        int quad;
+        int abs_d3, abs_d2;
+        if (d3 >= 0) {
+            if (d2 >= 0) { quad = 1; abs_d3 = d3;  abs_d2 = d2;  }  /* below-left  */
+            else          { quad = 2; abs_d3 = d3;  abs_d2 = -d2; }  /* below-right */
+        } else {
+            if (d2 >= 0) { quad = 4; abs_d3 = -d3; abs_d2 = d2;  }  /* above-left  */
+            else          { quad = 3; abs_d3 = -d3; abs_d2 = -d2; }  /* above-right */
+        }
+
+        /* Ratio test: (|Δy| * 192) / |Δx| — mirrors mulu/divu sequence. */
+        int ratio = (abs_d3 * 192) / abs_d2;
+        if      (ratio >= 965) d1 = 0;
+        else if (ratio >= 287) d1 = 1;
+        else if (ratio >= 128) d1 = 2;
+        else if (ratio >=  38) d1 = 3;
+        else                   d1 = 4;
+
+        /* Quadrant adjustment (lbC009C34-C60). */
+        switch (quad) {
+            case 1: /* below-left:  d1 unchanged */
+                break;
+            case 2: /* below-right: d1 = (d1 != 0) ? 16 - d1 : 0 */
+                if (d1 != 0) d1 = 16 - d1;
+                break;
+            case 3: /* above-right: d1 += 8 */
+                d1 += 8;
+                break;
+            default: /* case 4 — above-left: d1 = 8 - d1 */
+                d1 = 8 - d1;
+                break;
+        }
+    }
+
+    /*
+     * Store full d1 (0-15) in direction so the renderer can recover:
+     *   frame     = direction / 8   (0 → atlas y=320, 1 → atlas y=352)
+     *   atlas_col = direction % 8   (column = atlas_col * BOSS4_SAT_SPRITE_W)
+     */
+    a->direction = d1;
 }
 
 /*

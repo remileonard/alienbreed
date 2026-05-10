@@ -163,26 +163,36 @@
 /*
  * Boss_nbr=4 satellite (reactor-shield) sprite atlas layout — LEGACY atlas only.
  *
- * Level 10 uses the LEGACY atlas (L1BO).  Unlike the large boss creature (which
- * stores a 96×128 walk sprite at y=256 in COMPACT atlases), the LEGACY atlas
- * stores 8-directional satellite crescent sprites at y=256 and y=288:
+ * Level 10 uses the LEGACY atlas (L1BO).  The full-colour (blue) satellite crescent
+ * sprites are stored at y=320 and y=352 in the atlas:
  *
- *   y=256 ($100): animation frame 0, 8 directions, x = direction * 32
- *   y=288 ($120): animation frame 1, 8 directions, x = direction * 32
+ *   y=320 ($140): frame 0, 8 directions, x = direction * 32   (multi-colour: indices 4,5,6)
+ *   y=352 ($160): frame 1, 8 directions, x = direction * 32   (multi-colour: indices 4,5,6)
+ *
+ * The additional single-colour overlays at y=256 ($100) and y=288 ($120) are used only
+ * for the hit-flash effect (mirrors the 50(a0) alt-frame branch in lbC009AFC).
  *
  * Each crescent is 32 × 27 pixels ($20 × $1B).
- * Ref: lbW01945E entries 88-95 (y=256) and 96-103 (y=288) @ main.asm#L14114-L14129.
+ * Ref: lbW01945E entries 64-71 (y=320/$140) and 72-79 (y=352/$160) @ main.asm#L14098-L14113.
  *
  * The Amiga game renders these via hardware sprites (copper list, SPR2/SPR3 pair).
  * In the C port they are read directly from the decoded LEGACY atlas.
- * The satellite AI (lbC009AFC) computes 16 direction sub-steps; the C port maps
- * this to 8 compass directions via boss4_orbit_move() in alien.c.
+ *
+ * The satellite AI (lbC009AFC) calls lbC009BC4 to compute a 16-step direction value
+ * d1 (0-15): d1 / 8 selects the frame row (0 → y=320, 1 → y=352) and d1 % 8 selects
+ * the atlas column (direction * 32).  boss4_orbit_move() in alien.c stores d1 in
+ * Alien.direction so the renderer can split it into frame and column.
+ *
+ * Single-colour hit-flash sprites (alt-frame):
+ *   y=256 ($100): hit-flash frame 0, 8 directions  (lbW01945E entries 80-87)
+ *   y=288 ($120): hit-flash frame 1, 8 directions  (lbW01945E entries 88-95)
  */
 #define BOSS4_SAT_SPRITE_W      32   /* pixels wide  (= ALIEN_SPRITE_W = 0x20) */
 #define BOSS4_SAT_SPRITE_H      27   /* pixels tall  (= 0x1B) */
-#define BOSS4_SAT_ATLAS_Y      256   /* y of first satellite frame row (= 0x100) */
+#define BOSS4_SAT_ATLAS_Y      320   /* y of first satellite frame row (= 0x140, blue sprites) */
+#define BOSS4_SAT_HIT_ATLAS_Y  256   /* y of hit-flash frame row (= 0x100, single-colour) */
 #define BOSS4_SAT_FRAME_STRIDE  32   /* y-stride between animation frames */
-#define BOSS4_SAT_FRAMES         2   /* 2 animation frames (y=256 and y=288) */
+#define BOSS4_SAT_FRAMES         2   /* 2 animation frames (y=320 and y=352) */
 
 /*
  * Load the BO file at path, decode 5 sequential bitplanes to an indexed-color

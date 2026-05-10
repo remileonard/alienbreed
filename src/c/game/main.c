@@ -363,15 +363,20 @@ void level_game_loop_external(void)
                              *
                              * boss_nbr 4 → seven reactor-shield satellite crescents.
                              * Each satellite is a 32×27 px crescent drawn from the LEGACY
-                             * atlas (L1BO) at y=256 (frame 0) or y=288 (frame 1),
-                             * column = direction * 32 (8 compass directions).
-                             * Ref: lbW01945E entries 88-103 @ main.asm#L14114-L14129;
+                             * atlas (L1BO).  Alien.direction stores the lbC009BC4 d1 value
+                             * (0-15): d1/8 selects the atlas row (0→y=320, 1→y=352) and
+                             * d1%8 selects the atlas column (x = col*32).
+                             * Ref: lbW01945E entries 64-79 @ main.asm#L14098-L14113;
                              * satellite AI lbC009AFC @ main.asm#L6640. */
                             if (g_aliens[i].boss_rank == 0) {
                                 if (g_boss_nbr == 4) {
-                                    int sat_frame = (g_aliens[i].anim_counter / 2) % BOSS4_SAT_FRAMES;
-                                    sprite_draw_boss4_satellite(g_aliens[i].direction,
-                                                               sat_frame, sx, sy);
+                                    /* direction stores d1 (0-15) from lbC009BC4:
+                                     *   sat_frame = d1 / 8  (0=y=320, 1=y=352)
+                                     *   sat_dir   = d1 % 8  (atlas column) */
+                                    int sat_d1    = g_aliens[i].direction;
+                                    int sat_frame = sat_d1 / 8;
+                                    int sat_dir   = sat_d1 % 8;
+                                    sprite_draw_boss4_satellite(sat_dir, sat_frame, sx, sy);
                                 } else {
                                     int boss_frame = (anim_frame < BOSS_WALK_FRAMES) ? anim_frame : 0;
                                     sprite_draw_boss(boss_frame, sx, sy);

@@ -508,10 +508,25 @@ void check_tile_interaction(Player *p)
         break;
 
     case TILE_DESTRUCT_TRIGGER:
-        /* Tile 0x15: start self-destruct sequence (Ref: main.asm#L5500). */
+        /* Tile 0x15: start self-destruct sequence (Ref: main.asm#L5500 / lbC008424).
+         *
+         * For boss_nbr==4 (level 10) the ASM also clears the attribute bits of
+         * two wall tiles that block the escape route (lbW062366 / lbW062368).
+         * C port coordinates verified via in-game debug HUD: col=78, row=47 and
+         * col=78, row=48 (attrs 0x26 → 0x00).
+         * NOTE: ASM addresses map to different values when naively converted because
+         * the ASM buffer uses 124 cols (248 bytes/row) with 3 header rows; the C
+         * port reads the BODY chunk directly with 120 cols and no header rows.
+         * Always use the in-game debug HUD X/Y as the authoritative coordinates.
+         * Ref: lbC008424 @ main.asm#L5507-L5513.
+         */
         if (!g_self_destruct_initiated) {
             level_start_destruction();
             tilemap_replace_tile(&g_cur_map, col, row);
+            if (g_boss_nbr == 4) {
+                tilemap_replace_tile(&g_cur_map, 78, 47);
+                tilemap_replace_tile(&g_cur_map, 78, 48);
+            }
         }
         break;
 
