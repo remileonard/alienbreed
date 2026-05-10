@@ -2431,6 +2431,17 @@ void alien_kill(int i)
                 g_cur_map.tiles[27][70] = 0x0000;
             }
         }
+        if (g_boss_nbr == 3) {
+            /* Level 12 (LBMA): clear the three boss door tiles at col=112.
+             * Mirrors patch_tiles calls in lbC00A1BA @ main.asm#L7054-L7065.
+             * C port coordinates from in-game debug HUD: X=112, Y=68/69/70.
+             * NOTE: ASM uses 124 cols/248 bytes per row with 3 header rows;
+             * C port reads the BODY chunk directly (120 cols, no header rows)
+             * so HUD coords map directly without offset adjustment. */
+            g_cur_map.tiles[68][112] = 0x0000;
+            g_cur_map.tiles[69][112] = 0x0000;
+            g_cur_map.tiles[70][112] = 0x0000;
+        }
 
         /* Trigger self-destruct for boss_nbr 1, 2, 3.
          * Ref: move.w #1,self_destruct_initiated @ main.asm#L6818 (nbr1),
