@@ -336,6 +336,7 @@ static void go_bitplanes_to_indexed(const uint8_t *planes, uint8_t *fb)
 void gameover_run(void)
 {
     audio_stop_music();
+    audio_play_music("title");
 
     /* Load the IFF ANIM file into memory */
     VFile *f = vfs_open("assets/anim/gameover.anim");
@@ -449,8 +450,19 @@ void gameover_run(void)
     }
 
 wait_exit:
-    /* Hold last frame for 150 frames (= move.l #150,d0 / .wait loop) */
-    for (int i = 0; i < 150; i++) {
+    /*
+     * set_copper_buffer_2: the ASM always switches display to buf2 when
+     * entering wait_exit.  buf2 contains the last "first-half" decoded frame
+     * (iteration 36, sub-frame 1) which is where the GAME OVER text is fully
+     * visible.  buf1 (the last thing we decoded) is nearly blank — it is the
+     * "reset" frame that would start the next animation cycle.
+     */
+    go_bitplanes_to_indexed(buf2, g_framebuffer);
+    palette_tick();
+    video_present();
+
+    /* Hold on the last frame until the player presses fire or quits */
+    while (!g_quit_requested) {
         timer_begin_frame();
         input_poll();
         if (g_quit_requested) break;
@@ -459,7 +471,8 @@ wait_exit:
         video_present();
     }
 
-    /* fade_out: fade from current palette to black */
+    /* fade_out: stop music then fade palette to black */
+    audio_stop_music();
     {
         UWORD k_black[32] = {0};
         palette_get_current(cur_pal, 32);
