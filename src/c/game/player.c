@@ -51,8 +51,10 @@ void player_init_variables(void)
         p->ammunitions = PLAYER_MAX_AMMO; /* Ref: move.w #PLAYER_MAX_AMMO,PLAYER_AMMUNITIONS @ init_player_dats, main.asm#L1009 */
         p->shot_amount = 4;               /* Ref: move.w #4,PLAYER_SHOT_AMOUNT @ init_player_dats, main.asm#L998 */
         p->direction   = PLAYER_FACE_DOWN;
-        /* Animation: initial body pose = 3 (facing down), matching ASM move.w #3,PLAYER_CUR_SPRITE */
-        p->cur_sprite        = 3;
+        /* Animation: initial body pose = 5 (facing down). PLAYER_FACE_DOWN = 5.
+         * The ASM sets PLAYER_CUR_SPRITE = 3, but pose 3 is facing right in the
+         * animation table; pose 5 is facing down. Fix for misinterpretation. */
+        p->cur_sprite        = 5;
         p->anim_flipflop     = 0;
         p->anim_fire_counter = 0;
         p->anim_state        = 0;
@@ -82,8 +84,10 @@ void player_reset_for_level(void)
         p->extra_spd_x       = 0;
         p->extra_spd_y       = 0;
 
-        /* Animation state — mirrors clr.w 274/276/280/372(a0) + move.w #3,PLAYER_CUR_SPRITE */
-        p->cur_sprite        = 3;
+        /* Animation state — mirrors clr.w 274/276/280/372(a0) + move.w #3,PLAYER_CUR_SPRITE.
+         * The ASM value 3 is misinterpreted: pose 3 is facing right in the C animation table;
+         * pose 5 is facing down (PLAYER_FACE_DOWN = 5). */
+        p->cur_sprite        = 5;
         p->direction         = PLAYER_FACE_DOWN;
         p->anim_flipflop     = 0;
         p->anim_fire_counter = 0;
