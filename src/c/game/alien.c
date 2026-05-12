@@ -1650,6 +1650,28 @@ void alien_update_all(void)
 
         if (!s_projectiles[i].active) continue;
 
+        /* Pre-movement wall check: if the projectile's current position is
+         * already inside a blocking tile (can happen when the player fires
+         * while pressed against a wall — the spawn point may be clipped
+         * inside the wall), deactivate it immediately instead of letting it
+         * travel through the wall on the first tick.
+         */
+        {
+            int px0  = (int)(WORD)s_projectiles[i].x;
+            int py0  = (int)(WORD)s_projectiles[i].y;
+            int col0 = tilemap_pixel_to_col(px0);
+            int row0 = tilemap_pixel_to_row(py0);
+            if (tilemap_is_projectile_blocking(&g_cur_map, col0, row0)) {
+                s_projectiles[i].active        = 0;
+                s_projectiles[i].impact_active  = 1;
+                s_projectiles[i].impact_x       = px0;
+                s_projectiles[i].impact_y       = py0;
+                s_projectiles[i].impact_frame   = 0;
+                s_projectiles[i].impact_timer   = IMPACT_FRAME_TICKS;
+                continue;
+            }
+        }
+
         s_projectiles[i].x += s_projectiles[i].vx;
         s_projectiles[i].y += s_projectiles[i].vy;
 
