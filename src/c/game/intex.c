@@ -550,39 +550,20 @@ static void run_screen_weapons(int pidx, Font *font,
                     p->owned_weapons[wid - 1] = 1;
                     audio_play_sample(SAMPLE_CARET_MOVE);
                     /* ASM sequence (intex.asm#L1013-1020):
-                     *   copy_bkgnd_pic             → background only, no weapons UI
-                     *   display_text(text_credits_debited) → show ONLY "CREDITS DEBITED."
-                     *   wait_timed_frames #1        → 1-second pause
-                     *   bra scr_weapons             → full weapons screen redraw
+                     *   copy_bkgnd_pic                   → background only
+                     *   display_text(text_credits_debited) → all at once at x=0, y=62
+                     *   wait_timed_frames #1               → 1-second pause
+                     *   bra scr_weapons                    → loop redraws weapons screen
                      *
-                     * Step 1: clear to background only (NOT drawing the weapons layout
-                     * before the message — that was causing the text to be hidden). */
-                    video_clear();
-                    if (bg->pixels)
-                        video_blit(bg->pixels, bg->w, 0, 0, bg->w, bg->h, -1);
-                    /* Step 2: show ONLY "CREDITS DEBITED." with typewriter animation */
-                    {
-                        static const char * const k_debited[] = {
-                            "     CREDITS DEBITED.",
-                            NULL
-                        };
-                        int char_slow = 0;
-                        s_startup_interrupted = 0;
-                        intex_animated_lines(font, 0, 62, k_debited, &char_slow);
-                    }
-                    /* Flush fire button: wait for release so the 1-second timer
-                     * below isn't skipped immediately by the still-held confirm button. */
-                    for (int flush = 0; flush < 50; flush++) {
-                        input_poll();
-                        if (!(g_player1_input & (INPUT_FIRE1 | INPUT_FIRE2))) break;
-                        timer_begin_frame();
-                    }
-                    /* Step 3: 1-second pause (ref: wait_timed_frames #1) */
+                     * intex_flash_message replicates this exactly:
+                     *   video_clear + video_blit(bg) + typewriter_display + video_present
+                     *   + intex_wait_frames(1) + s_startup_interrupted=0.
+                     * Using intex_animated_lines here was wrong: it checks the fire button
+                     * per-character and the button is still held from the purchase confirm,
+                     * so it exits after the first character without displaying anything. */
                     s_startup_interrupted = 0;
-                    intex_wait_frames(1);
-                    /* Step 4: loop continues → draw_weapons_layout + video_present
-                     * runs on the next iteration, redrawing the weapons screen. */
-                    s_startup_interrupted = 0;
+                    intex_flash_message(font, 0, 62,
+                                        "     CREDITS DEBITED.", bg);
                     yes_no = 0;
                 }
                 debounce = 8;
