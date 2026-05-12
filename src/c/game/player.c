@@ -50,8 +50,10 @@ void player_init_variables(void)
         p->ammopacks   = 2;               /* Ref: move.w #2,PLAYER_AMMOPACKS @ init_player_dats, main.asm#L1008 */
         p->ammunitions = PLAYER_MAX_AMMO; /* Ref: move.w #PLAYER_MAX_AMMO,PLAYER_AMMUNITIONS @ init_player_dats, main.asm#L1009 */
         p->shot_amount = 4;               /* Ref: move.w #4,PLAYER_SHOT_AMOUNT @ init_player_dats, main.asm#L998 */
-        p->direction   = PLAYER_FACE_DOWN;
-        /* Animation: initial body pose = 3 (facing down), matching ASM move.w #3,PLAYER_CUR_SPRITE */
+        p->direction   = PLAYER_FACE_RIGHT;
+        /* Animation: initial body pose matches PLAYER_CUR_SPRITE = 3 from ASM
+         * (move.w #3,PLAYER_CUR_SPRITE @ init_player_dats, main.asm#L1005).
+         * PLAYER_FACE_RIGHT = 3. */
         p->cur_sprite        = 3;
         p->anim_flipflop     = 0;
         p->anim_fire_counter = 0;
@@ -82,9 +84,10 @@ void player_reset_for_level(void)
         p->extra_spd_x       = 0;
         p->extra_spd_y       = 0;
 
-        /* Animation state — mirrors clr.w 274/276/280/372(a0) + move.w #3,PLAYER_CUR_SPRITE */
+        /* Animation state — mirrors clr.w 274/276/280/372(a0) + move.w #3,PLAYER_CUR_SPRITE
+         * @ lbC006C08, main.asm#L3913. PLAYER_FACE_RIGHT = 3. */
         p->cur_sprite        = 3;
-        p->direction         = PLAYER_FACE_DOWN;
+        p->direction         = PLAYER_FACE_RIGHT;
         p->anim_flipflop     = 0;
         p->anim_fire_counter = 0;
         p->anim_state        = 0;
