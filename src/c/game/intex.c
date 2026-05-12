@@ -262,6 +262,12 @@ static void intex_animated_lines(Font *font, int x, int y_start,
 /*
  * Show a short message at (x,y), wait 1 second, then return.
  * Used for "INSUFFUCIENT FUNDS", "ALREADY PURCHASED", etc.
+ *
+ * In the ASM, display_text renders letter-by-letter which naturally gives the
+ * player time to release the fire button before wait_timed_frames runs.
+ * In C, typewriter_display is instantaneous, so fire may still be held when
+ * the wait starts.  We flush here (wait for release) to ensure the 1-second
+ * pause is honoured regardless of button state.
  */
 static void intex_flash_message(Font *font, int x, int y, const char *msg,
                                  const IntexImg *bg)
@@ -273,6 +279,14 @@ static void intex_flash_message(Font *font, int x, int y, const char *msg,
     intex_init_ctx(&ctx, font, x, y);
     typewriter_display(&ctx, msg);
     video_present();
+    /* Flush fire button: wait for release before the timed pause so a
+     * still-held confirm press does not immediately skip the wait. */
+    for (int flush = 0; flush < 50; flush++) {
+        input_poll();
+        if (!(g_player1_input & (INPUT_FIRE1 | INPUT_FIRE2))) break;
+        timer_begin_frame();
+    }
+    s_startup_interrupted = 0;
     intex_wait_frames(1);
     s_startup_interrupted = 0;
 }
