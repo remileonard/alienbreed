@@ -1653,8 +1653,9 @@ void alien_update_all(void)
         /* Pre-movement wall check: if the projectile's current position is
          * already inside a blocking tile (can happen when the player fires
          * while pressed against a wall — the spawn point may be clipped
-         * inside the wall), deactivate it immediately instead of letting it
-         * travel through the wall on the first tick.
+         * inside the wall), run the appropriate impact logic immediately
+         * instead of letting the projectile travel through the wall on the
+         * first tick.
          */
         {
             int px0  = (int)(WORD)s_projectiles[i].x;
@@ -1662,6 +1663,31 @@ void alien_update_all(void)
             int col0 = tilemap_pixel_to_col(px0);
             int row0 = tilemap_pixel_to_row(py0);
             if (tilemap_is_projectile_blocking(&g_cur_map, col0, row0)) {
+                UBYTE attr0 = tilemap_attr(&g_cur_map, col0, row0) & 0x3F;
+                /* Door: accumulate damage and open it when threshold is reached.
+                 * Same logic as the post-movement impact_on_door path. */
+                if (attr0 == 0x03) {
+                    audio_play_sample(SAMPLE_DOOR_HIT);
+                    if (col0 != g_door_impact_col || row0 != g_door_impact_row) {
+                        g_door_impact_col   = col0;
+                        g_door_impact_row   = row0;
+                        g_door_impact_accum = 0;
+                    }
+                    g_door_impact_accum += (int)(WORD)s_projectiles[i].strength;
+                    if (g_door_impact_accum >= 300) {
+                        g_door_impact_accum = 0;
+                        int pi0 = s_projectiles[i].player_idx;
+                        if (pi0 >= 0 && pi0 < MAX_PLAYERS) {
+                            Player *p0 = &g_players[pi0];
+                            /* Temporarily grant one key so open_door_at can
+                             * consume it — mirrors the ASM force_door path
+                             * (addq.w #1,PLAYER_KEYS / bsr force_door).
+                             * Ref: lbC00E56C-lbC00E574 @ main.asm#L9697-9699. */
+                            p0->keys++;
+                            open_door_at(p0, col0, row0);
+                        }
+                    }
+                }
                 s_projectiles[i].active        = 0;
                 s_projectiles[i].impact_active  = 1;
                 s_projectiles[i].impact_x       = px0;
@@ -1952,6 +1978,12 @@ void alien_update_all(void)
 
                 s_projectiles[i].vx = (WORD)vx;
                 s_projectiles[i].vy = (WORD)vy;
+
+                /* Step the projectile out of the wall using the new (reversed)
+                 * velocity so that the pre-movement check on the next tick
+                 * doesn't immediately kill it while it's still inside the tile. */
+                s_projectiles[i].x += (WORD)vx;
+                s_projectiles[i].y += (WORD)vy;
 
                 /*
                  * LAZER only: update direction sprite from new velocity.
