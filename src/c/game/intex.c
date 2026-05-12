@@ -549,13 +549,18 @@ static void run_screen_weapons(int pidx, Font *font,
                     p->credits -= k_weapon_prices[cur_wp];
                     p->owned_weapons[wid - 1] = 1;
                     audio_play_sample(SAMPLE_CARET_MOVE);
-                    /* Show "CREDITS DEBITED." at y=62 with typewriter effect,
-                     * then wait 1 second. (ref: text_credits_debited + display_text
-                     * + wait_timed_frames #1 in intex.asm) */
+                    /* ASM sequence (intex.asm#L1013-1020):
+                     *   copy_bkgnd_pic             → background only, no weapons UI
+                     *   display_text(text_credits_debited) → show ONLY "CREDITS DEBITED."
+                     *   wait_timed_frames #1        → 1-second pause
+                     *   bra scr_weapons             → full weapons screen redraw
+                     *
+                     * Step 1: clear to background only (NOT drawing the weapons layout
+                     * before the message — that was causing the text to be hidden). */
                     video_clear();
                     if (bg->pixels)
                         video_blit(bg->pixels, bg->w, 0, 0, bg->w, bg->h, -1);
-                    draw_weapons_layout(font, pidx, cur_wp, yes_no, wpic);
+                    /* Step 2: show ONLY "CREDITS DEBITED." with typewriter animation */
                     {
                         static const char * const k_debited[] = {
                             "     CREDITS DEBITED.",
@@ -566,20 +571,17 @@ static void run_screen_weapons(int pidx, Font *font,
                         intex_animated_lines(font, 0, 62, k_debited, &char_slow);
                     }
                     /* Flush fire button: wait for release so the 1-second timer
-                     * below (ref: wait_timed_frames #1) isn't skipped immediately
-                     * by the button still being held from the purchase confirm. */
+                     * below isn't skipped immediately by the still-held confirm button. */
                     for (int flush = 0; flush < 50; flush++) {
                         input_poll();
                         if (!(g_player1_input & (INPUT_FIRE1 | INPUT_FIRE2))) break;
                         timer_begin_frame();
                     }
-                    /* Reset in case the animation was interrupted early (fire was
-                     * pressed during the typewriter display), so the timer below
-                     * is not skipped via s_startup_interrupted. */
+                    /* Step 3: 1-second pause (ref: wait_timed_frames #1) */
                     s_startup_interrupted = 0;
                     intex_wait_frames(1);
-                    /* Reset again so later intex operations aren't skipped if the
-                     * user pressed fire during the 1-second wait. */
+                    /* Step 4: loop continues → draw_weapons_layout + video_present
+                     * runs on the next iteration, redrawing the weapons screen. */
                     s_startup_interrupted = 0;
                     yes_no = 0;
                 }
