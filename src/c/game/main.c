@@ -255,6 +255,9 @@ void level_game_loop_external(void)
 
             level_tick_timer();
             level_check_destruction();
+
+            if (g_debug_overlay_on)
+                debug_damage_tick();
         }
 
         /* Check if all players are dead */
