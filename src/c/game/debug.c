@@ -157,6 +157,77 @@ static void draw_string(int x, int y, const char *s,
         x += draw_char(x, y, (unsigned char)*s, r, g, b);
 }
 
+/* Draw a string with a per-pixel alpha value.                        */
+static int draw_char_a(int x, int y, unsigned char c,
+                       Uint8 r, Uint8 g, Uint8 b, Uint8 a)
+{
+    if (c >= 128) return 6;
+    const Uint8 *rows = k_font5x7[(int)c];
+    for (int row = 0; row < 7; row++) {
+        Uint8 bits = rows[row];
+        for (int col = 0; col < 5; col++) {
+            if (bits & (0x10 >> col))
+                video_overlay_draw_point(x + col, y + row, r, g, b, a);
+        }
+    }
+    return 6;
+}
+
+static void draw_string_a(int x, int y, const char *s,
+                          Uint8 r, Uint8 g, Uint8 b, Uint8 a)
+{
+    for (; *s; s++)
+        x += draw_char_a(x, y, (unsigned char)*s, r, g, b, a);
+}
+
+/* ------------------------------------------------------------------ */
+/* Damage-number display system                                        */
+/* ------------------------------------------------------------------ */
+#define MAX_DAMAGE_DISPLAYS  32
+#define DAMAGE_DISPLAY_TICKS 75  /* ~3 seconds at 25 Hz */
+
+typedef struct {
+    int active;
+    int world_x, world_y;
+    int damage;
+    int timer;
+} DamageDisplay;
+
+static DamageDisplay s_damage_displays[MAX_DAMAGE_DISPLAYS];
+
+void debug_register_impact_damage(int world_x, int world_y, int damage)
+{
+    /* Find a free slot; if none available replace the one closest to expiry. */
+    int slot = -1;
+    int min_timer = DAMAGE_DISPLAY_TICKS + 1;
+    for (int i = 0; i < MAX_DAMAGE_DISPLAYS; i++) {
+        if (!s_damage_displays[i].active) {
+            slot = i;
+            break;
+        }
+        if (s_damage_displays[i].timer < min_timer) {
+            min_timer = s_damage_displays[i].timer;
+            slot = i;
+        }
+    }
+    if (slot < 0) return;
+    s_damage_displays[slot].active  = 1;
+    s_damage_displays[slot].world_x = world_x;
+    s_damage_displays[slot].world_y = world_y;
+    s_damage_displays[slot].damage  = damage;
+    s_damage_displays[slot].timer   = DAMAGE_DISPLAY_TICKS;
+}
+
+void debug_damage_tick(void)
+{
+    for (int i = 0; i < MAX_DAMAGE_DISPLAYS; i++) {
+        if (s_damage_displays[i].active) {
+            if (--s_damage_displays[i].timer <= 0)
+                s_damage_displays[i].active = 0;
+        }
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* Tile border colors                                                 */
 /* ------------------------------------------------------------------ */
@@ -290,12 +361,27 @@ void debug_render_overlay(void)
     video_overlay_fill_rect(0, 0, SCREEN_W, 9, 0, 0, 0, 180);
 
     /* ---- Info bar text ---- */
+    /* Buffer sized for: "X:NNN Y:NNN HP:NN CR:NNNNN K:NN AM:NN P:N L:N W:FLMTHR"
+     * ≈ 55 characters maximum — 128 bytes is more than sufficient. */
     char buf[128];
     int tile_px = p1->pos_x / MAP_TILE_W;
     int tile_py = p1->pos_y / MAP_TILE_H;
 
+    static const char * const k_wnames[WEAPON_MAX] = {
+        "?",       /* 0 — unused        */
+        "MGUN",    /* 1 — MACHINEGUN    */
+        "TWIN",    /* 2 — TWINFIRE      */
+        "FARC",    /* 3 — FLAMEARC      */
+        "PLAS",    /* 4 — PLASMAGUN     */
+        "FLMTHR",  /* 5 — FLAMETHROWER  */
+        "SDWND",   /* 6 — SIDEWINDERS   */
+        "LAZR",    /* 7 — LAZER         */
+    };
+    int wid = (p1->cur_weapon >= 1 && p1->cur_weapon < WEAPON_MAX)
+              ? (int)p1->cur_weapon : 0;
+
     snprintf(buf, sizeof(buf),
-             "X:%d Y:%d HP:%d CR:%ld K:%d AM:%d P:%d L:%d",
+             "X:%d Y:%d HP:%d CR:%ld K:%d AM:%d P:%d L:%d W:%s",
              tile_px,
              tile_py,
              (int)p1->health,
@@ -303,11 +389,12 @@ void debug_render_overlay(void)
              (int)p1->keys,
              (int)p1->ammunitions,
              (int)p1->ammopacks,
-             (int)p1->lives);
+             (int)p1->lives,
+             k_wnames[wid]);
 
     draw_string(2, 1, buf, 255, 255, 255);
 
-    /* ---- Alien collision bounding boxes (32×32 — red) ---- */
+    /* ---- Alien collision bounding boxes (32×32 — red) + HP labels ---- */
     for (int i = 0; i < g_alien_count; i++) {
         if (g_aliens[i].alive == 0) continue;   /* skip fully dead slots */
         /* pos_x/pos_y is the centre of the 32×32 bbox; draw centred. */
@@ -317,6 +404,12 @@ void debug_render_overlay(void)
                                    COLOR_ALIEN_BBOX_R,
                                    COLOR_ALIEN_BBOX_G,
                                    COLOR_ALIEN_BBOX_B, 220);
+        /* Draw current HP in the top-left corner of the bounding box. */
+        if (sx > -32 && sx < SCREEN_W && sy > -8 && sy < SCREEN_H) {
+            char hp_str[8];
+            snprintf(hp_str, sizeof(hp_str), "%d", (int)g_aliens[i].strength);
+            draw_string(sx + 1, sy + 1, hp_str, 255, 220, 80);
+        }
     }
 
     /* ---- Player collision bounding boxes (16×16 at +8,+8 — cyan) ---- */
@@ -328,6 +421,23 @@ void debug_render_overlay(void)
                                    COLOR_PLAYER_BBOX_R,
                                    COLOR_PLAYER_BBOX_G,
                                    COLOR_PLAYER_BBOX_B, 220);
+    }
+
+    /* ---- Damage numbers at weapon impact points ---- */
+    for (int i = 0; i < MAX_DAMAGE_DISPLAYS; i++) {
+        if (!s_damage_displays[i].active) continue;
+        int sx = s_damage_displays[i].world_x - g_camera_x;
+        int sy = s_damage_displays[i].world_y - g_camera_y - 8;
+        if (sx < -30 || sx > SCREEN_W || sy < -8 || sy > SCREEN_H) continue;
+        /* Fade out in the last third of the display time.
+         * Use floating-point to avoid premature zero at timer==1. */
+        Uint8 alpha = 255;
+        int fade_ticks = DAMAGE_DISPLAY_TICKS / 3;
+        if (s_damage_displays[i].timer < fade_ticks)
+            alpha = (Uint8)(255.0f * s_damage_displays[i].timer / fade_ticks + 0.5f);
+        char dmg_str[8];
+        snprintf(dmg_str, sizeof(dmg_str), "-%d", s_damage_displays[i].damage);
+        draw_string_a(sx, sy, dmg_str, 255, 80, 80, alpha);
     }
 }
 

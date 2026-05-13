@@ -6,6 +6,7 @@
 #include "alien.h"
 #include "player.h"
 #include "level.h"
+#include "debug.h"
 #include "../hal/audio.h"
 #include "../hal/video.h"
 #include "../engine/tilemap.h"
@@ -2096,7 +2097,13 @@ void aliens_collisions_with_weapons(void)
 
             if (ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1) {
                 /* Apply damage */
+                int hit_dmg = (int)s_projectiles[pi].strength;
                 g_aliens[ai].strength -= s_projectiles[pi].strength;
+                /* Register damage number for the debug overlay. */
+                if (g_debug_overlay_on)
+                    debug_register_impact_damage((int)s_projectiles[pi].x,
+                                                 (int)s_projectiles[pi].y,
+                                                 hit_dmg);
                 /* Trigger ALT WALK hit-flash for two rendered frames (≈40ms
                  * at 50Hz = one 25Hz game-logic tick, same duration as the
                  * original single-VBL flash).

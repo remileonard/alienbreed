@@ -19,7 +19,9 @@
  *       cyan (16×16) = player hit box (origin = pos_x+8, pos_y+8)
  *   - Info bar at the top of the screen showing player 1 stats:
  *       X/Y tile coordinates, health, credits, keys, ammo,
- *       ammo packs, lives.
+ *       ammo packs, lives, current weapon.
+ *   - Alien HP label in the top-left corner of each alien's bounding box.
+ *   - Damage numbers shown at weapon impact points (fade out after ~3 s).
  */
 
 /* Non-zero when the debug overlay is active. */
@@ -31,6 +33,19 @@ extern int g_god_mode;
 /* Draw the debug overlay.  Must be called between
  * video_upload_framebuffer() and video_flip(). */
 void debug_render_overlay(void);
+
+/*
+ * Register a weapon-impact damage number at the given world position.
+ * The number is shown in the debug overlay for ~3 seconds then fades out.
+ * Must only be called when g_debug_overlay_on is non-zero.
+ */
+void debug_register_impact_damage(int world_x, int world_y, int damage);
+
+/*
+ * Advance damage-display timers by one 25 Hz game tick.
+ * Call once per game tick (not per render frame) from the main loop.
+ */
+void debug_damage_tick(void);
 
 /*
  * Full-screen scrollable graphics viewer.
