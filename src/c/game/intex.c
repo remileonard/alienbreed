@@ -260,25 +260,53 @@ static void intex_animated_lines(Font *font, int x, int y_start,
 }
 
 /*
- * Show a short message at (x,y), wait 1 second, then return.
- * Used for "INSUFFUCIENT FUNDS", "ALREADY PURCHASED", etc.
+ * Show a short message at (x,y) character-by-character (typewriter effect),
+ * then hold for 1 second.  Used for "CREDITS DEBITED.", "INSUFFUCIENT FUNDS", etc.
  *
- * In the ASM, display_text renders letter-by-letter which naturally gives the
- * player time to release the fire button before wait_timed_frames runs.
- * In C, typewriter_display is instantaneous, so fire may still be held when
- * the wait starts.  We flush here (wait for release) to ensure the 1-second
- * pause is honoured regardless of button state.
+ * Timing matches ASM display_text:
+ *   - Characters are drawn one at a time.
+ *   - A one-frame wait (flash_caret = wait VBL) occurs every other character,
+ *     controlled by the slowdown_flash_caret toggle in the ASM.
+ *   - Fire button is NOT checked during the animation (interruptible_by_used_flag=0
+ *     path in display_text), so the message always types out fully.
+ *
+ * After the last character the fire button is flushed (wait for release) before
+ * the 1-second timed pause, ensuring the confirm press does not skip the wait.
  */
 static void intex_flash_message(Font *font, int x, int y, const char *msg,
                                  const IntexImg *bg)
 {
-    video_clear();
-    if (bg->pixels)
-        video_blit(bg->pixels, bg->w, 0, 0, bg->w, bg->h, -1);
     TextCtx ctx;
     intex_init_ctx(&ctx, font, x, y);
-    typewriter_display(&ctx, msg);
-    video_present();
+
+    /* slowdown_flash_caret toggle: call timer_begin_frame every other character,
+     * exactly as "not.w slowdown_flash_caret; beq .dont_flash_caret; bsr flash_caret"
+     * in display_text. */
+    int slowdown = 0;
+
+    for (const char *p = msg; *p; p++) {
+        /* Re-draw background + all chars rendered so far on every frame so
+         * the screen is clean (no artifacts from the previous weapons UI). */
+        video_clear();
+        if (bg->pixels)
+            video_blit(bg->pixels, bg->w, 0, 0, bg->w, bg->h, -1);
+
+        /* Render all characters up to and including the current one. */
+        TextCtx tmp;
+        intex_init_ctx(&tmp, font, x, y);
+        for (const char *q = msg; q <= p; q++) {
+            typewriter_putchar(&tmp, *q);
+        }
+
+        video_present();
+
+        /* Every other character: wait one frame (= flash_caret VBL wait). */
+        slowdown ^= 1;
+        if (slowdown) {
+            timer_begin_frame();
+        }
+    }
+
     /* Flush fire button: wait for release before the timed pause so a
      * still-held confirm press does not immediately skip the wait. */
     for (int flush = 0; flush < 50; flush++) {
