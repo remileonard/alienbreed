@@ -247,6 +247,27 @@ static int try_move(Player *p, int dx, int dy)
      * corner cases not covered by the three directional samples). */
     if (tile_blocks(nx, ny, has_key)) return 0;
 
+    /* Check alien bounding boxes — mirrors the player-movement probe in
+     * lbC006C7A @ main.asm : the player cannot walk through a living alien.
+     * Each alien occupies a 32×32 bbox centred on pos_x/pos_y.
+     * Player bbox: [nx-8 … nx+8] × [ny-8 … ny+8]  (PLAYER_BBOX_OFFSET=-8, SIZE=16)
+     * Alien  bbox: [ax-16 … ax+16] × [ay-16 … ay+16] (32×32, centred)
+     * Overlap condition (AABB): no gap on either axis. */
+    for (int i = 0; i < g_alien_count; i++) {
+        const Alien *a = &g_aliens[i];
+        if (!a->alive) continue;
+        int ax1 = (int)a->pos_x - ALIEN_BBOX_HALF_SIZE;
+        int ax2 = (int)a->pos_x + ALIEN_BBOX_HALF_SIZE;
+        int ay1 = (int)a->pos_y - ALIEN_BBOX_HALF_SIZE;
+        int ay2 = (int)a->pos_y + ALIEN_BBOX_HALF_SIZE;
+        int px1 = nx + PLAYER_BBOX_OFFSET;
+        int px2 = nx + PLAYER_BBOX_OFFSET + PLAYER_BBOX_SIZE;
+        int py1 = ny + PLAYER_BBOX_OFFSET;
+        int py2 = ny + PLAYER_BBOX_OFFSET + PLAYER_BBOX_SIZE;
+        if (ax1 < px2 && ax2 > px1 && ay1 < py2 && ay2 > py1)
+            return 0;  /* blocked by alien */
+    }
+
     p->pos_x = (WORD)nx;
     p->pos_y = (WORD)ny;
     return 1;

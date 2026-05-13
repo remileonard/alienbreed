@@ -11,6 +11,10 @@
 
 #define MAX_ALIENS 64
 
+/* Half-size of the normal alien's 32×32 bounding box (centred on pos_x/pos_y).
+ * Used for both alien-alien and player-alien collision checks. */
+#define ALIEN_BBOX_HALF_SIZE 16
+
 typedef struct {
     WORD  pos_x, pos_y;
     WORD  speed;
