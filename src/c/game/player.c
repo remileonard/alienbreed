@@ -901,9 +901,15 @@ void player_update(Player *p, UWORD input_mask)
         }
     }
 
-    /* Next weapon */
-    if (input_mask & INPUT_NEXT_WPN)
-        player_next_weapon(p);
+    /* Next weapon — only on the rising edge of the button press so that
+     * holding the button does not cycle through multiple weapons per frame.
+     * Ref: user_change_weapon in main.asm reads joystick once per frame and
+     * only acts on a fresh press (the VBL interrupt runs once then returns). */
+    {
+        UWORD old_input = (p->port == 0) ? g_player1_old_input : g_player2_old_input;
+        if ((input_mask & INPUT_NEXT_WPN) && !(old_input & INPUT_NEXT_WPN))
+            player_next_weapon(p);
+    }
 
     /* Decrement invincibility */
     int idx = p->port;
