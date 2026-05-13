@@ -260,19 +260,61 @@ static void intex_animated_lines(Font *font, int x, int y_start,
 }
 
 /*
- * Show a short message at (x,y), wait 1 second, then return.
- * Used for "INSUFFUCIENT FUNDS", "ALREADY PURCHASED", etc.
+ * Show a short message at (x,y) character-by-character (typewriter effect),
+ * then hold for 1 second.  Used for "CREDITS DEBITED.", "INSUFFUCIENT FUNDS", etc.
+ *
+ * Timing matches ASM display_text:
+ *   - Characters are drawn one at a time.
+ *   - A one-frame wait (flash_caret = wait VBL) occurs every other character,
+ *     controlled by the slowdown_flash_caret toggle in the ASM.
+ *   - Fire button is NOT checked during the animation (interruptible_by_used_flag=0
+ *     path in display_text), so the message always types out fully.
+ *
+ * After the last character the fire button is flushed (wait for release) before
+ * the 1-second timed pause, ensuring the confirm press does not skip the wait.
  */
 static void intex_flash_message(Font *font, int x, int y, const char *msg,
                                  const IntexImg *bg)
 {
-    video_clear();
-    if (bg->pixels)
-        video_blit(bg->pixels, bg->w, 0, 0, bg->w, bg->h, -1);
     TextCtx ctx;
     intex_init_ctx(&ctx, font, x, y);
-    typewriter_display(&ctx, msg);
-    video_present();
+
+    /* slowdown_flash_caret toggle: call timer_begin_frame every other character,
+     * exactly as "not.w slowdown_flash_caret; beq .dont_flash_caret; bsr flash_caret"
+     * in display_text. */
+    int slowdown = 0;
+
+    for (const char *p = msg; *p; p++) {
+        /* Re-draw background + all chars rendered so far on every frame so
+         * the screen is clean (no artifacts from the previous weapons UI). */
+        video_clear();
+        if (bg->pixels)
+            video_blit(bg->pixels, bg->w, 0, 0, bg->w, bg->h, -1);
+
+        /* Render all characters up to and including the current one. */
+        TextCtx tmp;
+        intex_init_ctx(&tmp, font, x, y);
+        for (const char *q = msg; q <= p; q++) {
+            typewriter_putchar(&tmp, *q);
+        }
+
+        video_present();
+
+        /* Every other character: wait one frame (= flash_caret VBL wait). */
+        slowdown ^= 1;
+        if (slowdown) {
+            timer_begin_frame();
+        }
+    }
+
+    /* Flush fire button: wait for release before the timed pause so a
+     * still-held confirm press does not immediately skip the wait. */
+    for (int flush = 0; flush < 50; flush++) {
+        input_poll();
+        if (!(g_player1_input & (INPUT_FIRE1 | INPUT_FIRE2))) break;
+        timer_begin_frame();
+    }
+    s_startup_interrupted = 0;
     intex_wait_frames(1);
     s_startup_interrupted = 0;
 }
@@ -549,19 +591,21 @@ static void run_screen_weapons(int pidx, Font *font,
                     p->credits -= k_weapon_prices[cur_wp];
                     p->owned_weapons[wid - 1] = 1;
                     audio_play_sample(SAMPLE_CARET_MOVE);
-                    /* Show "CREDITS DEBITED." at y=62 (ref: text_credits_debited) */
-                    video_clear();
-                    if (bg->pixels)
-                        video_blit(bg->pixels, bg->w, 0, 0, bg->w, bg->h, -1);
-                    draw_weapons_layout(font, pidx, cur_wp, yes_no, wpic);
-                    {
-                        TextCtx ctx2;
-                        intex_init_ctx(&ctx2, font, 0, 62);
-                        typewriter_display(&ctx2, "     CREDITS DEBITED.");
-                    }
-                    video_present();
-                    intex_wait_frames(1);
+                    /* ASM sequence (intex.asm#L1013-1020):
+                     *   copy_bkgnd_pic                   → background only
+                     *   display_text(text_credits_debited) → all at once at x=0, y=62
+                     *   wait_timed_frames #1               → 1-second pause
+                     *   bra scr_weapons                    → loop redraws weapons screen
+                     *
+                     * intex_flash_message replicates this exactly:
+                     *   video_clear + video_blit(bg) + typewriter_display + video_present
+                     *   + intex_wait_frames(1) + s_startup_interrupted=0.
+                     * Using intex_animated_lines here was wrong: it checks the fire button
+                     * per-character and the button is still held from the purchase confirm,
+                     * so it exits after the first character without displaying anything. */
                     s_startup_interrupted = 0;
+                    intex_flash_message(font, 0, 62,
+                                        "     CREDITS DEBITED.", bg);
                     yes_no = 0;
                 }
                 debounce = 8;
