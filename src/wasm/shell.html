@@ -145,6 +145,14 @@
       }
     }
 
+    @media (pointer: coarse) and (orientation: landscape) {
+      #touch-controls {
+        max-width: calc(100vw - 8px);
+        --touch-gap: clamp(8px, 2vw, 22px);
+        --touch-inline-pad: clamp(2px, 0.8vw, 8px);
+      }
+    }
+
     /* Fallback: JS-detected touch device (belt-and-suspenders) */
     body.touch-device #touch-controls { display: flex; }
     body.touch-device .controls { display: none; }
