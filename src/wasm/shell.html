@@ -147,9 +147,15 @@
 
     @media (pointer: coarse) and (orientation: landscape) {
       #touch-controls {
-        max-width: calc(100vw - 8px);
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: clamp(8px, 2.2vh, 22px);
+        width: 100vw;
+        max-width: 100vw;
+        z-index: 20;
         --touch-gap: clamp(8px, 2vw, 22px);
-        --touch-inline-pad: clamp(2px, 0.8vw, 8px);
+        --touch-inline-pad: clamp(6px, 2.2vw, 20px);
       }
     }
 
