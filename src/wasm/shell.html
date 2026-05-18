@@ -109,10 +109,17 @@
       position: relative;     /* anchor for the audio-unlock overlay        */
       width: 100%;
       max-width: min(640px, 100vw - 16px);
-      padding: 10px 4px 4px;
+      --touch-gap: clamp(12px, 3.6vw, 40px);
+      --touch-inline-pad: clamp(4px, 1.5vw, 18px);
+      --touch-joy-size: clamp(118px, 22vw, 176px);
+      --touch-btn-min-width: clamp(46px, 8vw, 66px);
+      --touch-btn-height: clamp(42px, 7.5vw, 56px);
+      --touch-fire-width: clamp(96px, 18vw, 146px);
+      --touch-fire-height: clamp(62px, 11vw, 92px);
+      padding: 10px var(--touch-inline-pad) 4px;
       justify-content: space-between;
       align-items: flex-end;
-      gap: 8px;
+      gap: var(--touch-gap);
       /* Prevent text selection and default touch handling on the overlay */
       user-select: none;
       -webkit-user-select: none;
@@ -126,6 +133,100 @@
       .controls { display: none; }
     }
 
+    @media (pointer: coarse) and (orientation: portrait) {
+      #touch-controls {
+        --touch-gap: clamp(22px, 10vw, 120px);
+        --touch-inline-pad: clamp(6px, 4vw, 26px);
+        --touch-joy-size: clamp(124px, 24vw, 190px);
+        --touch-btn-min-width: clamp(50px, 8.2vw, 72px);
+        --touch-btn-height: clamp(44px, 7vw, 58px);
+        --touch-fire-width: clamp(104px, 20vw, 160px);
+        --touch-fire-height: clamp(64px, 12vw, 100px);
+      }
+    }
+
+    @media (pointer: coarse) and (orientation: landscape) {
+      /* --- Page chrome: hide decorative elements so canvas sits flush at top --- */
+      h1, .subtitle { display: none; }
+      body { padding: 0; overflow: hidden; }
+
+      /* --- Canvas: fill viewport height but guarantee ≥ 60 px side gap for buttons.
+       *   Formula: height = min(100dvh, (vw − 120px) × 0.8)  where 0.8 = 256÷320.
+       *   On phones  100dvh is usually the binding constraint → gap > 60 px.
+       *   On iPads (4:3 ≈ 1.33 AR, close to canvas AR 320÷256 = 1.25) the second
+       *   term kicks in so the canvas narrows, always leaving 60 px per side. --- */
+      canvas {
+        height: min(100dvh, calc((100vw - 120px) * 0.8));
+        width: auto;     /* aspect-ratio 320/256 handles width automatically */
+        max-width: calc(100vw - 120px);
+      }
+
+      /* --- Full-screen transparent overlay: never blocks the canvas -----------  */
+      /* pointer-events:none lets all touches fall through to the game;
+       * individual controls re-enable pointer-events as needed. */
+      #touch-controls {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        max-width: 100vw;
+        height: 100vh;
+        z-index: 20;
+        pointer-events: none;
+        padding: 0;
+        align-items: flex-end;
+        --touch-gap: 0px;
+        --touch-inline-pad: 0px;
+      }
+
+      /* --- Joystick: left gap, lowered slightly vs. buttons (28vh instead of 33) */
+      #touch-controls > #joystick-container {
+        pointer-events: auto;
+        margin-left: clamp(4px, 1vw, 14px);
+        margin-bottom: 28vh;
+      }
+
+      /* --- Action buttons: right gap, vertically stacked, FIRE at 33vh -------- */
+      /* max-width when phone (height-constrained): 50vw − 62.5dvh.
+       * On iPads (4:3 ratio, width-constrained): the canvas is capped to
+       * (100vw − 120px), guaranteeing exactly 60 px per side; the floor
+       * max(56px, …) ensures buttons never collapse below a usable width. */
+      #touch-controls > #action-btns {
+        pointer-events: auto;
+        margin-right: clamp(4px, 1vw, 14px);
+        margin-bottom: 33vh;
+        max-width: max(56px, calc(50vw - 62.5dvh));
+        align-items: stretch;
+      }
+
+      /* Stack the secondary buttons (MAP / WPN / INTEX / PAUSE / DEBUG)
+       * vertically above FIRE so they fit in the narrow side column. */
+      #touch-controls > #action-btns #action-top-row {
+        flex-direction: column;
+        flex-wrap: nowrap;
+        align-items: stretch;
+        gap: clamp(3px, 0.7vh, 8px);
+      }
+
+      /* Resize buttons to fit the side column — +25 % vs. portrait sizes.
+       * vh-based clamp keeps proportions on any device height. */
+      #touch-controls > #action-btns .action-btn {
+        min-width: 0;
+        width: 100%;
+        height: clamp(35px, 5.6vh, 58px);
+        font-size: clamp(9px, 1.6vh, 13px);
+      }
+      #touch-controls > #action-btns #btn-fire {
+        width: 100%;
+        height: clamp(45px, 7.5vh, 70px);
+        font-size: clamp(12px, 2.1vh, 17px);
+      }
+
+      /* Audio-unlock overlay still needs to receive taps */
+      #touch-controls > #audio-overlay {
+        pointer-events: auto;
+      }
+    }
+
     /* Fallback: JS-detected touch device (belt-and-suspenders) */
     body.touch-device #touch-controls { display: flex; }
     body.touch-device .controls { display: none; }
@@ -133,8 +234,8 @@
     /* Virtual joystick ----------------------------------------------------- */
     #joystick-container {
       position: relative;
-      width: 130px;
-      height: 130px;
+      width: var(--touch-joy-size);
+      height: var(--touch-joy-size);
       flex-shrink: 0;
       touch-action: none;
     }
@@ -149,8 +250,8 @@
 
     #joystick-thumb {
       position: absolute;
-      width: 54px;
-      height: 54px;
+      width: calc(var(--touch-joy-size) * 0.415);
+      height: calc(var(--touch-joy-size) * 0.415);
       border-radius: 50%;
       background: rgba(232, 64, 64, 0.30);
       border: 2px solid rgba(232, 64, 64, 0.70);
@@ -170,12 +271,12 @@
       display: flex;
       flex-direction: column;
       align-items: flex-end;
-      gap: 6px;
+      gap: clamp(8px, 1.8vw, 14px);
     }
 
     #action-top-row {
       display: flex;
-      gap: 6px;
+      gap: clamp(6px, 1.4vw, 12px);
       flex-wrap: wrap;
       justify-content: flex-end;
     }
@@ -184,10 +285,10 @@
       background: rgba(232, 64, 64, 0.12);
       border: 1.5px solid rgba(232, 64, 64, 0.55);
       color: #e84040;
-      font-size: 10px;
+      font-size: clamp(10px, 1.6vw, 12px);
       letter-spacing: 1px;
       text-transform: uppercase;
-      border-radius: 10px;
+      border-radius: clamp(8px, 1.4vw, 12px);
       cursor: pointer;
       display: flex;
       align-items: center;
@@ -195,8 +296,8 @@
       -webkit-tap-highlight-color: transparent;
       touch-action: none;
       transition: background 0.05s;
-      min-width: 48px;
-      height: 44px;
+      min-width: var(--touch-btn-min-width);
+      height: var(--touch-btn-height);
       font-family: 'Courier New', Courier, monospace;
     }
 
@@ -206,9 +307,9 @@
     }
 
     #btn-fire {
-      height: 68px;
-      min-width: 96px;
-      font-size: 13px;
+      height: var(--touch-fire-height);
+      min-width: var(--touch-fire-width);
+      font-size: clamp(12px, 2vw, 14px);
       letter-spacing: 2px;
     }
 
@@ -724,11 +825,20 @@
       var jContainer = document.getElementById('joystick-container');
       var jThumb     = document.getElementById('joystick-thumb');
 
-      /* Geometry (must match CSS): base=130px, thumb=54px */
-      var J_BASE_R   = 65;   /* base radius  */
-      var J_THUMB_R  = 27;   /* thumb radius */
-      var J_MAX_DIST = J_BASE_R - J_THUMB_R;  /* max travel = 38px */
-      var J_DEADZONE = 12;   /* px from centre before a direction fires */
+      var joyGeom = { maxDist: 38, deadzone: 12 };
+
+      function joyUpdateGeometry() {
+        var baseRect = jContainer.getBoundingClientRect();
+        var thumbRect = jThumb.getBoundingClientRect();
+        var baseR = (baseRect.width || 130) / 2;
+        var thumbR = (thumbRect.width || 54) / 2;
+        joyGeom.maxDist = Math.max(8, baseR - thumbR);
+        joyGeom.deadzone = Math.max(8, joyGeom.maxDist * 0.32);
+      }
+
+      joyUpdateGeometry();
+      window.addEventListener('resize', joyUpdateGeometry);
+      window.addEventListener('orientationchange', joyUpdateGeometry);
 
       var DIR = {
         up:    { key: 'ArrowUp',    code: 'ArrowUp',    keyCode: 38 },
@@ -742,7 +852,7 @@
       /* Map (dx,dy) to the list of direction keys that should be held */
       function joyGetKeys(dx, dy) {
         var dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < J_DEADZONE) return [];
+        if (dist < joyGeom.deadzone) return [];
         var ang = Math.atan2(dy, dx) * 180 / Math.PI;
         if (ang < 0) ang += 360;
         /* 8 equal sectors of 45°, sector 0 = East */
@@ -763,7 +873,7 @@
       /* Position thumb at (dx,dy) clamped to the base circle */
       function joyMoveThumb(dx, dy) {
         var dist  = Math.sqrt(dx * dx + dy * dy);
-        var clamp = Math.min(dist, J_MAX_DIST);
+        var clamp = Math.min(dist, joyGeom.maxDist);
         var nx = dist > 0 ? (dx / dist) * clamp : 0;
         var ny = dist > 0 ? (dy / dist) * clamp : 0;
         jThumb.style.transform =
@@ -802,6 +912,7 @@
 
       function joyHandleStart(t) {
         if (joyState.touchId !== null) return;
+        joyUpdateGeometry();
         var rect = jContainer.getBoundingClientRect();
         joyState.touchId = t.identifier;
         joyState.centerX = rect.left + rect.width  / 2;
